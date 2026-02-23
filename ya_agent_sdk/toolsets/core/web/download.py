@@ -40,7 +40,7 @@ class DownloadTool(BaseTool):
             return False
         return True
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         return _load_instruction()
 
     async def call(

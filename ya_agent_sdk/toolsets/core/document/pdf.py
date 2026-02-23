@@ -94,7 +94,7 @@ class PdfConvertTool(BaseTool):
             return False
         return True
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str:
         """Load instruction from prompts/pdf.md."""
         return _load_instruction()
 

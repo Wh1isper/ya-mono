@@ -92,7 +92,7 @@ def create_subagent_tool(
                 return True
             return availability_check(ctx)
 
-        def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+        async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
             if instruction is None:
                 return None
             if callable(instruction):

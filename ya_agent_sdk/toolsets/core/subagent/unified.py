@@ -290,7 +290,7 @@ def create_unified_subagent_tool(
             """Tool is available if at least one subagent is available."""
             return any(_is_subagent_available(entry, _parent_toolset, ctx) for entry in _registry.values())
 
-        def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+        async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
             """Generate instruction listing available subagents."""
             return _generate_instruction(_registry, _parent_toolset, ctx)
 

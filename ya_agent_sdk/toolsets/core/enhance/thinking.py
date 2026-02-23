@@ -30,7 +30,7 @@ class ThinkingTool(BaseTool):
     name = "thinking"
     description = "Think about something without obtaining new information or making changes."
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str:
         """Load instruction from prompts/thinking.md."""
         return _load_instruction()
 

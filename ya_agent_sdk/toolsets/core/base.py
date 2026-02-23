@@ -33,7 +33,6 @@ from ya_agent_sdk.toolsets.base import (
     BaseTool,
     BaseToolset,
     Instruction,
-    resolve_instruction,
 )
 from ya_agent_sdk.utils import get_tool_name_from_id
 
@@ -537,13 +536,12 @@ class Toolset(BaseToolset[AgentDepsT]):
         use their tool name as the implicit group.
 
         Returns a combined instruction string or None if no tools have instructions.
-        Supports both sync and async get_instruction methods on tools.
         """
         instructions: dict[str, str] = {}  # group -> content
 
         for name in self._tool_classes:
             tool_instance = self._get_tool_instance(name)
-            result = await resolve_instruction(tool_instance.get_instruction(ctx))
+            result = await tool_instance.get_instruction(ctx)
 
             if result is None:
                 continue

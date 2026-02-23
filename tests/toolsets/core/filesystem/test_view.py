@@ -18,14 +18,14 @@ from ya_agent_sdk.toolsets.core.filesystem.view import (
 )
 
 
-def test_view_tool_attributes(agent_context: AgentContext) -> None:
+async def test_view_tool_attributes(agent_context: AgentContext) -> None:
     """Should have correct name and description."""
     assert ViewTool.name == "view"
     assert "Read files" in ViewTool.description
     tool = ViewTool()
     mock_run_ctx = MagicMock(spec=RunContext)
     mock_run_ctx.deps = agent_context
-    instruction = tool.get_instruction(mock_run_ctx)
+    instruction = await tool.get_instruction(mock_run_ctx)
     assert instruction is not None
 
 

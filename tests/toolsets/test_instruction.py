@@ -5,7 +5,7 @@ from pydantic_ai import RunContext
 
 from ya_agent_sdk.context import AgentContext
 from ya_agent_sdk.toolsets import Instruction, Toolset
-from ya_agent_sdk.toolsets.base import BaseTool, resolve_instruction
+from ya_agent_sdk.toolsets.base import BaseTool
 
 
 class ToolWithStringInstruction(BaseTool):
@@ -14,7 +14,7 @@ class ToolWithStringInstruction(BaseTool):
     name = "string_tool"
     description = "Test tool with string instruction"
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str:
         return "String instruction content"
 
     async def call(self, ctx: RunContext[AgentContext]) -> str:
@@ -27,7 +27,7 @@ class ToolWithGroupedInstruction(BaseTool):
     name = "grouped_tool"
     description = "Test tool with grouped instruction"
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> Instruction:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> Instruction:
         return Instruction(group="my-group", content="Grouped instruction content")
 
     async def call(self, ctx: RunContext[AgentContext]) -> str:
@@ -40,7 +40,7 @@ class ToolWithSameGroup(BaseTool):
     name = "same_group_tool"
     description = "Test tool with same group"
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> Instruction:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> Instruction:
         return Instruction(group="my-group", content="This should be skipped")
 
     async def call(self, ctx: RunContext[AgentContext]) -> str:
@@ -65,42 +65,6 @@ def test_instruction_model():
     instr = Instruction(group="test-group", content="test content")
     assert instr.group == "test-group"
     assert instr.content == "test content"
-
-
-# Tests for resolve_instruction
-
-
-@pytest.mark.asyncio
-async def test_resolve_instruction_none():
-    """Test resolve_instruction with None."""
-    result = await resolve_instruction(None)
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_resolve_instruction_string():
-    """Test resolve_instruction with string."""
-    result = await resolve_instruction("test string")
-    assert result == "test string"
-
-
-@pytest.mark.asyncio
-async def test_resolve_instruction_instruction():
-    """Test resolve_instruction with Instruction."""
-    instr = Instruction(group="test", content="content")
-    result = await resolve_instruction(instr)
-    assert result == instr
-
-
-@pytest.mark.asyncio
-async def test_resolve_instruction_awaitable():
-    """Test resolve_instruction with awaitable."""
-
-    async def get_instruction():
-        return "async result"
-
-    result = await resolve_instruction(get_instruction())
-    assert result == "async result"
 
 
 # Tests for Toolset.get_instructions deduplication

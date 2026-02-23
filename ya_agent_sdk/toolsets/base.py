@@ -7,10 +7,7 @@ This module provides the foundational abstractions for building toolsets:
 
 from __future__ import annotations
 
-import asyncio
-import inspect
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel
@@ -45,7 +42,7 @@ class Instruction(BaseModel):
     Example:
         # Multiple task tools sharing one instruction
         class TaskCreateTool(BaseTool):
-            def get_instruction(self, ctx):
+            async def get_instruction(self, ctx):
                 return Instruction(
                     group="task-manager",
                     content="Task manager guidelines..."
@@ -59,27 +56,16 @@ class Instruction(BaseModel):
     """The instruction content to inject into system prompt."""
 
 
-# Type alias for instruction results
-InstructionResult = str | Instruction | Awaitable["str | Instruction | None"] | None
-
-
 @runtime_checkable
 class InstructableToolset(Protocol[AgentDepsT]):
     """Protocol for toolsets that provide instructions.
 
     This enables duck typing for any toolset that has a get_instructions method,
     allowing add_toolset_instructions() to work with both Toolset and BrowserUseToolset.
-
-    Supports both sync and async get_instructions methods.
-
-    TODO: Drop it when https://github.com/pydantic/pydantic-ai/pull/3780 merged
     """
 
-    def get_instructions(self, ctx: RunContext[AgentDepsT]) -> str | Awaitable[str | None] | None:
-        """Get instructions to inject into the system prompt.
-
-        Can be implemented as either sync or async method.
-        """
+    async def get_instructions(self, ctx: RunContext[AgentDepsT]) -> str | None:
+        """Get instructions to inject into the system prompt."""
         ...
 
 
@@ -95,7 +81,7 @@ class BaseTool(ABC):
             name = "read_file"
             description = "Read contents of a file"
 
-            def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+            async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
                 return "Use this tool to read file contents from the filesystem."
 
             async def call(self, ctx: RunContext[AgentContext], path: str) -> str:
@@ -131,11 +117,10 @@ class BaseTool(ABC):
         """
         return True
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> InstructionResult:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | Instruction | None:
         """Get instruction for this tool.
 
         Override this method to provide dynamic instructions based on context.
-        Can be implemented as either sync or async method.
         Default implementation returns None (no instruction).
 
         Returns:
@@ -145,11 +130,11 @@ class BaseTool(ABC):
 
         Example:
             # Plain string (no deduplication)
-            def get_instruction(self, ctx):
+            async def get_instruction(self, ctx):
                 return "Use this tool to read files."
 
             # Instruction with group (deduplicated with same group)
-            def get_instruction(self, ctx):
+            async def get_instruction(self, ctx):
                 return Instruction(
                     group="file-tools",
                     content="File operation guidelines..."
@@ -208,68 +193,24 @@ class BaseTool(ABC):
 class BaseToolset(AbstractToolset[AgentDepsT], ABC):
     """Base class for toolsets with instruction support.
 
-    Subclasses can override get_instructions() as either sync or async method.
-    The framework will handle both cases automatically.
+    Subclasses can override get_instructions() to provide custom instructions.
 
-    Example (sync):
+    Example:
         class MyToolset(BaseToolset):
-            def get_instructions(self, ctx: RunContext[AgentContext]) -> str | None:
-                return "My instructions"
-
-    Example (async):
-        class MyAsyncToolset(BaseToolset):
             async def get_instructions(self, ctx: RunContext[AgentContext]) -> str | None:
                 content = await self._load_instructions(ctx)
                 return content
     """
 
-    def get_instructions(self, ctx: RunContext[AgentDepsT]) -> str | Awaitable[str | None] | None:
+    async def get_instructions(self, ctx: RunContext[AgentDepsT]) -> str | None:
         """Get instructions to inject into the system prompt.
 
         Override this method to provide tool-specific instructions.
-        Can be implemented as either sync or async method.
 
         Args:
             ctx: The run context containing runtime information.
 
         Returns:
-            Instruction string, awaitable returning string/None, or None.
+            Instruction string or None.
         """
         return None
-
-
-async def resolve_instruction(result: InstructionResult) -> str | Instruction | None:
-    """Resolve instruction result that may be sync or async.
-
-    Args:
-        result: The result from get_instruction(), which may be:
-            - str: Return as-is
-            - Instruction: Return as-is
-            - Awaitable[str | Instruction]: Await and return
-            - None: Return None
-
-    Returns:
-        The resolved instruction (str or Instruction), or None.
-    """
-    if result is None:
-        return None
-    if isinstance(result, (str, Instruction)):
-        return result
-    if inspect.isawaitable(result):
-        return await result
-    # Fallback for coroutine objects
-    if asyncio.iscoroutine(result):
-        return await result
-    return result
-
-
-# Backward compatibility alias
-async def resolve_instructions(result: str | Awaitable[str | None] | None) -> str | None:
-    """Resolve instruction result (backward compatibility).
-
-    Deprecated: Use resolve_instruction instead.
-    """
-    resolved = await resolve_instruction(result)
-    if isinstance(resolved, Instruction):
-        return resolved.content
-    return resolved

@@ -203,7 +203,7 @@ def test_unified_tool_availability_dynamic(mock_run_ctx) -> None:
 # =============================================================================
 
 
-def test_unified_tool_instruction_contains_available_subagents(mock_run_ctx) -> None:
+async def test_unified_tool_instruction_contains_available_subagents(mock_run_ctx) -> None:
     """Instruction should list available subagents."""
     configs = [
         SubagentConfig(
@@ -219,14 +219,14 @@ def test_unified_tool_instruction_contains_available_subagents(mock_run_ctx) -> 
     tool_cls = create_unified_subagent_tool(configs, parent_toolset, model="test")
     tool = tool_cls()
 
-    instruction = tool.get_instruction(mock_run_ctx)
+    instruction = await tool.get_instruction(mock_run_ctx)
 
     assert instruction is not None
     assert "debugger" in instruction
     assert "debugging errors" in instruction
 
 
-def test_unified_tool_instruction_excludes_unavailable_subagents(mock_run_ctx) -> None:
+async def test_unified_tool_instruction_excludes_unavailable_subagents(mock_run_ctx) -> None:
     """Instruction should not include unavailable subagents."""
     configs = [
         SubagentConfig(
@@ -249,14 +249,14 @@ def test_unified_tool_instruction_excludes_unavailable_subagents(mock_run_ctx) -
     tool_cls = create_unified_subagent_tool(configs, parent_toolset, model="test")
     tool = tool_cls()
 
-    instruction = tool.get_instruction(mock_run_ctx)
+    instruction = await tool.get_instruction(mock_run_ctx)
 
     assert instruction is not None
     assert "available_agent" in instruction
     assert "unavailable_agent" not in instruction
 
 
-def test_unified_tool_instruction_none_when_no_subagents_available(mock_run_ctx) -> None:
+async def test_unified_tool_instruction_none_when_no_subagents_available(mock_run_ctx) -> None:
     """Instruction should be None when no subagents available."""
     configs = [
         SubagentConfig(name="a1", description="...", system_prompt="...", tools=["missing"]),
@@ -266,12 +266,12 @@ def test_unified_tool_instruction_none_when_no_subagents_available(mock_run_ctx)
     tool_cls = create_unified_subagent_tool(configs, parent_toolset, model="test")
     tool = tool_cls()
 
-    instruction = tool.get_instruction(mock_run_ctx)
+    instruction = await tool.get_instruction(mock_run_ctx)
 
     assert instruction is None
 
 
-def test_unified_tool_instruction_format(mock_run_ctx) -> None:
+async def test_unified_tool_instruction_format(mock_run_ctx) -> None:
     """Instruction should use XML-like format for subagent sections."""
     configs = [
         SubagentConfig(
@@ -286,7 +286,7 @@ def test_unified_tool_instruction_format(mock_run_ctx) -> None:
     tool_cls = create_unified_subagent_tool(configs, parent_toolset, model="test")
     tool = tool_cls()
 
-    instruction = tool.get_instruction(mock_run_ctx)
+    instruction = await tool.get_instruction(mock_run_ctx)
 
     assert '<subagent name="helper">' in instruction
     assert "</subagent>" in instruction

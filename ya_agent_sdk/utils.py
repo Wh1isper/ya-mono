@@ -68,18 +68,17 @@ def add_toolset_instructions(
 
     Works with any toolset that implements InstructableToolset protocol
     (has get_instructions method), including Toolset and BrowserUseToolset.
-    Supports both sync and async get_instructions methods.
 
-    TODO: Skip subclasses of AbstractToolset when https://github.com/pydantic/pydantic-ai/pull/3780 merged
+    TODO: Drop this when https://github.com/pydantic/pydantic-ai/pull/4123 merged
     """
-    from ya_agent_sdk.toolsets.base import InstructableToolset, resolve_instructions
+    from ya_agent_sdk.toolsets.base import InstructableToolset
 
     @agent.instructions
     async def _(ctx: RunContext[AgentDepsT]) -> str | None:
         parts: list[str] = []
         for toolset in toolsets:
             if isinstance(toolset, InstructableToolset):
-                instructions = await resolve_instructions(toolset.get_instructions(ctx))
+                instructions = await toolset.get_instructions(ctx)
                 if instructions:
                     parts.append(instructions)
         if not parts:

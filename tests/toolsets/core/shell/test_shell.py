@@ -146,6 +146,6 @@ async def test_shell_tool_get_instruction(agent_context: AgentContext) -> None:
     tool = ShellTool()
     mock_run_ctx = MagicMock(spec=RunContext)
     mock_run_ctx.deps = agent_context
-    instruction = tool.get_instruction(mock_run_ctx)
+    instruction = await tool.get_instruction(mock_run_ctx)
     assert "shell" in instruction.lower()
     assert "command" in instruction.lower()

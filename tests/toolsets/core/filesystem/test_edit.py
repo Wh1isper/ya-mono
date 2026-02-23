@@ -13,14 +13,14 @@ from ya_agent_sdk.toolsets.core.filesystem._types import EditItem
 from ya_agent_sdk.toolsets.core.filesystem.edit import EditTool, MultiEditTool
 
 
-def test_edit_tool_attributes(agent_context: AgentContext) -> None:
+async def test_edit_tool_attributes(agent_context: AgentContext) -> None:
     """Should have correct name and description."""
     assert EditTool.name == "edit"
     assert "string replacement" in EditTool.description
     tool = EditTool()
     mock_run_ctx = MagicMock(spec=RunContext)
     mock_run_ctx.deps = agent_context
-    instruction = tool.get_instruction(mock_run_ctx)
+    instruction = await tool.get_instruction(mock_run_ctx)
     assert instruction is not None
 
 

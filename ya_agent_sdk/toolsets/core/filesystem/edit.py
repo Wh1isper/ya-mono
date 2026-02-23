@@ -44,7 +44,7 @@ class EditTool(BaseTool):
             return False
         return True
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         """Load instruction from prompts/edit.md."""
         return _load_edit_instruction()
 
@@ -110,7 +110,7 @@ class MultiEditTool(BaseTool):
             return False
         return True
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         """Load instruction from prompts/multi_edit.md."""
         return _load_multi_edit_instruction()
 

@@ -62,7 +62,7 @@ class SearchTool(BaseTool):
         has_tavily = bool(cfg.tavily_api_key) and _is_tavily_available()
         return has_google or has_brave or has_tavily
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         if not self.is_available(ctx):
             return None
         return _load_search_instruction()
@@ -177,7 +177,7 @@ class SearchStockImageTool(BaseTool):
         """Available if Pixabay API key is configured."""
         return bool(ctx.deps.tool_config.pixabay_api_key)
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         return _load_search_stock_image_instruction()
 
     async def call(
@@ -244,7 +244,7 @@ class SearchImageTool(BaseTool):
         """Available if RapidAPI key is configured."""
         return bool(ctx.deps.tool_config.rapidapi_api_key)
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         return _load_search_image_instruction()
 
     async def call(
