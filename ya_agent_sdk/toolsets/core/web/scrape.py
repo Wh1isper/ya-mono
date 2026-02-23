@@ -36,7 +36,7 @@ class ScrapeTool(BaseTool):
     def __init__(self) -> None:
         self._md = MarkItDown(enable_plugins=True)
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         return _load_instruction()
 
     async def call(

@@ -14,8 +14,6 @@ from ya_agent_sdk.toolsets.base import (
     InstructableToolset,
     Instruction,
     UserInputPreprocessResult,
-    resolve_instruction,
-    resolve_instructions,
 )
 from ya_agent_sdk.toolsets.browser_use import BrowserUseSettings, BrowserUseToolset
 from ya_agent_sdk.toolsets.core.base import (
@@ -47,6 +45,4 @@ __all__ = [
     "Toolset",
     "UserInputPreprocessResult",
     "UserInteraction",
-    "resolve_instruction",
-    "resolve_instructions",
 ]

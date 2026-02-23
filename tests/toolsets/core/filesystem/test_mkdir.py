@@ -11,14 +11,14 @@ from ya_agent_sdk.environment.local import LocalEnvironment
 from ya_agent_sdk.toolsets.core.filesystem.mkdir import MkdirTool
 
 
-def test_mkdir_tool_attributes(agent_context: AgentContext) -> None:
+async def test_mkdir_tool_attributes(agent_context: AgentContext) -> None:
     """Should have correct name and description."""
     assert MkdirTool.name == "mkdir"
     assert "directories" in MkdirTool.description
     tool = MkdirTool()
     mock_run_ctx = MagicMock(spec=RunContext)
     mock_run_ctx.deps = agent_context
-    instruction = tool.get_instruction(mock_run_ctx)
+    instruction = await tool.get_instruction(mock_run_ctx)
     assert instruction is not None
 
 

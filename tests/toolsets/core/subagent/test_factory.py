@@ -89,7 +89,7 @@ def test_call_signature_has_correct_parameters():
     assert "return" in annotations, "Should have return annotation"
 
 
-def test_instruction_string(agent_context: AgentContext):
+async def test_instruction_string(agent_context: AgentContext):
     """Test static instruction string."""
     mock_agent = MagicMock(spec=Agent)
     mock_agent.model.model_name = "test-model"
@@ -106,10 +106,10 @@ def test_instruction_string(agent_context: AgentContext):
     tool = SearchTool()
     ctx = _create_mock_run_context(agent_context)
 
-    assert tool.get_instruction(ctx) == "Use this to search the web."
+    assert await tool.get_instruction(ctx) == "Use this to search the web."
 
 
-def test_instruction_callable(agent_context: AgentContext):
+async def test_instruction_callable(agent_context: AgentContext):
     """Test dynamic instruction callable."""
     mock_agent = MagicMock(spec=Agent)
     mock_agent.model.model_name = "test-model"
@@ -129,11 +129,11 @@ def test_instruction_callable(agent_context: AgentContext):
     tool = SearchTool()
     ctx = _create_mock_run_context(agent_context)
 
-    instruction = tool.get_instruction(ctx)
+    instruction = await tool.get_instruction(ctx)
     assert agent_context.run_id in instruction
 
 
-def test_instruction_none(agent_context: AgentContext):
+async def test_instruction_none(agent_context: AgentContext):
     """Test that no instruction returns None."""
     mock_agent = MagicMock(spec=Agent)
     mock_agent.model.model_name = "test-model"
@@ -149,7 +149,7 @@ def test_instruction_none(agent_context: AgentContext):
     tool = SearchTool()
     ctx = _create_mock_run_context(agent_context)
 
-    assert tool.get_instruction(ctx) is None
+    assert await tool.get_instruction(ctx) is None
 
 
 async def test_with_toolset(agent_context: AgentContext):

@@ -45,7 +45,7 @@ class MoveTool(BaseTool):
             return False
         return True
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         """Load instruction from prompts/move.md."""
         return _load_move_instruction()
 
@@ -103,7 +103,7 @@ class CopyTool(BaseTool):
             return False
         return True
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         """Load instruction from prompts/copy.md."""
         return _load_copy_instruction()
 

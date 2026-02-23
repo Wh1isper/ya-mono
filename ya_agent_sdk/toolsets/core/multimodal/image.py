@@ -24,7 +24,7 @@ class ReadImageTool(BaseTool):
     name = "read_image"
     description = "Read and analyze an image from a URL. Use when native vision is unavailable."
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         """No instruction needed for this tool."""
         return None
 

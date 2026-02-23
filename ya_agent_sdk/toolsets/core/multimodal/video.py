@@ -24,7 +24,7 @@ class ReadVideoTool(BaseTool):
     name = "read_video"
     description = "Read and analyze a video from a URL. Use when native video understanding is unavailable."
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         """No instruction needed for this tool."""
         return None
 

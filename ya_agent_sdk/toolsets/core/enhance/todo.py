@@ -57,7 +57,7 @@ class TodoReadTool(BaseTool):
             return False
         return True
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         """Get instruction for this tool."""
         instruction_file = _PROMPTS_DIR / "to_do_read.md"
         if instruction_file.exists():
@@ -106,7 +106,7 @@ class TodoWriteTool(BaseTool):
             return False
         return True
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         """Get instruction for this tool."""
         instruction_file = _PROMPTS_DIR / "to_do_write.md"
         if instruction_file.exists():

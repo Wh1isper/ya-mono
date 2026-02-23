@@ -75,7 +75,7 @@ class LoadMediaUrlTool(BaseTool):
         # Available if any capability is present
         return has_vision or has_video or (has_document and enable_load_document)
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str:
         """Generate dynamic instruction based on model capabilities."""
         model_cfg = ctx.deps.model_cfg
         has_vision = model_cfg is not None and model_cfg.has_capability(ModelCapability.vision)

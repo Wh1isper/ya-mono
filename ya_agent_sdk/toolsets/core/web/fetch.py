@@ -31,7 +31,7 @@ class FetchTool(BaseTool):
     name = "fetch"
     description = "Read web files or check resource availability via HTTP."
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         return _load_instruction()
 
     async def call(

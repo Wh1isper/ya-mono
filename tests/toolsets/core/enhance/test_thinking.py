@@ -9,7 +9,7 @@ from ya_agent_sdk.context import AgentContext
 from ya_agent_sdk.toolsets.core.enhance.thinking import ThinkingTool
 
 
-def test_thinking_tool_attributes(agent_context: AgentContext) -> None:
+async def test_thinking_tool_attributes(agent_context: AgentContext) -> None:
     """Should have correct name, description and instruction."""
     assert ThinkingTool.name == "thinking"
     assert ThinkingTool.description == snapshot(
@@ -19,7 +19,7 @@ def test_thinking_tool_attributes(agent_context: AgentContext) -> None:
     tool = ThinkingTool()
     mock_run_ctx = MagicMock(spec=RunContext)
     mock_run_ctx.deps = agent_context
-    assert tool.get_instruction(mock_run_ctx) == snapshot(
+    assert await tool.get_instruction(mock_run_ctx) == snapshot(
         """\
 <thinking-guidelines>
 

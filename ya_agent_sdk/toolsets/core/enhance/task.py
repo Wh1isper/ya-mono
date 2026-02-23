@@ -38,7 +38,7 @@ class TaskCreateTool(BaseTool):
     description = "Create a new task. Task status defaults to pending."
     auto_inherit = True
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> Instruction | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> Instruction | None:
         """Get instruction for this tool (shared with other task tools)."""
         instruction_file = _PROMPTS_DIR / "task_manager.md"
         if instruction_file.exists():
@@ -72,7 +72,7 @@ class TaskGetTool(BaseTool):
     description = "Get task details by ID."
     auto_inherit = True
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> Instruction | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> Instruction | None:
         """Get instruction for this tool (shared with other task tools)."""
         instruction_file = _PROMPTS_DIR / "task_manager.md"
         if instruction_file.exists():
@@ -113,7 +113,7 @@ class TaskUpdateTool(BaseTool):
     description = "Update task status, content, or dependencies."
     auto_inherit = True
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> Instruction | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> Instruction | None:
         """Get instruction for this tool (shared with other task tools)."""
         instruction_file = _PROMPTS_DIR / "task_manager.md"
         if instruction_file.exists():
@@ -214,7 +214,7 @@ class TaskListTool(BaseTool):
     description = "List all tasks and their status."
     auto_inherit = True
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> Instruction | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> Instruction | None:
         """Get instruction for this tool (shared with other task tools)."""
         instruction_file = _PROMPTS_DIR / "task_manager.md"
         if instruction_file.exists():

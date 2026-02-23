@@ -94,7 +94,7 @@ class DummyTool(BaseTool):
     name = "dummy_tool"
     description = "A dummy tool for testing"
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         return "Use this dummy tool for testing purposes."
 
     async def call(self, ctx: RunContext[AgentContext], message: str = "hello") -> str:
@@ -154,7 +154,8 @@ async def test_base_tool_process_user_input_returns_none(agent_context: AgentCon
 
 
 # --- BaseToolset tests ---
-def test_base_toolset_get_instructions_returns_none() -> None:
+@pytest.mark.asyncio
+async def test_base_toolset_get_instructions_returns_none() -> None:
     """Should return None by default."""
 
     class SimpleToolset(BaseToolset):
@@ -170,7 +171,7 @@ def test_base_toolset_get_instructions_returns_none() -> None:
 
     toolset = SimpleToolset()
     mock_ctx = MagicMock(spec=RunContext)
-    assert toolset.get_instructions(mock_ctx) is None
+    assert await toolset.get_instructions(mock_ctx) is None
 
 
 # --- Toolset tests ---

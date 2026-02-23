@@ -38,7 +38,7 @@ class MkdirTool(BaseTool):
             return False
         return True
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         """Load instruction from prompts/mkdir.md."""
         return _load_instruction()
 

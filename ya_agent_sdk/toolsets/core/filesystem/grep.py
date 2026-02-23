@@ -66,7 +66,7 @@ class GrepTool(BaseTool):
             return False
         return True
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         """Load instruction from prompts/grep.md."""
         return _load_instruction()
 

@@ -12,14 +12,14 @@ from ya_agent_sdk.environment.local import LocalEnvironment
 from ya_agent_sdk.toolsets.core.filesystem.write import WriteTool
 
 
-def test_write_tool_attributes(agent_context: AgentContext) -> None:
+async def test_write_tool_attributes(agent_context: AgentContext) -> None:
     """Should have correct name and description."""
     assert WriteTool.name == "write"
     assert "Write or overwrite" in WriteTool.description
     tool = WriteTool()
     mock_run_ctx = MagicMock(spec=RunContext)
     mock_run_ctx.deps = agent_context
-    instruction = tool.get_instruction(mock_run_ctx)
+    instruction = await tool.get_instruction(mock_run_ctx)
     assert instruction is not None
 
 

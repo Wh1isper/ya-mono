@@ -52,12 +52,12 @@ def test_handoff_tool_is_available(agent_context: AgentContext, mock_run_ctx) ->
     assert tool.is_available(mock_run_ctx) is True
 
 
-def test_handoff_tool_get_instruction(agent_context: AgentContext) -> None:
+async def test_handoff_tool_get_instruction(agent_context: AgentContext) -> None:
     """Should load instruction from prompts/handoff.md."""
     tool = HandoffTool()
     mock_run_ctx = MagicMock(spec=RunContext)
     mock_run_ctx.deps = agent_context
-    instruction = tool.get_instruction(mock_run_ctx)
+    instruction = await tool.get_instruction(mock_run_ctx)
     # Verify instruction is loaded and contains expected content
     assert instruction is not None
     assert len(instruction) > 0

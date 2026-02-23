@@ -12,14 +12,14 @@ from ya_agent_sdk.environment.local import LocalEnvironment
 from ya_agent_sdk.toolsets.core.filesystem.ls import ListTool
 
 
-def test_list_tool_attributes(agent_context: AgentContext) -> None:
+async def test_list_tool_attributes(agent_context: AgentContext) -> None:
     """Should have correct name and description."""
     assert ListTool.name == "ls"
     assert "List directory" in ListTool.description
     tool = ListTool()
     mock_run_ctx = MagicMock(spec=RunContext)
     mock_run_ctx.deps = agent_context
-    instruction = tool.get_instruction(mock_run_ctx)
+    instruction = await tool.get_instruction(mock_run_ctx)
     assert instruction is not None
 
 

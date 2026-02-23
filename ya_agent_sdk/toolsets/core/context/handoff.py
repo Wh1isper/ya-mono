@@ -84,7 +84,7 @@ before resetting. The handoff message will be injected into the new context auto
 """
     auto_inherit = True
 
-    def get_instruction(self, ctx: RunContext[AgentContext]) -> str:
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str:
         """Load instruction from prompts/handoff.md."""
         return _load_instruction()
 
