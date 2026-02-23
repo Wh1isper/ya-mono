@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -208,7 +208,12 @@ def test_cli_worktree_option_exists() -> None:
 def test_cli_worktree_not_in_repo(tmp_path: Path) -> None:
     """Test CLI exits with error when --worktree used outside git repo."""
     runner = CliRunner()
-    with patch("yaacli.cli._get_git_root", return_value=None):
+    with (
+        patch("yaacli.cli._get_git_root", return_value=None),
+        patch("yaacli.cli.ConfigManager.load", return_value=MagicMock(is_configured=True, env={})),
+        patch("yaacli.cli.ensure_builtin_assets"),
+        patch("yaacli.cli.load_env_from_config"),
+    ):
         result = runner.invoke(cli, ["--worktree"])
     assert result.exit_code != 0
     assert "requires a git repository" in result.output
@@ -217,7 +222,12 @@ def test_cli_worktree_not_in_repo(tmp_path: Path) -> None:
 def test_cli_branch_implies_worktree(tmp_path: Path) -> None:
     """Test --branch implies --worktree."""
     runner = CliRunner()
-    with patch("yaacli.cli._get_git_root", return_value=None):
+    with (
+        patch("yaacli.cli._get_git_root", return_value=None),
+        patch("yaacli.cli.ConfigManager.load", return_value=MagicMock(is_configured=True, env={})),
+        patch("yaacli.cli.ensure_builtin_assets"),
+        patch("yaacli.cli.load_env_from_config"),
+    ):
         result = runner.invoke(cli, ["--branch", "my-feature"])
     assert result.exit_code != 0
     assert "requires a git repository" in result.output
