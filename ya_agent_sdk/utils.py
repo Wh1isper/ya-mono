@@ -70,7 +70,7 @@ def add_toolset_instructions(
     (has get_instructions method), including Toolset and BrowserUseToolset.
     Supports both sync and async get_instructions methods.
 
-    TODO: Skip subclasses of AbstractToolset when https://github.com/pydantic/pydantic-ai/pull/3780 merged
+    TODO: Drop this when https://github.com/pydantic/pydantic-ai/pull/4123 merged
     """
     from ya_agent_sdk.toolsets.base import InstructableToolset, resolve_instructions
 
