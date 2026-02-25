@@ -924,6 +924,10 @@ class TUIApp:
             self._finalize_streaming_thinking()
             # Reset all HITL state
             self._reset_hitl_state()
+            # Drain any pending bus messages to prevent leaking into next run
+            # (e.g., steering messages sent just before interruption)
+            self.runtime.ctx.consume_messages()
+            self._steering_items.clear()
             self._agent_phase = "idle"
             self._state = TUIState.IDLE
             if self._app:
