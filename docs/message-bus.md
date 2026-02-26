@@ -63,6 +63,49 @@ async with AgentContext(env=env) as ctx:
     ))
 ```
 
+### Multimodal Messages
+
+BusMessage content supports pydantic-ai's `UserContent` types, enabling
+multimodal messages with images, audio, documents, and video:
+
+```python
+from pydantic_ai.messages import ImageUrl, AudioUrl, BinaryContent
+from ya_agent_sdk.context import BusMessage
+
+# Send an image with text context
+ctx.send_message(BusMessage(
+    content=["Analyze this screenshot:", ImageUrl(url="https://example.com/screenshot.png")],
+    source="user",
+    target="main",
+))
+
+# Send audio content
+ctx.send_message(BusMessage(
+    content=["Transcribe this:", AudioUrl(url="https://example.com/recording.mp3")],
+    source="user",
+    target="main",
+))
+
+# Send binary image data
+ctx.send_message(BusMessage(
+    content=["What is in this image?", BinaryContent(data=image_bytes, media_type="image/png")],
+    source="user",
+    target="main",
+))
+```
+
+When content is multimodal (`Sequence[UserContent]`), the `template` field is
+ignored during rendering. Use `content_text()` to get a text-only representation
+for logging or display:
+
+```python
+msg = BusMessage(
+    content=["Check this:", ImageUrl(url="https://example.com/img.png")],
+    source="user",
+)
+msg.content_text()  # "Check this: [image-url]"
+```
+
 ### Subscriber Lifecycle
 
 Subscribers are managed automatically by AgentContext:
@@ -235,15 +278,23 @@ async for event in streamer:
 ```python
 class BusMessage(BaseModel):
     id: str           # Unique ID (auto-generated UUID if not provided)
-    content: str      # Message content
+    content: str | Sequence[UserContent]  # Message content (text or multimodal)
     source: str       # Sender identifier
     target: str | None = None  # Recipient (None = broadcast)
-    template: str | None = None  # Jinja2 template
+    template: str | None = None  # Jinja2 template (str content only)
     timestamp: datetime  # Creation time (auto-set)
 
-    def render(self) -> str:
-        """Apply template and return rendered content."""
+    def render(self) -> str | Sequence[UserContent]:
+        """Apply template (str only) and return rendered content."""
+
+    def content_text(self) -> str:
+        """Extract text-only representation. Non-text parts shown as placeholders."""
 ```
+
+The `content` field accepts either a plain string or a sequence of `UserContent`
+items from pydantic-ai (e.g., `str`, `ImageUrl`, `AudioUrl`, `DocumentUrl`,
+`VideoUrl`, `BinaryContent`). When content is multimodal, `template` is ignored
+by `render()` and the content is returned as-is.
 
 ### MessageBus
 

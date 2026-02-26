@@ -40,7 +40,7 @@ from .agent import (
     ToolIdWrapper,
     ToolSettings,
 )
-from .bus import BusMessage, MessageBus
+from .bus import BusMessage, MessageBus, content_as_text
 from .tasks import Task, TaskManager, TaskStatus
 
 __all__ = [
@@ -63,4 +63,5 @@ __all__ = [
     "ToolConfig",
     "ToolIdWrapper",
     "ToolSettings",
+    "content_as_text",
 ]

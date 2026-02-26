@@ -1430,12 +1430,12 @@ class TUIApp:
             # Update UI status to acked for matched steering messages
             for msg_info in message_event.messages:
                 if msg_info.source == "user":
-                    self._ack_steering_by_content(msg_info.content)
+                    self._ack_steering_by_content(msg_info.content_text)
 
             # Render user messages
             user_messages = [m for m in message_event.messages if m.source == "user"]
             if user_messages:
-                previews = [m.content for m in user_messages]
+                previews = [m.content_text for m in user_messages]
                 rendered = self._event_renderer.render_steering_injected(previews)
                 self._append_output(rendered.rstrip())
 

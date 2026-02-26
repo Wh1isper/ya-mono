@@ -178,15 +178,19 @@ class BusMessageInfo:
 
     Attributes:
         content: Original message content (before template rendering).
+            Can be str for text or Sequence[UserContent] for multimodal.
         rendered_content: Rendered message content (template already applied).
+            Can be str for text or Sequence[UserContent] for multimodal.
         source: Who sent the message (e.g., "user", agent_id).
         target: Who should receive the message (agent_id, or None for broadcast).
+        content_text: Text-only representation of the content for display/logging.
     """
 
-    content: str
-    rendered_content: str
+    content: str | Sequence[UserContent]
+    rendered_content: str | Sequence[UserContent]
     source: str
     target: str | None = None
+    content_text: str = ""
 
 
 @dataclass
