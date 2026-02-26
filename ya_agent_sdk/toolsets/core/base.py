@@ -398,15 +398,41 @@ class Toolset(BaseToolset[AgentDepsT]):
         )
 
     async def get_tools(self, ctx: RunContext[AgentDepsT]) -> dict[str, ToolsetTool[AgentDepsT]]:
-        """Return all tools in this toolset."""
+        """Return all tools in this toolset.
+
+        Uses two-phase filtering:
+        1. Check basic availability and collect capability tags
+        2. Filter out tools superseded by active tags
+        """
         logger.debug(f"get_tools called, preparing {len(self._tool_classes)} tools")
-        tools: dict[str, ToolsetTool[AgentDepsT]] = {}
+
+        # Phase 1: determine basic availability and collect tags
+        available_names: set[str] = set()
+        collected_tags: set[str] = set()
 
         for name in self._tool_classes:
             tool_instance = self._get_tool_instance(name)
             # Check availability at get_tools time (when env is entered)
             if self._skip_unavailable and not tool_instance.is_available(ctx):
                 logger.debug(f"Skipping unavailable tool {name!r}")
+                continue
+            available_names.add(name)
+            collected_tags.update(tool_instance.tags)
+
+        # Set collected tags on context (recomputed fresh each call)
+        ctx.deps.tool_tags = collected_tags
+
+        # Phase 2: build final tools, filtering superseded ones
+        tools: dict[str, ToolsetTool[AgentDepsT]] = {}
+
+        for name in available_names:
+            tool_instance = self._get_tool_instance(name)
+
+            # Check if superseded by any active tag from THIS toolset's available tools
+            # Use local collected_tags (not ctx.deps.tool_tags) to avoid stale/inherited tags
+            if tool_instance.superseded_by_tags and (tool_instance.superseded_by_tags & collected_tags):
+                superseding = tool_instance.superseded_by_tags & collected_tags
+                logger.debug(f"Skipping tool {name!r}: superseded by tags {superseding}")
                 continue
 
             # Get or create pydantic_ai Tool wrapper

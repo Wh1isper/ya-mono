@@ -30,6 +30,7 @@ class MkdirTool(BaseTool):
 
     name = "mkdir"
     description = "Create multiple directories in batch within the working directory."
+    superseded_by_tags = frozenset({"shell"})
 
     def is_available(self, ctx: RunContext[AgentContext]) -> bool:
         """Check if tool is available (requires file_operator)."""

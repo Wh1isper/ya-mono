@@ -899,6 +899,25 @@ class AgentContext(BaseModel):
     task_manager: TaskManager = Field(default_factory=TaskManager)
     """Task manager for tracking tasks and dependencies within the session."""
 
+    tool_tags: set[str] = Field(default_factory=set)
+    """Active capability tags from available tools.
+
+    Recomputed by Toolset.get_tools() on each call. Tags are collected from
+    all available tools' `tags` attribute and set here (replacing previous value).
+    Tools with `superseded_by_tags` matching any active tag are hidden.
+
+    Cleared on subagent context creation to ensure fresh computation.
+
+    This field is useful for external inspection to determine
+    what tool capabilities are active in the current session.
+
+    Example::
+
+        if "shell" in ctx.tool_tags:
+            # Shell tool is available, can use shell commands
+            ...
+    """
+
     message_bus: MessageBus = Field(default_factory=MessageBus)
     """Message bus for inter-agent communication.
 
@@ -1278,6 +1297,7 @@ class AgentContext(BaseModel):
             "user_prompts": None,  # Subagent has its own initial prompt (set by caller)
             "steering_messages": [],  # Subagent has its own steering queue
             "tool_id_wrapper": ToolIdWrapper(),  # Fresh wrapper for subagent
+            "tool_tags": set(),  # Fresh tags for subagent (recomputed by its own Toolset)
             # env is inherited via model_copy (shares parent's env reference)
             **override,
         }

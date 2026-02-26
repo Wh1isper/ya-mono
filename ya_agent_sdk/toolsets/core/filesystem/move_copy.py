@@ -37,6 +37,7 @@ class MoveTool(BaseTool):
 
     name = "move"
     description = "Move files or directories. Supports batch operations with multiple src/dst pairs."
+    superseded_by_tags = frozenset({"shell"})
 
     def is_available(self, ctx: RunContext[AgentContext]) -> bool:
         """Check if tool is available (requires file_operator)."""
@@ -95,6 +96,7 @@ class CopyTool(BaseTool):
 
     name = "copy"
     description = "Copy files. Supports batch operations with multiple src/dst pairs. Files only."
+    superseded_by_tags = frozenset({"shell"})
 
     def is_available(self, ctx: RunContext[AgentContext]) -> bool:
         """Check if tool is available (requires file_operator)."""
