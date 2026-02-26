@@ -33,10 +33,12 @@ Example:
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import datetime
 
 from jinja2 import Template
 from pydantic import BaseModel, Field, field_validator
+from pydantic_ai import UserContent
 
 
 def render_template(content: str, template: str | None) -> str:
@@ -52,6 +54,30 @@ def render_template(content: str, template: str | None) -> str:
     if template is None:
         return content
     return Template(template).render(content=content)
+
+
+def content_as_text(content: str | Sequence[UserContent]) -> str:
+    """Extract text representation from content.
+
+    For str content, returns the string directly.
+    For multimodal content, extracts and joins all string parts.
+    Non-text parts are represented as placeholders.
+
+    Args:
+        content: Message content (str or multimodal sequence).
+
+    Returns:
+        Text representation of the content.
+    """
+    if isinstance(content, str):
+        return content
+    parts: list[str] = []
+    for item in content:
+        if isinstance(item, str):
+            parts.append(item)
+        else:
+            parts.append(f"[{item.kind}]")
+    return " ".join(parts) if parts else ""
 
 
 class BusMessage(BaseModel):
@@ -89,8 +115,27 @@ class BusMessage(BaseModel):
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     """Unique message ID (UUID string). Used for idempotent send and consume."""
 
-    content: str
-    """The message content (typically markdown text)."""
+    content: str | Sequence[UserContent]
+    """The message content.
+
+    Can be a simple string (typically markdown text) or a sequence of
+    UserContent items for multimodal messages (text, images, audio, etc.).
+
+    When using multimodal content, the template field is ignored during
+    rendering and the content is returned as-is.
+
+    Example::
+
+        # Simple text
+        BusMessage(content="Hello", source="user")
+
+        # Multimodal with image
+        from pydantic_ai.messages import ImageUrl
+        BusMessage(
+            content=["Check this image:", ImageUrl(url="https://example.com/img.png")],
+            source="user",
+        )
+    """
 
     source: str
     """Who sent the message (e.g., "user", agent_id)."""
@@ -112,9 +157,30 @@ class BusMessage(BaseModel):
             raise ValueError("id must be non-empty")
         return value
 
-    def render(self) -> str:
-        """Render the message using its Jinja2 template, or return raw content if no template."""
-        return render_template(self.content, self.template)
+    def render(self) -> str | Sequence[UserContent]:
+        """Render the message content.
+
+        For str content: applies the Jinja2 template if set, otherwise returns raw content.
+        For multimodal content (Sequence[UserContent]): returns content as-is (template is ignored).
+
+        Returns:
+            Rendered content (str for text, Sequence[UserContent] for multimodal).
+        """
+        if isinstance(self.content, str):
+            return render_template(self.content, self.template)
+        # Multimodal content: template not applicable, return as-is
+        return self.content
+
+    def content_text(self) -> str:
+        """Extract text representation of the content.
+
+        For str content, returns the string directly.
+        For multimodal content, extracts and joins all string parts
+        with non-text parts shown as placeholders (e.g., "[image-url]").
+
+        Useful for logging, events, and steering message accumulation.
+        """
+        return content_as_text(self.content)
 
 
 class MessageBus:

@@ -249,3 +249,153 @@ async def test_inject_bus_messages_accumulates_rendered_content() -> None:
     # Rendered content (with template) should be accumulated
     assert len(ctx.deps.steering_messages) == 1
     assert ctx.deps.steering_messages[0] == "[URGENT] Stop task"
+
+
+# =============================================================================
+# Multimodal Content Tests
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_inject_bus_messages_multimodal_content() -> None:
+    """Test filter injects multimodal content as UserPromptPart with sequence."""
+    from pydantic_ai.messages import ImageUrl
+
+    bus = MessageBus()
+    bus.subscribe("main")
+    bus.send(
+        BusMessage(
+            content=["Check this image:", ImageUrl(url="https://example.com/img.png")],
+            source="user",
+            target="main",
+        )
+    )
+    ctx = create_mock_ctx(message_bus=bus)
+    messages = [ModelRequest(parts=[UserPromptPart(content="Hello")])]
+
+    result = await inject_bus_messages(ctx, messages)
+
+    assert len(result) == 1
+    assert len(result[0].parts) == 2  # Original + injected
+    injected = result[0].parts[1]
+    assert isinstance(injected, UserPromptPart)
+    # Multimodal content should be a sequence with header, content items, footer
+    assert isinstance(injected.content, list)
+    assert injected.content[0] == '<bus-message source="user">'
+    assert injected.content[1] == "Check this image:"
+    assert isinstance(injected.content[2], ImageUrl)
+    assert injected.content[3] == "</bus-message>"
+
+
+@pytest.mark.asyncio
+async def test_inject_bus_messages_multimodal_emits_event() -> None:
+    """Test filter emits event with multimodal content info."""
+    from pydantic_ai.messages import ImageUrl
+
+    bus = MessageBus()
+    bus.subscribe("main")
+    bus.send(
+        BusMessage(
+            content=["Look:", ImageUrl(url="https://example.com/img.png")],
+            source="user",
+            target="main",
+        )
+    )
+    ctx = create_mock_ctx(message_bus=bus)
+    messages = [ModelRequest(parts=[UserPromptPart(content="Hello")])]
+
+    await inject_bus_messages(ctx, messages)
+
+    ctx.deps.emit_event.assert_called_once()
+    event = ctx.deps.emit_event.call_args[0][0]
+    assert len(event.messages) == 1
+    msg_info = event.messages[0]
+    assert isinstance(msg_info.content, list)
+    assert msg_info.source == "user"
+    assert msg_info.content_text == "Look: [image-url]"
+
+
+@pytest.mark.asyncio
+async def test_inject_bus_messages_multimodal_steering() -> None:
+    """Test filter accumulates text representation for multimodal user steering."""
+    from pydantic_ai.messages import ImageUrl
+
+    bus = MessageBus()
+    bus.subscribe("main")
+    bus.send(
+        BusMessage(
+            content=["Analyze this:", ImageUrl(url="https://example.com/img.png")],
+            source="user",
+            target="main",
+        )
+    )
+    ctx = create_mock_ctx(message_bus=bus)
+    messages = [ModelRequest(parts=[UserPromptPart(content="Hello")])]
+
+    await inject_bus_messages(ctx, messages)
+
+    # Multimodal user message should accumulate text representation
+    assert len(ctx.deps.steering_messages) == 1
+    assert "Analyze this:" in ctx.deps.steering_messages[0]
+    assert "[image-url]" in ctx.deps.steering_messages[0]
+
+
+@pytest.mark.asyncio
+async def test_inject_bus_messages_mixed_str_and_multimodal() -> None:
+    """Test filter handles mix of str and multimodal messages correctly."""
+    from pydantic_ai.messages import ImageUrl
+
+    bus = MessageBus()
+    bus.subscribe("main")
+    bus.send(BusMessage(content="Simple text", source="user", target="main"))
+    bus.send(
+        BusMessage(
+            content=["With image:", ImageUrl(url="https://example.com/img.png")],
+            source="user",
+            target="main",
+        )
+    )
+    ctx = create_mock_ctx(message_bus=bus)
+    messages = [ModelRequest(parts=[UserPromptPart(content="Hello")])]
+
+    result = await inject_bus_messages(ctx, messages)
+
+    assert len(result[0].parts) == 3  # Original + 2 injected
+
+    # First injected: str content wrapped in XML
+    first = result[0].parts[1]
+    assert isinstance(first.content, str)
+    assert "Simple text" in first.content
+
+    # Second injected: multimodal content as sequence
+    second = result[0].parts[2]
+    assert isinstance(second.content, list)
+    assert isinstance(second.content[2], ImageUrl)
+
+    # Both user messages accumulated for steering
+    assert len(ctx.deps.steering_messages) == 2
+    assert ctx.deps.steering_messages[0] == "Simple text"
+    assert "[image-url]" in ctx.deps.steering_messages[1]
+
+
+@pytest.mark.asyncio
+async def test_inject_bus_messages_multimodal_non_user_no_steering() -> None:
+    """Test filter does not accumulate steering for non-user multimodal messages."""
+    from pydantic_ai.messages import ImageUrl
+
+    bus = MessageBus()
+    bus.subscribe("main")
+    bus.send(
+        BusMessage(
+            content=["System image:", ImageUrl(url="https://example.com/img.png")],
+            source="system",
+            target="main",
+        )
+    )
+    ctx = create_mock_ctx(message_bus=bus)
+    messages = [ModelRequest(parts=[UserPromptPart(content="Hello")])]
+
+    await inject_bus_messages(ctx, messages)
+
+    # Non-user messages should not be accumulated for steering
+    assert len(ctx.deps.steering_messages) == 0

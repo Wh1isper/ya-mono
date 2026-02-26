@@ -442,3 +442,111 @@ def test_message_bus_new_subscriber_only_sees_new_messages() -> None:
     sub_msgs = bus.consume("subagent")
     assert len(sub_msgs) == 1
     assert sub_msgs[0].content == "New broadcast"
+
+
+# =============================================================================
+# Multimodal Content Tests
+# =============================================================================
+
+
+def test_bus_message_multimodal_content() -> None:
+    """Test BusMessage with multimodal content (Sequence[UserContent])."""
+    from pydantic_ai.messages import ImageUrl
+
+    msg = BusMessage(
+        id="mm-001",
+        content=["Check this image:", ImageUrl(url="https://example.com/img.png")],
+        source="user",
+    )
+    assert msg.id == "mm-001"
+    assert isinstance(msg.content, list)
+    assert len(msg.content) == 2
+    assert msg.content[0] == "Check this image:"
+    assert isinstance(msg.content[1], ImageUrl)
+
+
+def test_bus_message_multimodal_render_ignores_template() -> None:
+    """Test that render() ignores template for multimodal content."""
+    from pydantic_ai.messages import ImageUrl
+
+    msg = BusMessage(
+        content=["Look at this:", ImageUrl(url="https://example.com/img.png")],
+        source="user",
+        template="[URGENT] {{ content }}",  # Should be ignored
+    )
+    rendered = msg.render()
+    # Multimodal content returned as-is, template ignored
+    assert isinstance(rendered, list)
+    assert len(rendered) == 2
+    assert rendered[0] == "Look at this:"
+
+
+def test_bus_message_multimodal_render_without_template() -> None:
+    """Test that render() returns multimodal content as-is without template."""
+    from pydantic_ai.messages import AudioUrl
+
+    content = ["Listen:", AudioUrl(url="https://example.com/audio.mp3")]
+    msg = BusMessage(content=content, source="user")
+    rendered = msg.render()
+    assert rendered == content  # Same value, no transformation
+
+
+def test_bus_message_content_text_str() -> None:
+    """Test content_text() returns the string for str content."""
+    msg = BusMessage(content="Hello world", source="user")
+    assert msg.content_text() == "Hello world"
+
+
+def test_bus_message_content_text_multimodal() -> None:
+    """Test content_text() extracts text parts and shows placeholders for media."""
+    from pydantic_ai.messages import ImageUrl
+
+    msg = BusMessage(
+        content=["Check this:", ImageUrl(url="https://example.com/img.png"), "What do you think?"],
+        source="user",
+    )
+    text = msg.content_text()
+    assert "Check this:" in text
+    assert "[image-url]" in text
+    assert "What do you think?" in text
+
+
+def test_bus_message_content_text_empty_multimodal() -> None:
+    """Test content_text() returns empty string for empty multimodal content."""
+    msg = BusMessage(content=[], source="user")
+    assert msg.content_text() == ""
+
+
+def test_content_as_text_str() -> None:
+    """Test content_as_text utility with str input."""
+    from ya_agent_sdk.context.bus import content_as_text
+
+    assert content_as_text("hello") == "hello"
+
+
+def test_content_as_text_multimodal() -> None:
+    """Test content_as_text utility with multimodal input."""
+    from pydantic_ai.messages import DocumentUrl, ImageUrl
+
+    from ya_agent_sdk.context.bus import content_as_text
+
+    result = content_as_text(["text part", ImageUrl(url="https://a.com/i.png"), DocumentUrl(url="https://a.com/d.pdf")])
+    assert result == "text part [image-url] [document-url]"
+
+
+def test_bus_message_multimodal_in_bus() -> None:
+    """Test multimodal messages work with MessageBus send/consume."""
+    from pydantic_ai.messages import ImageUrl
+
+    bus = MessageBus()
+    bus.subscribe("main")
+
+    content = ["Check this:", ImageUrl(url="https://example.com/img.png")]
+    bus.send(BusMessage(content=content, source="user", target="main"))
+
+    messages = bus.consume("main")
+    assert len(messages) == 1
+    assert isinstance(messages[0].content, list)
+    assert len(messages[0].content) == 2
+    assert messages[0].content[0] == "Check this:"
+    assert isinstance(messages[0].content[1], ImageUrl)
