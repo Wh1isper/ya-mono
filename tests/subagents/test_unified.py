@@ -650,3 +650,144 @@ def test_unified_subagent_includes_auto_inherit_tools(mock_run_ctx) -> None:
 
     # The subagent should have access to both grep and auto_tool
     assert tool_cls is not None
+
+
+# =============================================================================
+# Independent toolsets tests
+# =============================================================================
+
+
+class ImageGenTool(BaseTool):
+    """Test tool representing an independent capability."""
+
+    name = "image_gen"
+    description = "Generate images"
+
+    async def call(self, ctx: RunContext, prompt: str) -> str:
+        return f"image_gen: {prompt}"
+
+
+def test_unified_tool_with_own_toolsets_subagent(mock_run_ctx) -> None:
+    """Unified tool should work with subagents that have own toolsets."""
+    own_toolset = Toolset(tools=[ImageGenTool])
+
+    configs = [
+        SubagentConfig(
+            name="designer",
+            description="Design agent",
+            system_prompt="You are a designer",
+            toolsets=[own_toolset],
+            tools=None,
+        ),
+        SubagentConfig(
+            name="debugger",
+            description="Debug agent",
+            system_prompt="You are a debugger",
+            tools=["grep"],
+        ),
+    ]
+    parent_toolset = Toolset(tools=[GrepTool, ViewTool])
+
+    tool_cls = create_unified_subagent_tool(configs, parent_toolset, model="test")
+    tool = tool_cls()
+
+    # Both subagents should be available
+    assert tool.is_available(mock_run_ctx) is True
+
+
+def test_unified_tool_availability_with_own_toolsets_always_available(mock_run_ctx) -> None:
+    """Subagent with own toolsets and no required parent tools is always available."""
+    own_toolset = Toolset(tools=[ImageGenTool])
+
+    configs = [
+        SubagentConfig(
+            name="designer",
+            description="Design agent",
+            system_prompt="You are a designer",
+            toolsets=[own_toolset],
+            tools=None,  # no required parent tools
+        ),
+    ]
+    parent_toolset = Toolset(tools=[])  # empty parent
+
+    tool_cls = create_unified_subagent_tool(configs, parent_toolset, model="test")
+    tool = tool_cls()
+
+    # Available because own toolsets are always present, no required parent tools
+    assert tool.is_available(mock_run_ctx) is True
+
+
+def test_unified_tool_availability_with_own_toolsets_and_required_tools(mock_run_ctx) -> None:
+    """Subagent with own toolsets + required parent tools: availability depends on parent."""
+    own_toolset = Toolset(tools=[ImageGenTool])
+
+    configs = [
+        SubagentConfig(
+            name="designer",
+            description="Design agent",
+            system_prompt="You are a designer",
+            toolsets=[own_toolset],
+            tools=["grep"],  # requires grep from parent
+        ),
+    ]
+    parent_toolset = Toolset(tools=[])  # grep not available
+
+    tool_cls = create_unified_subagent_tool(configs, parent_toolset, model="test")
+    tool = tool_cls()
+
+    # Unavailable because required parent tool "grep" is missing
+    assert tool.is_available(mock_run_ctx) is False
+
+
+async def test_unified_tool_instruction_includes_toolset_subagent(mock_run_ctx) -> None:
+    """Instruction should include subagent with own toolsets when available."""
+    own_toolset = Toolset(tools=[ImageGenTool])
+
+    configs = [
+        SubagentConfig(
+            name="designer",
+            description="Design agent",
+            system_prompt="You are a designer",
+            instruction="Use for design tasks and image generation.",
+            toolsets=[own_toolset],
+            tools=None,
+        ),
+    ]
+    parent_toolset = Toolset(tools=[])
+
+    tool_cls = create_unified_subagent_tool(configs, parent_toolset, model="test")
+    tool = tool_cls()
+
+    instruction = await tool.get_instruction(mock_run_ctx)
+
+    assert instruction is not None
+    assert "designer" in instruction
+    assert "image generation" in instruction
+
+
+def test_unified_tool_mixed_toolset_and_inherited_subagents(mock_run_ctx) -> None:
+    """Unified tool with mix of toolset-based and inherited subagents."""
+    own_toolset = Toolset(tools=[ImageGenTool])
+
+    configs = [
+        SubagentConfig(
+            name="designer",
+            description="Design agent",
+            system_prompt="designer",
+            toolsets=[own_toolset],
+            tools=None,
+        ),
+        SubagentConfig(
+            name="debugger",
+            description="Debug agent",
+            system_prompt="debugger",
+            tools=["missing_tool"],  # unavailable
+        ),
+    ]
+    parent_toolset = Toolset(tools=[GrepTool])
+
+    tool_cls = create_unified_subagent_tool(configs, parent_toolset, model="test")
+    tool = tool_cls()
+
+    # Available because at least designer is available
+    assert tool.is_available(mock_run_ctx) is True

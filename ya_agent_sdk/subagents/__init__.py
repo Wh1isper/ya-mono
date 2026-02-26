@@ -58,6 +58,7 @@ from pydantic_ai._agent_graph import HistoryProcessor
 
 from ya_agent_sdk.context import AgentContext, ModelConfig
 from ya_agent_sdk.presets import INHERIT
+from ya_agent_sdk.subagents.builder import build_subagent_agent
 from ya_agent_sdk.subagents.config import (
     SubagentConfig,
     load_subagent_from_file,
@@ -285,6 +286,7 @@ def __getattr__(name: str) -> Any:
 __all__ = [
     "INHERIT",
     "SubagentConfig",
+    "build_subagent_agent",
     "create_subagent_call_func",
     "create_subagent_tool",
     "create_subagent_tool_from_config",

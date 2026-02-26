@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class SubagentConfig(BaseModel):
@@ -19,6 +19,8 @@ class SubagentConfig(BaseModel):
     This model represents the configuration extracted from a markdown file
     with YAML frontmatter.
     """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: str
     """Unique name for the subagent, used as tool name."""
@@ -37,6 +39,22 @@ class SubagentConfig(BaseModel):
 
     optional_tools: list[str] | None = None
     """Optional tools from parent toolset. Included if available, not required for availability."""
+
+    toolsets: list[Any] | None = None
+    """Independent toolsets for this subagent (list of AbstractToolset instances).
+
+    When set, the subagent uses these toolsets in addition to any tools inherited
+    from the parent. Only usable via programmatic SubagentConfig construction,
+    not from markdown files (Toolset instances cannot be serialized in YAML frontmatter).
+
+    The two sources are additive:
+    - config.toolsets provides the subagent's own capabilities
+    - config.tools/optional_tools select inherited tools from parent
+    - auto_inherit tools (task_*, handoff) are always included from parent
+
+    When toolsets is set and tools is None, the subagent gets its own toolsets
+    plus only auto_inherit tools from parent (not all parent tools).
+    """
 
     model: str | None = None
     """Model to use: 'inherit' (default), or model name like 'anthropic:claude-sonnet-4'."""

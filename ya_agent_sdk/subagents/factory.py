@@ -9,13 +9,11 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import RunContext
 from pydantic_ai._agent_graph import HistoryProcessor
 
-from ya_agent_sdk.agents.guards import attach_message_bus_guard
-from ya_agent_sdk.agents.models import infer_model
 from ya_agent_sdk.context import AgentContext, ModelConfig
-from ya_agent_sdk.presets import INHERIT, resolve_model_cfg, resolve_model_settings
+from ya_agent_sdk.subagents.builder import build_subagent_agent
 from ya_agent_sdk.subagents.config import (
     SubagentConfig,
     load_subagent_from_file,
@@ -23,7 +21,7 @@ from ya_agent_sdk.subagents.config import (
     parse_subagent_markdown,
 )
 from ya_agent_sdk.toolsets.core.base import BaseTool, Toolset
-from ya_agent_sdk.toolsets.core.subagent import (
+from ya_agent_sdk.toolsets.core.subagent.factory import (
     create_subagent_call_func,
     create_subagent_tool,
 )
@@ -31,51 +29,6 @@ from ya_agent_sdk.toolsets.core.subagent import (
 if TYPE_CHECKING:
     from pydantic_ai import ModelSettings
     from pydantic_ai.models import Model
-
-
-def _resolve_model(config: SubagentConfig, model: str | Model | None) -> str | Model:
-    """Resolve effective model from config and fallback."""
-    if config.model is not None and config.model != INHERIT:
-        return config.model
-    if model is not None:
-        return model
-    return "test"  # Placeholder, actual model passed at runtime
-
-
-def _resolve_model_settings(
-    config: SubagentConfig, model_settings: ModelSettings | dict[str, Any] | str | None
-) -> dict[str, Any] | None:
-    """Resolve effective model settings from config and fallback."""
-    if config.model_settings is not None and config.model_settings != INHERIT:
-        return resolve_model_settings(config.model_settings)
-    if model_settings is not None:
-        return resolve_model_settings(model_settings)
-    return None
-
-
-def _resolve_model_cfg(config: SubagentConfig, model_cfg: ModelConfig | None) -> ModelConfig | None:
-    """Resolve effective ModelConfig from config and fallback.
-
-    Resolution order:
-    1. config.model_cfg is not None and != 'inherit' -> resolve to ModelConfig
-    2. Otherwise use model_cfg fallback (inherit from parent)
-    """
-    resolved = resolve_model_cfg(config.model_cfg)
-    if resolved is not None:
-        return ModelConfig(**resolved)
-    return model_cfg
-
-
-def _collect_tools(config: SubagentConfig) -> list[str] | None:
-    """Collect all tools (required + optional) from config."""
-    if config.tools is None and config.optional_tools is None:
-        return None
-    all_tools: list[str] = []
-    if config.tools:
-        all_tools.extend(config.tools)
-    if config.optional_tools:
-        all_tools.extend(config.optional_tools)
-    return all_tools
 
 
 def create_subagent_tool_from_config(
@@ -100,25 +53,14 @@ def create_subagent_tool_from_config(
     Returns:
         A BaseTool subclass that wraps the subagent.
     """
-    effective_model = _resolve_model(config, model)
-    resolved_settings = _resolve_model_settings(config, model_settings)
-    resolved_model_cfg = _resolve_model_cfg(config, model_cfg)
-    all_tools = _collect_tools(config)
-
-    sub_toolset = parent_toolset.subset(all_tools, include_auto_inherit=True)
-
-    subagent: Agent[AgentContext, str] = Agent(
-        model=infer_model(effective_model),
-        system_prompt=config.system_prompt,
-        toolsets=[sub_toolset],
-        model_settings=resolved_settings,  # type: ignore[arg-type]
-        deps_type=AgentContext,
+    agent, resolved_model_cfg = build_subagent_agent(
+        config,
+        parent_toolset,
+        model=model,
+        model_settings=model_settings,
         history_processors=history_processors,
-        name=config.name,
+        model_cfg=model_cfg,
     )
-
-    # Attach message bus guard for pending message handling
-    attach_message_bus_guard(subagent)
 
     required_tools = config.tools
 
@@ -130,7 +72,7 @@ def create_subagent_tool_from_config(
     return create_subagent_tool(
         name=config.name,
         description=config.description,
-        call_func=create_subagent_call_func(subagent, model_cfg=resolved_model_cfg),
+        call_func=create_subagent_call_func(agent, model_cfg=resolved_model_cfg),
         instruction=config.instruction,
         availability_check=check_tools_available,
     )
