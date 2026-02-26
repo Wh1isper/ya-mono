@@ -1422,6 +1422,8 @@ class TUIApp:
             self._agent_phase = "thinking"
 
         elif isinstance(message_event, ToolCallsStartEvent):
+            self._finalize_streaming_text()
+            self._finalize_streaming_thinking()
             self._agent_phase = "tools"
 
         elif isinstance(message_event, MessageReceivedEvent):
