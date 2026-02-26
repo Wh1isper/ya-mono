@@ -48,6 +48,7 @@ class ShellTool(BaseTool):
 
     name = "shell"
     description = "Execute a shell command."
+    tags = frozenset({"shell"})
 
     def is_available(self, ctx: RunContext[AgentContext]) -> bool:
         """Check if tool is available (requires shell)."""

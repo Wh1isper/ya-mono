@@ -94,6 +94,32 @@ class BaseTool(ABC):
     description: str
     """Description of what the tool does, shown to the model."""
 
+    tags: frozenset[str] = frozenset()
+    """Capability tags this tool provides.
+
+    Tags represent capabilities that this tool makes available.
+    Other tools can declare themselves superseded by these tags.
+    The active tags are collected by Toolset and exposed via AgentContext.tool_tags.
+
+    Example::
+
+        class ShellTool(BaseTool):
+            tags = frozenset({"shell"})
+    """
+
+    superseded_by_tags: frozenset[str] = frozenset()
+    """Tags that make this tool redundant.
+
+    If any of these tags are active (provided by an available tool),
+    this tool will be automatically hidden from the agent.
+    This allows tools to gracefully yield to more capable alternatives.
+
+    Example::
+
+        class MkdirTool(BaseTool):
+            superseded_by_tags = frozenset({"shell"})  # shell can do mkdir better
+    """
+
     auto_inherit: bool = False
     """Whether this tool is automatically inherited by subagents.
 
