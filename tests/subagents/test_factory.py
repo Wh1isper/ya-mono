@@ -425,3 +425,217 @@ async def test_agent_registry_preserved_on_resume_agent_failure(async_agent_cont
     # agent_registry should still contain the entry (not cleaned up for resume)
     assert agent_id in async_agent_context.agent_registry
     assert async_agent_context.agent_registry[agent_id].agent_name == "resume_agent"
+
+
+# =============================================================================
+# Independent toolsets tests
+# =============================================================================
+
+
+class ImageGenTool(BaseTool):
+    """Test tool representing an independent capability (e.g., image generation)."""
+
+    name = "image_gen"
+    description = "Generate images"
+
+    async def call(self, ctx, prompt: str) -> str:
+        return f"image_gen: {prompt}"
+
+
+class DataProcessTool(BaseTool):
+    """Test tool representing an independent capability (e.g., data processing)."""
+
+    name = "data_process"
+    description = "Process data"
+
+    async def call(self, ctx, data: str) -> str:
+        return f"data_process: {data}"
+
+
+class AutoInheritTool(BaseTool):
+    """Test tool that is automatically inherited by subagents."""
+
+    name = "task_create"
+    description = "Create a task"
+    auto_inherit = True
+
+    async def call(self, ctx) -> str:
+        return "task_create"
+
+
+def test_subagent_with_own_toolsets_only(agent_context, mock_run_ctx) -> None:
+    """Subagent with own toolsets and no parent tools should always be available."""
+    own_toolset = Toolset(tools=[ImageGenTool])
+    parent_toolset = Toolset(tools=[GrepTool, ViewTool])
+
+    config = SubagentConfig(
+        name="designer",
+        description="Design agent",
+        system_prompt="You are a designer",
+        toolsets=[own_toolset],
+        tools=None,  # no parent tools required
+    )
+
+    tool_cls = create_subagent_tool_from_config(config, parent_toolset, model="test")
+    tool_instance = tool_cls()
+
+    # Always available since tools=None (no required parent tools)
+    assert tool_instance.is_available(mock_run_ctx) is True
+
+
+def test_subagent_with_own_toolsets_and_parent_tools(agent_context, mock_run_ctx) -> None:
+    """Subagent with own toolsets + required parent tools: availability depends on parent."""
+    own_toolset = Toolset(tools=[ImageGenTool])
+    parent_toolset = Toolset(tools=[GrepTool, ViewTool])
+
+    config = SubagentConfig(
+        name="designer",
+        description="Design agent with search",
+        system_prompt="You are a designer with search capability",
+        toolsets=[own_toolset],
+        tools=["grep"],  # also needs grep from parent
+    )
+
+    tool_cls = create_subagent_tool_from_config(config, parent_toolset, model="test")
+    tool_instance = tool_cls()
+
+    # Available because grep exists in parent
+    assert tool_instance.is_available(mock_run_ctx) is True
+
+
+def test_subagent_with_own_toolsets_unavailable_when_parent_tools_missing(agent_context, mock_run_ctx) -> None:
+    """Subagent with own toolsets + required parent tools: unavailable if parent tools missing."""
+    own_toolset = Toolset(tools=[ImageGenTool])
+    parent_toolset = Toolset(tools=[GrepTool])  # no ViewTool
+
+    config = SubagentConfig(
+        name="designer",
+        description="Design agent",
+        system_prompt="You are a designer",
+        toolsets=[own_toolset],
+        tools=["grep", "view"],  # requires view which is missing
+    )
+
+    tool_cls = create_subagent_tool_from_config(config, parent_toolset, model="test")
+    tool_instance = tool_cls()
+
+    # Unavailable because view is missing from parent
+    assert tool_instance.is_available(mock_run_ctx) is False
+
+
+def test_subagent_with_own_toolsets_gets_auto_inherit(agent_context, mock_run_ctx) -> None:
+    """Subagent with own toolsets should still get auto_inherit tools from parent."""
+    own_toolset = Toolset(tools=[ImageGenTool])
+    parent_toolset = Toolset(tools=[GrepTool, AutoInheritTool])
+
+    config = SubagentConfig(
+        name="designer",
+        description="Design agent",
+        system_prompt="You are a designer",
+        toolsets=[own_toolset],
+        tools=None,  # no parent tools explicitly requested
+    )
+
+    # Should not raise - auto_inherit tools are included
+    tool_cls = create_subagent_tool_from_config(config, parent_toolset, model="test")
+    assert tool_cls is not None
+
+
+def test_subagent_without_toolsets_backward_compatible(agent_context, mock_run_ctx) -> None:
+    """Subagent without toolsets should behave identically to before."""
+    parent_toolset = Toolset(tools=[GrepTool, ViewTool])
+
+    config = SubagentConfig(
+        name="test_subagent",
+        description="Test subagent",
+        system_prompt="You are a test agent",
+        # toolsets=None (default)
+        tools=["grep", "view"],
+    )
+
+    tool_cls = create_subagent_tool_from_config(config, parent_toolset, model="test")
+    tool_instance = tool_cls()
+
+    assert tool_instance.is_available(mock_run_ctx) is True
+
+
+def test_subagent_config_toolsets_default_none() -> None:
+    """SubagentConfig should default toolsets to None."""
+    config = SubagentConfig(
+        name="test",
+        description="test",
+        system_prompt="test",
+    )
+    assert config.toolsets is None
+
+
+def test_subagent_with_empty_toolsets_does_not_inherit_all_parent_tools(agent_context, mock_run_ctx) -> None:
+    """Empty toolsets=[] should NOT inherit all parent tools (only auto_inherit).
+
+    This is the key edge case: [] is falsy in Python, but semantically it means
+    'this subagent has its own toolsets (currently empty)', not 'inherit all parent tools'.
+    """
+    parent_toolset = Toolset(tools=[GrepTool, ViewTool])
+
+    config = SubagentConfig(
+        name="empty_toolset_agent",
+        description="Agent with explicitly empty toolsets",
+        system_prompt="You are a test agent",
+        toolsets=[],  # explicitly empty, NOT None
+        tools=None,
+    )
+
+    # Should not raise
+    tool_cls = create_subagent_tool_from_config(config, parent_toolset, model="test")
+    tool_instance = tool_cls()
+
+    # Should be available (no required parent tools)
+    assert tool_instance.is_available(mock_run_ctx) is True
+
+
+def test_build_toolsets_empty_list_vs_none() -> None:
+    """Verify _build_toolsets distinguishes between toolsets=[] and toolsets=None."""
+    from ya_agent_sdk.subagents.builder import _build_toolsets
+
+    parent_toolset = Toolset(tools=[GrepTool, ViewTool])
+
+    # toolsets=None -> gets all parent tools (1 toolset = full parent subset)
+    config_none = SubagentConfig(
+        name="t",
+        description="t",
+        system_prompt="t",
+        toolsets=None,
+        tools=None,
+    )
+    result_none = _build_toolsets(config_none, parent_toolset)
+    assert len(result_none) == 1  # just the parent subset (all tools)
+
+    # toolsets=[] -> gets empty own + auto_inherit parent subset (1 toolset)
+    config_empty = SubagentConfig(
+        name="t",
+        description="t",
+        system_prompt="t",
+        toolsets=[],
+        tools=None,
+    )
+    result_empty = _build_toolsets(config_empty, parent_toolset)
+    assert len(result_empty) == 1  # just the parent subset (auto_inherit only)
+
+    # toolsets=[own] -> gets own + auto_inherit parent subset (2 toolsets)
+    own_toolset = Toolset(tools=[ImageGenTool])
+    config_set = SubagentConfig(
+        name="t",
+        description="t",
+        system_prompt="t",
+        toolsets=[own_toolset],
+        tools=None,
+    )
+    result_set = _build_toolsets(config_set, parent_toolset)
+    assert len(result_set) == 2  # own_toolset + parent auto_inherit subset
+
+    # Key difference: None gives full parent, [] gives only auto_inherit
+    # With no auto_inherit tools, the empty-subset has 0 tools, full has 2
+    none_parent_subset = result_none[0]
+    empty_parent_subset = result_empty[0]
+    assert set(none_parent_subset.tool_names) == {"grep", "view"}
+    assert set(empty_parent_subset.tool_names) == set()  # no auto_inherit tools in parent
