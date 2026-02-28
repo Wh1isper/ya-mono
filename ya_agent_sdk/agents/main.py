@@ -434,7 +434,7 @@ def create_agent(
                 all_subagent_configs,
                 model=model,
                 model_settings=model_settings,
-                history_processors=[*ctx.get_history_processors()],
+                history_processors=cast(list[HistoryProcessor[AgentContext]], all_processors),
                 model_cfg=effective_model_cfg,
                 unified=unified_subagents,
             )
