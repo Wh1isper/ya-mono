@@ -80,6 +80,7 @@ async def test_search_tool_not_available_without_keys(tmp_path: Path) -> None:
                 tool_config=ToolConfig(
                     google_search_api_key=None,
                     google_search_cx=None,
+                    brave_search_api_key=None,
                     tavily_api_key=None,
                 ),
             )
