@@ -258,6 +258,7 @@ def create_agent(
     agent_name: str = "main",
     system_prompt: str | None = None,
     system_prompt_template_vars: dict[str, Any] | None = None,
+    pre_history_processors: Sequence[HistoryProcessor[AgentDepsT]] | None = None,
     history_processors: Sequence[HistoryProcessor[AgentDepsT]] | None = None,
     retries: int = 1,
     output_retries: int = 3,
@@ -314,7 +315,10 @@ def create_agent(
             rendered as a Jinja2 template, supporting conditionals and default values.
         system_prompt_template_vars: Variables for Jinja2 template rendering. Works with
             both custom system_prompt strings and the default template file.
-        history_processors: Sequence of history processor functions.
+        pre_history_processors: Sequence of history processors to run BEFORE built-in
+            processors. Use this to bypass or modify messages before built-in filters
+            (compact, environment instructions, etc.) process them.
+        history_processors: Sequence of history processors to run AFTER built-in processors.
         retries: Number of retries for agent run. Defaults to 1.
         output_retries: Number of retries for output parsing. Defaults to 3.
         defer_model_check: Defer model validation. Defaults to False.
@@ -379,8 +383,12 @@ def create_agent(
     logger.debug("Context created: %s (run_id=%s)", type(ctx).__name__, ctx.run_id)
 
     # --- History Processors ---
-    # Combine context's processors with built-in and user-provided ones
-    all_processors: list[HistoryProcessor[AgentDepsT]] = [
+    # Combine pre-processors, context's processors, built-in, and user-provided ones
+    # Order: pre_history_processors -> ctx processors -> compact -> env instructions -> history_processors
+    all_processors: list[HistoryProcessor[AgentDepsT]] = []
+    if pre_history_processors:
+        all_processors.extend(pre_history_processors)
+    all_processors.extend([
         *ctx.get_history_processors(),
         create_compact_filter(
             model=compact_model,
@@ -390,7 +398,7 @@ def create_agent(
             main_model_settings=model_settings,
         ),
         create_environment_instructions_filter(actual_env),
-    ]
+    ])
     if history_processors:
         all_processors.extend(history_processors)
 
