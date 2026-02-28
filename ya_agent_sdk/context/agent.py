@@ -541,10 +541,10 @@ class ModelConfig(BaseModel):
     context_window: int | None = None
     """Total context window size in tokens."""
 
-    proactive_context_management_threshold: float | None = 0.5
+    proactive_context_management_threshold: float | None = Field(default=0.5, ge=0.0, le=1.0)
     """Proactive context management threshold. When token usage exceeds this ratio, reminders are triggered."""
 
-    compact_threshold: float = 0.90
+    compact_threshold: float = Field(default=0.90, ge=0.0, le=1.0)
     """Compact threshold for auto-compaction. When token usage exceeds this ratio, compact is triggered."""
 
     max_images: int = 20
@@ -741,9 +741,8 @@ class ResumableState(BaseModel):
         ctx.need_user_approve_tools = list(self.need_user_approve_tools)
         ctx.need_user_approve_mcps = list(self.need_user_approve_mcps)
         ctx.auto_load_files = list(self.auto_load_files)
-        # Restore task_manager from serialized tasks
-        if self.tasks:
-            ctx.task_manager = TaskManager.from_exported(self.tasks)
+        # Restore task_manager from serialized tasks (always reset to avoid stale state)
+        ctx.task_manager = TaskManager.from_exported(self.tasks) if self.tasks else TaskManager()
 
 
 # =============================================================================
@@ -1194,7 +1193,7 @@ class AgentContext(BaseModel):
         # Only include on user prompts, not tool responses
         if is_user_prompt:
             known_subagents = {
-                agent_id: info for agent_id, info in self.agent_registry.items() if agent_id != self.run_id
+                agent_id: info for agent_id, info in self.agent_registry.items() if agent_id != self._agent_id
             }
             if known_subagents:
                 subagents_elem = SubElement(root, "known-subagents")
@@ -1225,6 +1224,7 @@ class AgentContext(BaseModel):
             and self.model_cfg.proactive_context_management_threshold is not None
             and run_context
             and (request_usage := get_latest_request_usage(run_context.messages))
+            and request_usage.total_tokens is not None
         ):
             threshold_tokens = int(
                 self.model_cfg.context_window * self.model_cfg.proactive_context_management_threshold
@@ -1557,6 +1557,7 @@ class AgentContext(BaseModel):
             deferred_tool_metadata=dict(self.deferred_tool_metadata),
             agent_registry=serialized_registry,
             need_user_approve_tools=list(self.need_user_approve_tools),
+            need_user_approve_mcps=list(self.need_user_approve_mcps),
             auto_load_files=list(self.auto_load_files),
             tasks=self.task_manager.export_tasks(),
         )

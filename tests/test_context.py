@@ -1332,9 +1332,9 @@ async def test_get_context_instructions_excludes_main_agent(env: LocalEnvironmen
     from ya_agent_sdk.context import AgentInfo
 
     async with AgentContext(env=env) as ctx:
-        # Register main agent (should be excluded)
-        ctx.agent_registry[ctx.run_id] = AgentInfo(
-            agent_id=ctx.run_id,
+        # Register main agent (should be excluded by _agent_id filtering)
+        ctx.agent_registry[ctx.agent_id] = AgentInfo(
+            agent_id=ctx.agent_id,
             agent_name="main",
             parent_agent_id=None,
         )
@@ -1342,14 +1342,14 @@ async def test_get_context_instructions_excludes_main_agent(env: LocalEnvironmen
         ctx.agent_registry["sub1"] = AgentInfo(
             agent_id="sub1",
             agent_name="search_agent",
-            parent_agent_id=ctx.run_id,
+            parent_agent_id=ctx.agent_id,
         )
 
         instructions = await ctx.get_context_instructions()
 
-        # Should include subagent but not main agent's run_id
+        # Should include subagent but not main agent itself
         assert 'id="sub1"' in instructions
-        assert f'id="{ctx.run_id}"' not in instructions
+        assert f'id="{ctx.agent_id}"' not in instructions
 
 
 async def test_get_context_instructions_no_subagents(env: LocalEnvironment) -> None:

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
-from pydantic_ai import ApprovalRequired, RunContext, Tool, UserError
+from pydantic_ai import ApprovalRequired, CallDeferred, RunContext, Tool, UserError
 from pydantic_ai._agent_graph import HistoryProcessor
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.tools import (
@@ -533,6 +533,11 @@ class Toolset(BaseToolset[AgentDepsT]):
         logger.debug(f"call_tool: {name!r} executing tool function")
         try:
             result = await self._call_tool_func(args, ctx, tool)
+        except (ApprovalRequired, CallDeferred):
+            # Pydantic AI control flow exceptions must propagate directly.
+            # ApprovalRequired: conditional approval from within tool (e.g. protected files)
+            # CallDeferred: external tool execution (result provided outside agent run)
+            raise
         except Exception as e:
             # Let the post-hook handle the exception
             logger.debug(f"call_tool: {name!r} tool function raised exception: {type(e).__name__}")
