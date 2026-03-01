@@ -14,6 +14,7 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
+import os
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -33,13 +34,8 @@ from ya_agent_sdk.environment.local import VirtualLocalFileOperator, VirtualMoun
 if TYPE_CHECKING:
     pass
 
-try:
-    import docker
-    import docker.errors
-except ImportError as e:
-    raise ImportError(
-        "The 'docker' package is required for SandboxEnvironment. Install it with: pip install ya-agent-sdk[docker]"
-    ) from e
+import docker
+import docker.errors
 
 
 class DockerShell(Shell):
@@ -270,7 +266,18 @@ class SandboxEnvironment(Environment):
             resource_factories=resource_factories,
         )
         self._mounts = mounts
-        self._work_dir = work_dir if work_dir is not None else str(mounts[0].virtual_path)
+        raw_work_dir = work_dir if work_dir is not None else str(mounts[0].virtual_path)
+
+        # Validate work_dir is absolute and under at least one mount's virtual_path
+        normalized_work_dir = Path(os.path.normpath(raw_work_dir))
+        if not normalized_work_dir.is_absolute():
+            raise ValueError(f"work_dir must be absolute, got: {raw_work_dir}")
+        if not any(self._is_path_under(normalized_work_dir, m.virtual_path) for m in mounts):
+            raise ValueError(
+                f"work_dir '{raw_work_dir}' is not under any mount virtual path: "
+                f"{[str(m.virtual_path) for m in mounts]}"
+            )
+        self._work_dir = str(normalized_work_dir)
         self._custom_shell = shell
         self._container_id = container_id
         self._image = image
@@ -283,6 +290,15 @@ class SandboxEnvironment(Environment):
         self._created_container: bool = False
         self._client: docker.DockerClient | None = None
         self._tmp_dir_obj: tempfile.TemporaryDirectory[str] | None = None
+
+    @staticmethod
+    def _is_path_under(path: Path, root: Path) -> bool:
+        """Check if path is equal to or under root using path semantics."""
+        try:
+            path.relative_to(root)
+            return True
+        except ValueError:
+            return False
 
     @property
     def client(self) -> docker.DockerClient:

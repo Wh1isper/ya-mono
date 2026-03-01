@@ -21,7 +21,7 @@ try:
     )
 
     _DOCKER_AVAILABLE = True
-except ImportError:
+except ModuleNotFoundError:
     _DOCKER_AVAILABLE = False
 
 __all__ = [

@@ -501,7 +501,16 @@ class VirtualLocalFileOperator(FileOperator):
         virtual = self._resolve_virtual(path)
         mount = self._find_mount(virtual)
         rel = virtual.relative_to(mount.virtual_path)
-        return (mount.host_path.resolve() / rel).resolve()
+        resolved = (mount.host_path.resolve() / rel).resolve()
+
+        # Security: verify resolved path hasn't escaped the mount root via symlinks
+        mount_root = mount.host_path.resolve()
+        try:
+            resolved.relative_to(mount_root)
+        except ValueError as exc:
+            raise PathNotAllowedError(f"Path escapes mount boundary via symlink: {path}") from exc
+
+        return resolved
 
     def _find_mount_for_host(self, host_path: Path) -> VirtualMount | None:
         """Find the mount that contains a host path.
@@ -526,7 +535,7 @@ class VirtualLocalFileOperator(FileOperator):
                 continue
         return best
 
-    def _to_virtual_rel(self, host_path: Path) -> str:
+    def _to_virtual_rel(self, host_path: Path) -> str | None:
         """Translate a host path back to a virtual-relative path string.
 
         Uses longest-prefix matching to find the appropriate mount.
@@ -535,7 +544,8 @@ class VirtualLocalFileOperator(FileOperator):
             host_path: Absolute or relative host path.
 
         Returns:
-            Path string relative to the default virtual path.
+            Path string relative to the default virtual path, or None if
+            the host path is outside all mounts.
         """
         if not host_path.is_absolute():
             # For relative paths, try default mount first
@@ -551,7 +561,8 @@ class VirtualLocalFileOperator(FileOperator):
                 return str(virtual_abs.relative_to(self._default_path))
             except ValueError:
                 return str(virtual_abs)
-        return str(host_path)
+        # Path is outside all mounts - return None to avoid leaking host paths
+        return None
 
     # --- FileOperator _impl methods: translate then perform local I/O ---
 
@@ -724,7 +735,7 @@ class VirtualLocalFileOperator(FileOperator):
         dst_host = self._to_host(dst)
         try:
             if src_host.is_dir():
-                await anyio.to_thread.run_sync(lambda: shutil.copytree(src_host, dst_host))  # type: ignore[reportAttributeAccessIssue]
+                await anyio.to_thread.run_sync(lambda: shutil.copytree(src_host, dst_host, symlinks=True))  # type: ignore[reportAttributeAccessIssue]
             else:
                 await anyio.to_thread.run_sync(lambda: shutil.copy2(src_host, dst_host))  # type: ignore[reportAttributeAccessIssue]
         except FileNotFoundError as e:
@@ -769,7 +780,7 @@ class VirtualLocalFileOperator(FileOperator):
             normalized = Path(os.path.normpath(pattern_path))
             try:
                 mount = self._find_mount(normalized)
-            except Exception:
+            except PathNotAllowedError:
                 return []
             mount_host = mount.host_path.resolve()
             rel = normalized.relative_to(mount.virtual_path)
@@ -777,7 +788,9 @@ class VirtualLocalFileOperator(FileOperator):
             matches = []
             for p_str in glob_module.glob(host_pattern, recursive=True):
                 resolved = Path(p_str).resolve()
-                matches.append(self._to_virtual_rel(resolved))
+                virtual_rel = self._to_virtual_rel(resolved)
+                if virtual_rel is not None:
+                    matches.append(virtual_rel)
         else:
             # Relative pattern: glob on default mount's host path
             matches = []
