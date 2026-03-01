@@ -48,6 +48,7 @@ from pydantic_ai.messages import (
     FunctionToolResultEvent,
     ModelMessagesTypeAdapter,
     PartDeltaEvent,
+    PartEndEvent,
     PartStartEvent,
     TextPart,
     TextPartDelta,
@@ -396,6 +397,19 @@ class TUIApp:
                 self._total_line_count -= self._block_line_counts[i]
             self._output_lines = self._output_lines[trim_count:]
             self._block_line_counts = self._block_line_counts[trim_count:]
+            # Adjust streaming indices to account for removed blocks
+            if self._streaming_line_index is not None:
+                self._streaming_line_index -= trim_count
+                if self._streaming_line_index < 0:
+                    # Streaming block was trimmed away - reset
+                    self._streaming_text = ""
+                    self._streaming_line_index = None
+            if self._streaming_thinking_line_index is not None:
+                self._streaming_thinking_line_index -= trim_count
+                if self._streaming_thinking_line_index < 0:
+                    # Thinking block was trimmed away - reset
+                    self._streaming_thinking = ""
+                    self._streaming_thinking_line_index = None
 
         # Auto-scroll to bottom when agent is running
         if self._state == TUIState.RUNNING:
@@ -1323,7 +1337,8 @@ class TUIApp:
 
         elif isinstance(message_event, PartStartEvent) and isinstance(message_event.part, ThinkingPart):
             # Start new streaming thinking block (extended thinking from model)
-            self._finalize_streaming_thinking()  # Finalize any previous
+            self._finalize_streaming_text()  # Finalize any active text (interleaved thinking)
+            self._finalize_streaming_thinking()  # Finalize any previous thinking
             self._start_streaming_thinking(message_event.part.content)
 
         elif isinstance(message_event, PartDeltaEvent) and isinstance(message_event.delta, TextPartDelta):
@@ -1342,6 +1357,18 @@ class TUIApp:
                 else:
                     # Fallback if no streaming started
                     self._start_streaming_thinking(message_event.delta.content_delta)
+
+        elif isinstance(message_event, PartStartEvent):
+            # Other part types (ToolCallPart, FilePart, etc.) - finalize active streams
+            self._finalize_streaming_text()
+            self._finalize_streaming_thinking()
+
+        elif isinstance(message_event, PartEndEvent):
+            # Part completed - finalize the corresponding stream
+            if isinstance(message_event.part, TextPart):
+                self._finalize_streaming_text()
+            elif isinstance(message_event.part, ThinkingPart):
+                self._finalize_streaming_thinking()
 
         elif isinstance(message_event, FunctionToolCallEvent):
             # Finalize any streaming text before tool call
