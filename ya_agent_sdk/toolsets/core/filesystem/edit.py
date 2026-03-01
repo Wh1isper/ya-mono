@@ -1,7 +1,7 @@
 """Edit tools for file modification."""
 
 from functools import cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Annotated, cast
 
 from pydantic import Field
@@ -71,6 +71,10 @@ class EditTool(BaseTool):
         if not old_string:
             if await file_operator.exists(file_path):
                 return f"Error: File already exists: {file_path}. Use `write` tool to overwrite."
+            # Auto-create parent directories if needed
+            parent = str(PurePosixPath(file_path).parent)
+            if parent and parent != ".":
+                await file_operator.mkdir(parent, parents=True)
             await file_operator.write_file(file_path, new_string)
             return f"Successfully created new file: {file_path}"
 
@@ -145,6 +149,10 @@ class MultiEditTool(BaseTool):
         if not edits[0].old_string:
             if await file_operator.exists(file_path):
                 return f"Error: File already exists: {file_path}. Use `write` tool to overwrite."
+            # Auto-create parent directories if needed
+            parent = str(PurePosixPath(file_path).parent)
+            if parent and parent != ".":
+                await file_operator.mkdir(parent, parents=True)
             content = edits[0].new_string
             remaining_edits = edits[1:]
         else:
