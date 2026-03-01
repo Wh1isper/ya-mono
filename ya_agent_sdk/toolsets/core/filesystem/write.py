@@ -1,7 +1,7 @@
 """Write tool for writing or appending file contents."""
 
 from functools import cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Annotated, cast
 
 from pydantic import Field
@@ -59,6 +59,11 @@ class WriteTool(BaseTool):
 
         if mode not in ("w", "a"):
             return f"Error: Invalid mode '{mode}'. Only 'w' and 'a' are supported."
+
+        # Auto-create parent directories if needed
+        parent = str(PurePosixPath(file_path).parent)
+        if parent and parent != ".":
+            await file_operator.mkdir(parent, parents=True)
 
         if mode == "w":
             await file_operator.write_file(file_path, content)
