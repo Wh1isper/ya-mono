@@ -929,7 +929,8 @@ class TUIApp:
         except Exception as e:
             self._finalize_streaming_text()
             self._finalize_streaming_thinking()
-            # Display error in output pane - don't save history so user can retry
+            # Display error - message_history is already saved in memory
+            # by _execute_stream, so user can continue with a new prompt
             self._append_error_output(e)
             logger.exception("Agent execution failed")
         finally:
@@ -1003,28 +1004,38 @@ class TUIApp:
             async for event in stream:
                 self._handle_stream_event(event)
 
-            stream.raise_if_exception()
-            # Save run and update message history for next conversation
+            # Always try to save message history from the run, even on error.
+            # This preserves conversation context so user can continue
+            # with a new prompt after an error, instead of losing all context.
+            # Wrapped in try/except since run fields may be incomplete on error.
             self._last_run = stream.run
+            try:
+                if stream.run:
+                    self._message_history = list(stream.run.all_messages())
+                    # Update context usage from run
+                    usage = stream.run.usage()
+                    latest_usage = get_latest_request_usage(self._message_history)
+                    self._current_context_tokens = latest_usage.total_tokens if latest_usage else usage.total_tokens
+
+                    # Accumulate session usage
+                    model_id = cast(Model, self.runtime.agent.model).model_name
+                    self._session_usage.add("main", model_id, usage)
+
+                    # Also accumulate extra_usages (subagents, image_understanding, etc.)
+                    ctx = self.runtime.ctx
+                    for record in ctx.extra_usages:
+                        self._session_usage.add(record.agent, record.model_id, record.usage)
+            except Exception:
+                logger.debug("Failed to save message history from errored run", exc_info=True)
+
+            # Raise after saving history - on error, history is preserved in memory
+            # but not written to disk (auto_save_history is skipped)
+            stream.raise_if_exception()
+
+            # Only auto-save session to disk on successful completion
+            # Note: export_state() defaults to include_extra_usages=False,
+            # so next restore won't have stale usage data
             if stream.run:
-                self._message_history = list(stream.run.all_messages())
-                # Update context usage from run
-                usage = stream.run.usage()
-                latest_usage = get_latest_request_usage(self._message_history)
-                self._current_context_tokens = latest_usage.total_tokens if latest_usage else usage.total_tokens
-
-                # Accumulate session usage
-                model_id = cast(Model, self.runtime.agent.model).model_name
-                self._session_usage.add("main", model_id, usage)
-
-                # Also accumulate extra_usages (subagents, image_understanding, etc.)
-                ctx = self.runtime.ctx
-                for record in ctx.extra_usages:
-                    self._session_usage.add(record.agent, record.model_id, record.usage)
-
-                # Auto-save session after each run
-                # Note: export_state() defaults to include_extra_usages=False,
-                # so next restore won't have stale usage data
                 self._auto_save_history()
 
             return stream.run.result if stream.run else None
