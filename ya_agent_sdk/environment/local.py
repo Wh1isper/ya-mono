@@ -6,8 +6,10 @@ using standard library functions.
 
 import asyncio
 import glob as glob_module
+import os
 import shutil
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -333,6 +335,482 @@ class LocalFileOperator(FileOperator):
             try:
                 p = Path(x) if Path(x).is_absolute() else (self._default_path / x)
                 return p.stat().st_mtime
+            except (OSError, FileNotFoundError):
+                return 0.0
+
+        matches.sort(key=get_mtime, reverse=True)
+        return matches
+
+
+@dataclass(frozen=True)
+class VirtualMount:
+    """Maps a host directory to a virtual path.
+
+    Used by VirtualLocalFileOperator and SandboxEnvironment to define
+    path mappings between host filesystem and virtual path space.
+
+    Attributes:
+        host_path: Actual directory on the host filesystem.
+        virtual_path: Virtual path presented to the agent. Must be absolute.
+    """
+
+    host_path: Path
+    virtual_path: Path
+
+    def __post_init__(self) -> None:
+        if not self.virtual_path.is_absolute():
+            raise ValueError(f"virtual_path must be absolute, got: {self.virtual_path}")
+
+
+class VirtualLocalFileOperator(FileOperator):
+    """File operator that presents a virtual path space while performing I/O on the host filesystem.
+
+    Supports multiple mount mappings between virtual paths (what the agent sees)
+    and host paths (where actual I/O happens). This enables symmetric path spaces
+    between file operations and shell execution in sandboxed environments.
+
+    Path resolution uses longest-prefix matching when multiple mounts are configured.
+
+    Example:
+        Single mount:
+
+        ```python
+        op = VirtualLocalFileOperator(
+            mounts=[VirtualMount(Path("/home/user/project"), Path("/workspace"))],
+        )
+        # Agent reads "/workspace/test.py" -> reads /home/user/project/test.py
+        content = await op.read_file("test.py")
+        ```
+
+        Multiple mounts:
+
+        ```python
+        op = VirtualLocalFileOperator(
+            mounts=[
+                VirtualMount(Path("/home/user/project"), Path("/workspace/project")),
+                VirtualMount(Path("/home/user/.config"), Path("/workspace/.config")),
+            ],
+        )
+        await op.read_file("/workspace/project/main.py")   # -> /home/user/project/main.py
+        await op.read_file("/workspace/.config/settings")   # -> /home/user/.config/settings
+        ```
+    """
+
+    def __init__(
+        self,
+        mounts: list[VirtualMount],
+        default_virtual_path: Path | None = None,
+        instructions_skip_dirs: frozenset[str] | None = None,
+        instructions_max_depth: int = 3,
+        tmp_dir: Path | None = None,
+        tmp_file_operator: "TmpFileOperator | None" = None,
+    ):
+        """Initialize VirtualLocalFileOperator.
+
+        Args:
+            mounts: List of mount mappings from host paths to virtual paths.
+                At least one mount is required. All virtual_paths must be absolute.
+            default_virtual_path: Default virtual path for relative path resolution.
+                If None, uses the first mount's virtual_path.
+            instructions_skip_dirs: Directories to skip in file tree generation.
+            instructions_max_depth: Maximum depth for file tree generation.
+            tmp_dir: Directory for temporary files.
+            tmp_file_operator: Operator for tmp file operations.
+
+        Raises:
+            ValueError: If mounts is empty.
+        """
+        if not mounts:
+            raise ValueError("At least one mount is required")
+
+        self._mounts = mounts
+        default_vp = default_virtual_path if default_virtual_path is not None else mounts[0].virtual_path
+
+        super().__init__(
+            default_path=default_vp,
+            allowed_paths=[m.virtual_path for m in mounts],
+            instructions_skip_dirs=instructions_skip_dirs,
+            instructions_max_depth=instructions_max_depth,
+            tmp_dir=tmp_dir,
+            tmp_file_operator=tmp_file_operator,
+        )
+
+    def _find_mount(self, normalized_virtual: Path) -> VirtualMount:
+        """Find the mount whose virtual_path is the longest prefix of the given path.
+
+        Args:
+            normalized_virtual: Normalized absolute virtual path.
+
+        Returns:
+            The best-matching VirtualMount.
+
+        Raises:
+            PathNotAllowedError: If no mount matches the path.
+        """
+        best: VirtualMount | None = None
+        best_depth = -1
+        for mount in self._mounts:
+            try:
+                normalized_virtual.relative_to(mount.virtual_path)
+                depth = len(mount.virtual_path.parts)
+                if depth > best_depth:
+                    best = mount
+                    best_depth = depth
+            except ValueError:
+                continue
+        if best is None:
+            raise PathNotAllowedError(
+                str(normalized_virtual),
+                [str(m.virtual_path) for m in self._mounts],
+            )
+        return best
+
+    def _resolve_virtual(self, path: str) -> Path:
+        """Resolve a virtual path to a normalized absolute virtual path.
+
+        Args:
+            path: Virtual path (relative or absolute).
+
+        Returns:
+            Normalized absolute virtual Path.
+
+        Raises:
+            PathNotAllowedError: If the path is outside all mount virtual paths.
+        """
+        target = Path(path)
+        if not target.is_absolute():
+            target = self._default_path / target
+        # Normalize without resolving against real filesystem
+        normalized = Path(os.path.normpath(target))
+
+        # Validate: must be under at least one mount
+        self._find_mount(normalized)
+        return normalized
+
+    def _to_host(self, path: str) -> Path:
+        """Translate virtual path to host filesystem path.
+
+        Uses longest-prefix matching to find the appropriate mount.
+
+        Args:
+            path: Virtual path (relative or absolute).
+
+        Returns:
+            Resolved host Path for actual I/O.
+        """
+        virtual = self._resolve_virtual(path)
+        mount = self._find_mount(virtual)
+        rel = virtual.relative_to(mount.virtual_path)
+        resolved = (mount.host_path.resolve() / rel).resolve()
+
+        # Security: verify resolved path hasn't escaped the mount root via symlinks
+        mount_root = mount.host_path.resolve()
+        try:
+            resolved.relative_to(mount_root)
+        except ValueError as exc:
+            raise PathNotAllowedError(f"Path escapes mount boundary via symlink: {path}") from exc
+
+        return resolved
+
+    def _find_mount_for_host(self, host_path: Path) -> VirtualMount | None:
+        """Find the mount that contains a host path.
+
+        Args:
+            host_path: Absolute host path.
+
+        Returns:
+            The matching VirtualMount, or None if no mount matches.
+        """
+        best: VirtualMount | None = None
+        best_depth = -1
+        for mount in self._mounts:
+            resolved_host = mount.host_path.resolve()
+            try:
+                host_path.relative_to(resolved_host)
+                depth = len(resolved_host.parts)
+                if depth > best_depth:
+                    best = mount
+                    best_depth = depth
+            except ValueError:
+                continue
+        return best
+
+    def _to_virtual_rel(self, host_path: Path) -> str | None:
+        """Translate a host path back to a virtual-relative path string.
+
+        Uses longest-prefix matching to find the appropriate mount.
+
+        Args:
+            host_path: Absolute or relative host path.
+
+        Returns:
+            Path string relative to the default virtual path, or None if
+            the host path is outside all mounts.
+        """
+        if not host_path.is_absolute():
+            # For relative paths, try default mount first
+            mount = self._mounts[0]
+            host_path = mount.host_path.resolve() / host_path
+
+        found = self._find_mount_for_host(host_path)
+        if found is not None:
+            rel = host_path.relative_to(found.host_path.resolve())
+            virtual_abs = found.virtual_path / rel
+            # Return relative to default_path if possible
+            try:
+                return str(virtual_abs.relative_to(self._default_path))
+            except ValueError:
+                return str(virtual_abs)
+        # Path is outside all mounts - return None to avoid leaking host paths
+        return None
+
+    # --- FileOperator _impl methods: translate then perform local I/O ---
+
+    async def _read_file_impl(
+        self,
+        path: str,
+        *,
+        encoding: str = "utf-8",
+        offset: int = 0,
+        length: int | None = None,
+    ) -> str:
+        host = self._to_host(path)
+        try:
+            content = await anyio.Path(host).read_text(encoding=encoding)
+            if offset > 0 or length is not None:
+                end = None if length is None else offset + length
+                content = content[offset:end]
+            return content
+        except FileNotFoundError as e:
+            raise FileOperationError("read", path, "file not found") from e
+        except PermissionError as e:
+            raise FileOperationError("read", path, "permission denied") from e
+        except OSError as e:
+            raise FileOperationError("read", path, str(e)) from e
+
+    async def _read_bytes_impl(
+        self,
+        path: str,
+        *,
+        offset: int = 0,
+        length: int | None = None,
+    ) -> bytes:
+        host = self._to_host(path)
+        try:
+            content = await anyio.Path(host).read_bytes()
+            if offset > 0 or length is not None:
+                end = None if length is None else offset + length
+                content = content[offset:end]
+            return content
+        except FileNotFoundError as e:
+            raise FileOperationError("read", path, "file not found") from e
+        except PermissionError as e:
+            raise FileOperationError("read", path, "permission denied") from e
+        except OSError as e:
+            raise FileOperationError("read", path, str(e)) from e
+
+    async def _write_file_impl(
+        self,
+        path: str,
+        content: str | bytes,
+        *,
+        encoding: str = "utf-8",
+    ) -> None:
+        host = self._to_host(path)
+        try:
+            apath = anyio.Path(host)
+            if isinstance(content, bytes):
+                await apath.write_bytes(content)
+            else:
+                await apath.write_text(content, encoding=encoding)
+        except PermissionError as e:
+            raise FileOperationError("write", path, "permission denied") from e
+        except OSError as e:
+            raise FileOperationError("write", path, str(e)) from e
+
+    async def _append_file_impl(
+        self,
+        path: str,
+        content: str | bytes,
+        *,
+        encoding: str = "utf-8",
+    ) -> None:
+        host = self._to_host(path)
+        try:
+
+            def _append() -> None:
+                mode = "ab" if isinstance(content, bytes) else "a"
+                with open(host, mode, encoding=None if isinstance(content, bytes) else encoding) as f:
+                    f.write(content)
+
+            await anyio.to_thread.run_sync(_append)  # type: ignore[reportAttributeAccessIssue]
+        except PermissionError as e:
+            raise FileOperationError("append", path, "permission denied") from e
+        except OSError as e:
+            raise FileOperationError("append", path, str(e)) from e
+
+    async def _delete_impl(self, path: str) -> None:
+        host = self._to_host(path)
+        try:
+            apath = anyio.Path(host)
+            if await apath.is_dir():
+                await apath.rmdir()
+            else:
+                await apath.unlink()
+        except FileNotFoundError as e:
+            raise FileOperationError("delete", path, "file not found") from e
+        except PermissionError as e:
+            raise FileOperationError("delete", path, "permission denied") from e
+        except OSError as e:
+            raise FileOperationError("delete", path, str(e)) from e
+
+    async def _list_dir_impl(self, path: str) -> list[str]:
+        host = self._to_host(path)
+        try:
+            entries: list[str] = []
+            async for entry in anyio.Path(host).iterdir():
+                entries.append(entry.name)
+            return sorted(entries)
+        except FileNotFoundError as e:
+            raise FileOperationError("list", path, "directory not found") from e
+        except NotADirectoryError as e:
+            raise FileOperationError("list", path, "not a directory") from e
+        except PermissionError as e:
+            raise FileOperationError("list", path, "permission denied") from e
+        except OSError as e:
+            raise FileOperationError("list", path, str(e)) from e
+
+    async def _list_dir_with_types_impl(self, path: str) -> list[tuple[str, bool]]:
+        host = self._to_host(path)
+        try:
+            result: list[tuple[str, bool]] = []
+            async for entry in anyio.Path(host).iterdir():
+                is_dir = await entry.is_dir()
+                result.append((entry.name, is_dir))
+            return sorted(result, key=lambda x: x[0])
+        except FileNotFoundError as e:
+            raise FileOperationError("list", path, "directory not found") from e
+        except NotADirectoryError as e:
+            raise FileOperationError("list", path, "not a directory") from e
+        except PermissionError as e:
+            raise FileOperationError("list", path, "permission denied") from e
+        except OSError as e:
+            raise FileOperationError("list", path, str(e)) from e
+
+    async def _exists_impl(self, path: str) -> bool:
+        host = self._to_host(path)
+        return await anyio.Path(host).exists()
+
+    async def _is_file_impl(self, path: str) -> bool:
+        host = self._to_host(path)
+        return await anyio.Path(host).is_file()
+
+    async def _is_dir_impl(self, path: str) -> bool:
+        host = self._to_host(path)
+        return await anyio.Path(host).is_dir()
+
+    async def _mkdir_impl(self, path: str, *, parents: bool = False) -> None:
+        host = self._to_host(path)
+        try:
+            await anyio.Path(host).mkdir(parents=parents, exist_ok=True)
+        except PermissionError as e:
+            raise FileOperationError("mkdir", path, "permission denied") from e
+        except OSError as e:
+            raise FileOperationError("mkdir", path, str(e)) from e
+
+    async def _move_impl(self, src: str, dst: str) -> None:
+        src_host = self._to_host(src)
+        dst_host = self._to_host(dst)
+        try:
+            await anyio.to_thread.run_sync(lambda: shutil.move(src_host, dst_host))  # type: ignore[reportAttributeAccessIssue]
+        except FileNotFoundError as e:
+            raise FileOperationError("move", src, "source not found") from e
+        except PermissionError as e:
+            raise FileOperationError("move", src, "permission denied") from e
+        except OSError as e:
+            raise FileOperationError("move", src, str(e)) from e
+
+    async def _copy_impl(self, src: str, dst: str) -> None:
+        src_host = self._to_host(src)
+        dst_host = self._to_host(dst)
+        try:
+            if src_host.is_dir():
+                await anyio.to_thread.run_sync(lambda: shutil.copytree(src_host, dst_host, symlinks=True))  # type: ignore[reportAttributeAccessIssue]
+            else:
+                await anyio.to_thread.run_sync(lambda: shutil.copy2(src_host, dst_host))  # type: ignore[reportAttributeAccessIssue]
+        except FileNotFoundError as e:
+            raise FileOperationError("copy", src, "source not found") from e
+        except PermissionError as e:
+            raise FileOperationError("copy", src, "permission denied") from e
+        except OSError as e:
+            raise FileOperationError("copy", src, str(e)) from e
+
+    async def _stat_impl(self, path: str) -> FileStat:
+        host = self._to_host(path)
+        try:
+            apath = anyio.Path(host)
+            st = await apath.stat()
+            return FileStat(
+                size=st.st_size,
+                mtime=st.st_mtime,
+                is_file=await apath.is_file(),
+                is_dir=await apath.is_dir(),
+            )
+        except FileNotFoundError as e:
+            raise FileOperationError("stat", path, "file not found") from e
+        except PermissionError as e:
+            raise FileOperationError("stat", path, "permission denied") from e
+        except OSError as e:
+            raise FileOperationError("stat", path, str(e)) from e
+
+    async def _glob_impl(self, pattern: str) -> list[str]:
+        """Find files matching glob pattern.
+
+        Relative patterns are globbed against the default mount's host path.
+        Absolute virtual patterns are matched to the appropriate mount and globbed there.
+        Results are returned as relative paths for relative patterns,
+        or absolute virtual paths for absolute patterns.
+        """
+        pattern_path = Path(pattern)
+        default_mount = self._find_mount(self._default_path)
+        default_host = default_mount.host_path.resolve()
+
+        if pattern_path.is_absolute():
+            # Find which mount this pattern belongs to
+            normalized = Path(os.path.normpath(pattern_path))
+            try:
+                mount = self._find_mount(normalized)
+            except PathNotAllowedError:
+                return []
+            mount_host = mount.host_path.resolve()
+            rel = normalized.relative_to(mount.virtual_path)
+            host_pattern = str(mount_host / rel)
+            matches = []
+            for p_str in glob_module.glob(host_pattern, recursive=True):
+                resolved = Path(p_str).resolve()
+                virtual_rel = self._to_virtual_rel(resolved)
+                if virtual_rel is not None:
+                    matches.append(virtual_rel)
+        else:
+            # Relative pattern: glob on default mount's host path
+            matches = []
+            for p in default_host.glob(pattern):
+                try:
+                    rel = p.relative_to(default_host)
+                    matches.append(str(rel))
+                except ValueError:
+                    matches.append(str(p))
+
+        # Sort by modification time (newest first)
+        def get_mtime(x: str) -> float:
+            try:
+                target = Path(x)
+                if target.is_absolute():
+                    # Absolute virtual path - translate to host for mtime
+                    host = self._to_host(x)
+                    return host.stat().st_mtime
+                else:
+                    return (default_host / target).stat().st_mtime
             except (OSError, FileNotFoundError):
                 return 0.0
 

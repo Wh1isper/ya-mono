@@ -9,25 +9,29 @@ from ya_agent_sdk.environment.local import (
     LocalEnvironment,
     LocalFileOperator,
     LocalShell,
+    VirtualLocalFileOperator,
+    VirtualMount,
 )
 
-# Docker environment is optional (requires docker package)
+# Sandbox environment is optional (requires docker package)
 try:
-    from ya_agent_sdk.environment.docker import (  # noqa: F401
-        DockerEnvironment,
+    from ya_agent_sdk.environment.sandbox import (  # noqa: F401
         DockerShell,
+        SandboxEnvironment,
     )
 
     _DOCKER_AVAILABLE = True
-except ImportError:
+except ModuleNotFoundError:
     _DOCKER_AVAILABLE = False
 
 __all__ = [
     "LocalEnvironment",
     "LocalFileOperator",
     "LocalShell",
+    "VirtualLocalFileOperator",
+    "VirtualMount",
 ]
 
-# Add Docker exports if available
+# Add Sandbox exports if available
 if _DOCKER_AVAILABLE:
-    __all__.extend(["DockerEnvironment", "DockerShell"])
+    __all__.extend(["DockerShell", "SandboxEnvironment"])

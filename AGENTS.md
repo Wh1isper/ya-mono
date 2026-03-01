@@ -8,7 +8,7 @@
 
 ## Key Features
 
-- **Environment-based Architecture**: Inject file operations, shell access, and resources via `Environment` for clean separation of concerns (LocalEnvironment, DockerEnvironment)
+- **Environment-based Architecture**: Inject file operations, shell access, and resources via `Environment` for clean separation of concerns (LocalEnvironment, SandboxEnvironment)
 - **Resumable Sessions**: Export/restore `AgentContext` state for multi-turn conversations across restarts
 - **Hierarchical Agents**: Subagent system with task delegation, tool inheritance, and markdown-based configuration
 - **Skills System**: Markdown-based instruction files with hot reload and progressive loading
@@ -33,8 +33,8 @@ ya_agent_sdk/
 │
 ├── environment/           # Environment management
 │   ├── base.py            # Environment ABC, FileOperator, Shell, ResourceRegistry, BaseResource
-│   ├── local.py           # LocalEnvironment for local filesystem
-│   └── docker.py          # DockerEnvironment for container-based execution
+│   ├── local.py           # LocalEnvironment, LocalFileOperator, VirtualLocalFileOperator
+│   └── sandbox.py         # SandboxEnvironment, DockerShell
 │
 ├── toolsets/              # Tool implementations
 │   ├── core/              # Core toolsets collection
@@ -212,7 +212,7 @@ See [docs/environment.md](docs/environment.md) for details:
 
 - Environment ABC: FileOperator, Shell, ResourceRegistry
 - `_setup`/`_teardown` pattern for custom environments
-- `LocalEnvironment` and `DockerEnvironment` usage
+- `LocalEnvironment` and `SandboxEnvironment` usage
 - `AsyncExitStack` for managing dependent context managers
 
 ### Resumable Resources

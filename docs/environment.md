@@ -2,7 +2,7 @@
 
 Resource management, lifecycle hooks, and environment implementations.
 
-> **Note**: Base abstractions (`Environment`, `FileOperator`, `Shell`, `ResourceRegistry`, etc.) are defined in the [y-agent-environment](https://github.com/wh1isper/y-agent-environment) protocol package. This SDK provides concrete implementations (`LocalEnvironment`, `DockerEnvironment`).
+> **Note**: Base abstractions (`Environment`, `FileOperator`, `Shell`, `ResourceRegistry`, etc.) are defined in the [y-agent-environment](https://github.com/wh1isper/y-agent-environment) protocol package. This SDK provides concrete implementations (`LocalEnvironment`, `SandboxEnvironment`).
 
 ## Overview
 
@@ -103,14 +103,33 @@ LocalEnvironment(
 )
 ```
 
-### DockerEnvironment
+### SandboxEnvironment
+
+Sandbox environment with virtual file operations and containerized shell.
+Both file operations and shell commands see the same path space (e.g., `/workspace`).
 
 ```python
-DockerEnvironment(
-    mount_dir=Path("/home/user/project"),
-    container_workdir="/workspace",
+# Single mount with Docker
+SandboxEnvironment(
+    mounts=[VirtualMount(Path("/home/user/project"), Path("/workspace"))],
     image="python:3.11",
     cleanup_on_exit=True,
+)
+
+# Multiple mounts
+SandboxEnvironment(
+    mounts=[
+        VirtualMount(Path("/home/user/project"), Path("/workspace/project")),
+        VirtualMount(Path("/home/user/.config"), Path("/workspace/.config")),
+    ],
+    work_dir="/workspace/project",
+    image="python:3.11",
+)
+
+# With custom shell backend
+SandboxEnvironment(
+    mounts=[VirtualMount(Path("/home/user/project"), Path("/workspace"))],
+    shell=my_custom_shell,
 )
 ```
 
