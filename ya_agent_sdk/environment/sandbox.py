@@ -1,15 +1,14 @@
-"""Docker environment implementation.
+"""Sandbox environment implementation.
 
-This module provides a Docker-based environment that:
-- Uses docker exec for shell commands (runs inside container)
-- Uses local filesystem for file operations (via mount directory)
-- Supports existing containers or creating new ones
-- Supports optional container cleanup on exit for cross-session sharing
+This module provides a sandboxed environment that:
+- Uses VirtualLocalFileOperator for path-mapped file operations
+- Uses a sandboxed shell (Docker by default, pluggable)
+- Presents a symmetric path space to the agent
 
 Architecture:
-    - File operations: Local filesystem at mount_dir (host side)
-    - Shell execution: Docker exec inside container at container_workdir
-    - Mount relationship: host mount_dir <-> container container_workdir
+    - File operations: Local filesystem at host_dir, presented as work_dir
+    - Shell execution: Sandboxed shell (e.g., Docker) at work_dir
+    - Both file ops and shell see the same path space (e.g., /workspace)
 """
 
 from __future__ import annotations
@@ -29,7 +28,7 @@ from y_agent_environment import (
     ShellTimeoutError,
 )
 
-from ya_agent_sdk.environment.local import LocalFileOperator
+from ya_agent_sdk.environment.local import VirtualLocalFileOperator, VirtualMount
 
 if TYPE_CHECKING:
     pass
@@ -39,7 +38,7 @@ try:
     import docker.errors
 except ImportError as e:
     raise ImportError(
-        "The 'docker' package is required for DockerEnvironment. Install it with: pip install ya-agent-sdk[docker]"
+        "The 'docker' package is required for SandboxEnvironment. Install it with: pip install ya-agent-sdk[docker]"
     ) from e
 
 
@@ -166,49 +165,55 @@ class DockerShell(Shell):
   <container-workdir>{self._container_workdir}</container-workdir>
   <default-timeout>{self._default_timeout}s</default-timeout>
   <note>Commands are executed inside the Docker container via docker exec.</note>
-  <note>File edits are performed on the host filesystem, which is mounted into the container.</note>
 </shell-execution>"""
 
 
-class DockerEnvironment(Environment):
-    """Docker-based environment with local file operations and containerized shell.
+class SandboxEnvironment(Environment):
+    """Sandboxed environment with virtual file operations and containerized shell.
 
     This environment provides:
-    - File operations via local filesystem (at mount_dir on host)
-    - Shell execution via docker exec (inside container at container_workdir)
-    - Support for existing containers (pass container_id)
-    - Support for creating new containers (pass image)
-    - Optional container cleanup on exit (cleanup_on_exit=False for cross-session sharing)
+    - File operations via VirtualLocalFileOperator (host I/O with virtual paths)
+    - Shell execution via a sandboxed shell (Docker by default, pluggable)
+    - Symmetric path space: both file ops and shell see the same paths
+    - Multiple mount support for mapping several host directories
 
-    The mount relationship:
-    - Host: mount_dir (e.g., /home/user/project)
-    - Container: container_workdir (e.g., /workspace)
-    - Files edited at mount_dir appear at container_workdir inside the container
+    The agent sees a unified virtual path space for both file operations and
+    shell commands. Internally, file I/O happens on the host filesystem while
+    shell commands execute in the sandbox.
 
     Example:
-        Using existing container (cross-session sharing):
+        Single mount with Docker:
 
         ```python
-        async with DockerEnvironment(
-            container_id="abc123",
-            mount_dir=Path("/home/user/project"),
-            container_workdir="/workspace",
-            cleanup_on_exit=False,  # Keep container for next session
+        async with SandboxEnvironment(
+            mounts=[VirtualMount(Path("/home/user/project"), Path("/workspace"))],
+            image="python:3.11",
         ) as env:
-            # File operations work on /home/user/project
             await env.file_operator.write_file("test.py", "print('hello')")
-            # Shell executes in container at /workspace
-            code, stdout, stderr = await env.shell.execute(["python", "test.py"])
+            code, stdout, stderr = await env.shell.execute("python test.py")
         ```
 
-        Creating new container:
+        Multiple mounts:
 
         ```python
-        async with DockerEnvironment(
+        async with SandboxEnvironment(
+            mounts=[
+                VirtualMount(Path("/home/user/project"), Path("/workspace/project")),
+                VirtualMount(Path("/home/user/.config"), Path("/workspace/.config")),
+            ],
+            work_dir="/workspace/project",
             image="python:3.11",
-            mount_dir=Path("/home/user/project"),
-            container_workdir="/workspace",
-            cleanup_on_exit=True,  # Remove container when done
+        ) as env:
+            ...
+        ```
+
+        Using a custom shell backend:
+
+        ```python
+        custom_shell = MySSHShell(host="remote", workdir="/workspace")
+        async with SandboxEnvironment(
+            mounts=[VirtualMount(Path("/home/user/project"), Path("/workspace"))],
+            shell=custom_shell,
         ) as env:
             ...
         ```
@@ -216,8 +221,9 @@ class DockerEnvironment(Environment):
 
     def __init__(
         self,
-        mount_dir: Path,
-        container_workdir: str = "/workspace",
+        mounts: list[VirtualMount],
+        work_dir: str | None = None,
+        shell: Shell | None = None,
         container_id: str | None = None,
         image: str | None = None,
         cleanup_on_exit: bool = True,
@@ -227,39 +233,45 @@ class DockerEnvironment(Environment):
         resource_state: ResourceRegistryState | None = None,
         resource_factories: dict[str, ResourceFactory] | None = None,
     ):
-        """Initialize DockerEnvironment.
+        """Initialize SandboxEnvironment.
 
         Args:
-            mount_dir: Host directory to mount into container.
-                This is where file operations are performed.
-            container_workdir: Path inside container where mount_dir is mounted.
-                This is where shell commands are executed.
-            container_id: Existing container ID to use.
-                If provided, the container must already be running.
-            image: Docker image to create new container from.
-                Required if container_id is not provided.
-            cleanup_on_exit: Whether to stop/remove container on exit.
-                Set to False for cross-session container sharing.
+            mounts: List of mount mappings from host paths to virtual paths.
+                At least one mount is required.
+            work_dir: Default working directory (virtual path) for shell commands.
+                If None, uses the first mount's virtual_path.
+            shell: Custom shell backend to use. If provided, container_id and
+                image are ignored. The shell should use work_dir as its
+                working directory for path symmetry.
+            container_id: Existing Docker container ID to use.
+                Ignored if shell is provided.
+            image: Docker image to create a new container from.
+                Required if neither shell nor container_id is provided.
+                Ignored if shell is provided.
+            cleanup_on_exit: Whether to stop/remove Docker container on exit.
+                Only applies to Docker-managed containers.
             shell_timeout: Default timeout for shell commands.
+                Only applies when creating a DockerShell (no custom shell).
             enable_tmp_dir: Whether to create a session temporary directory.
             tmp_base_dir: Base directory for creating session temporary directory.
             resource_state: Optional state to restore resources from.
-                Resources will be restored when entering the context.
             resource_factories: Optional dictionary of resource factories.
-                Required for any resources in resource_state.
 
         Raises:
-            ValueError: If neither container_id nor image is provided.
+            ValueError: If mounts is empty or no shell backend can be determined.
         """
-        if container_id is None and image is None:
-            raise ValueError("Either container_id or image must be provided")
+        if not mounts:
+            raise ValueError("At least one mount is required")
+        if shell is None and container_id is None and image is None:
+            raise ValueError("Either shell, container_id, or image must be provided")
 
         super().__init__(
             resource_state=resource_state,
             resource_factories=resource_factories,
         )
-        self._mount_dir = mount_dir.resolve()
-        self._container_workdir = container_workdir
+        self._mounts = mounts
+        self._work_dir = work_dir if work_dir is not None else str(mounts[0].virtual_path)
+        self._custom_shell = shell
         self._container_id = container_id
         self._image = image
         self._cleanup_on_exit = cleanup_on_exit
@@ -297,46 +309,48 @@ class DockerEnvironment(Environment):
         tmp_dir_path: Path | None = None
         if self._enable_tmp_dir:
             self._tmp_dir_obj = tempfile.TemporaryDirectory(
-                prefix="ya_agent_docker_",
+                prefix="ya_agent_sandbox_",
                 dir=str(self._tmp_base_dir) if self._tmp_base_dir else None,
             )
             tmp_dir_path = Path(self._tmp_dir_obj.name)
 
-        # Ensure mount_dir exists
-        self._mount_dir.mkdir(parents=True, exist_ok=True)
+        # Ensure all host directories exist
+        for mount in self._mounts:
+            mount.host_path.resolve().mkdir(parents=True, exist_ok=True)
 
-        # Build allowed paths for file operator
-        allowed_paths = [self._mount_dir]
-        if tmp_dir_path:
-            allowed_paths.append(tmp_dir_path)
+        # Create or verify Docker container (unless custom shell provided)
+        if self._custom_shell is None:
+            if self._container_id is None:
+                # Create new container
+                self._container_id = await self._create_container()
+                self._created_container = True
+            else:
+                # Verify existing container is running
+                await self._verify_container()
 
-        # Create or verify container
-        if self._container_id is None:
-            # Create new container
-            self._container_id = await self._create_container()
-            self._created_container = True
-        else:
-            # Verify existing container is running
-            await self._verify_container()
-
-        # Create file operator (local filesystem at mount_dir)
-        self._file_operator = LocalFileOperator(
-            default_path=self._mount_dir,
-            allowed_paths=allowed_paths,
+        # Create file operator (virtual paths mapped to host filesystem)
+        self._file_operator = VirtualLocalFileOperator(
+            mounts=self._mounts,
+            default_virtual_path=Path(self._work_dir),
             tmp_dir=tmp_dir_path,
         )
 
-        # Create shell (docker exec)
-        self._shell = DockerShell(
-            container_id=self._container_id,
-            container_workdir=self._container_workdir,
-            default_timeout=self._shell_timeout,
-        )
+        # Create shell
+        if self._custom_shell is not None:
+            self._shell = self._custom_shell
+        else:
+            if self._container_id is None:
+                raise RuntimeError("container_id must be set when no custom shell is provided")
+            self._shell = DockerShell(
+                container_id=self._container_id,
+                container_workdir=self._work_dir,
+                default_timeout=self._shell_timeout,
+            )
 
     async def _teardown(self) -> None:
         """Clean up container and tmp directory."""
         # Cleanup container if we created it and cleanup_on_exit is True
-        if self._cleanup_on_exit and self._container_id is not None:
+        if self._cleanup_on_exit and self._created_container and self._container_id is not None:
             await self._stop_container()
 
         # Cleanup tmp directory
@@ -348,18 +362,25 @@ class DockerEnvironment(Environment):
         self._shell = None
 
     async def _create_container(self) -> str:
-        """Create and start a new container."""
+        """Create and start a new container with all mounts and tmp_dir."""
         if self._image is None:
             raise ValueError("Image must be provided to create a new container")
 
         image = self._image  # Capture for closure
+        work_dir = self._work_dir
+        mounts = self._mounts
+        tmp_dir = self.tmp_dir
 
         def _run_container() -> str:
             try:
+                volumes = {str(m.host_path.resolve()): {"bind": str(m.virtual_path), "mode": "rw"} for m in mounts}
+                # Also mount tmp_dir into container so shell can access tmp files
+                if tmp_dir is not None:
+                    volumes[str(tmp_dir)] = {"bind": str(tmp_dir), "mode": "rw"}
                 container = self.client.containers.run(
                     image=image,
-                    volumes={str(self._mount_dir): {"bind": self._container_workdir, "mode": "rw"}},
-                    working_dir=self._container_workdir,
+                    volumes=volumes,
+                    working_dir=work_dir,
                     detach=True,
                     stdin_open=True,
                     tty=True,
@@ -377,24 +398,32 @@ class DockerEnvironment(Environment):
         return await loop.run_in_executor(None, _run_container)
 
     async def _verify_container(self) -> None:
-        """Verify that the existing container is running."""
+        """Verify that the existing container is running, auto-starting if stopped."""
         container_id = self._container_id
         if container_id is None:
             raise RuntimeError("Container ID is not set")
 
-        def _check_container() -> None:
+        def _check_and_start_container() -> None:
             try:
                 container = self.client.containers.get(container_id)
                 container.reload()
-                if container.status != "running":
-                    raise RuntimeError(f"Container {container_id} is not running (status: {container.status})")
+                if container.status == "running":
+                    return
+                # Auto-start stopped/exited containers (handles restart scenarios)
+                if container.status in ("exited", "created", "paused"):
+                    container.start()
+                    container.reload()
+                    if container.status != "running":
+                        raise RuntimeError(f"Container {container_id} failed to start (status: {container.status})")
+                else:
+                    raise RuntimeError(f"Container {container_id} is in unrecoverable state: {container.status}")
             except docker.errors.NotFound as e:
                 raise RuntimeError(f"Container not found: {container_id}") from e
             except docker.errors.APIError as e:
-                raise RuntimeError(f"Failed to verify container: {e}") from e
+                raise RuntimeError(f"Failed to verify/start container: {e}") from e
 
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, _check_container)
+        await loop.run_in_executor(None, _check_and_start_container)
 
     async def _stop_container(self) -> None:
         """Stop and remove the container."""
@@ -418,6 +447,9 @@ class DockerEnvironment(Environment):
     async def get_context_instructions(self) -> str:
         """Return combined context instructions for file operations and shell.
 
+        Since VirtualLocalFileOperator and shell share the same path space,
+        no mount-mapping instructions are needed.
+
         Raises:
             EnvironmentNotEnteredError: If environment has not been entered yet.
         """
@@ -427,16 +459,7 @@ class DockerEnvironment(Environment):
         file_instructions = await self.file_operator.get_context_instructions()
         shell_instructions = await self.shell.get_context_instructions()
 
-        mount_info = f"""<docker-environment>
-  <mount-mapping>
-    <host-path>{self._mount_dir}</host-path>
-    <container-path>{self._container_workdir}</container-path>
-  </mount-mapping>
-  <note>File edits modify files at host path, which are visible at container path inside the container.</note>
-  <note>Shell commands run inside the container at container path.</note>
-</docker-environment>"""
-
-        parts = [mount_info]
+        parts = []
         if file_instructions:
             parts.append(file_instructions)
         if shell_instructions:

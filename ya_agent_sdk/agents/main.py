@@ -349,8 +349,11 @@ def create_agent(
 
         With external environment management::
 
-            async with DockerEnvironment(image="python:3.11") as docker_env:
-                runtime = create_agent("openai:gpt-4", env=docker_env)
+            async with SandboxEnvironment(
+                mounts=[VirtualMount(Path("."), Path("/workspace"))],
+                image="python:3.11",
+            ) as sandbox_env:
+                runtime = create_agent("openai:gpt-4", env=sandbox_env)
 
         With templated system prompt::
 
