@@ -21,7 +21,7 @@ Example::
     )
 """
 
-from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart, UserPromptPart
+from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from pydantic_ai.tools import RunContext
 
 from ya_agent_sdk._logger import get_logger
@@ -65,9 +65,9 @@ async def process_auto_load_files(
     if not last_request:
         return message_history
 
-    # Skip if last request is tool return (only inject on user input)
-    if any(isinstance(part, ToolReturnPart) for part in last_request.parts):
-        return message_history
+    # Note: we inject into any last ModelRequest regardless of whether it contains
+    # ToolReturnPart. This is needed for handoff compatibility, where the last message
+    # is a ToolReturn + UserPromptPart (handoff-complete marker).
 
     # Load files
     file_contents: list[str] = []
