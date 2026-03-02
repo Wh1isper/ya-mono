@@ -4,7 +4,7 @@ Supports text files, images, videos, and audio files.
 All file operations use the FileOperator abstraction for remote filesystem support.
 """
 
-import asyncio
+import inspect
 from functools import cache
 from pathlib import Path
 from typing import Annotated, Any, cast
@@ -173,7 +173,7 @@ class ViewTool(BaseTool):
         if ctx.deps.tool_config and ctx.deps.tool_config.image_to_url_hook:
             try:
                 hook = ctx.deps.tool_config.image_to_url_hook
-                if asyncio.iscoroutinefunction(hook):
+                if inspect.iscoroutinefunction(hook):
                     result = await hook(ctx, image_data, media_type)
                 else:
                     # Run sync hook in threadpool to avoid blocking event loop
@@ -250,7 +250,7 @@ class ViewTool(BaseTool):
         if ctx.deps.tool_config and ctx.deps.tool_config.video_to_url_hook:
             try:
                 hook = ctx.deps.tool_config.video_to_url_hook
-                if asyncio.iscoroutinefunction(hook):
+                if inspect.iscoroutinefunction(hook):
                     result = await hook(ctx, video_data, media_type)
                 else:
                     # Run sync hook in threadpool to avoid blocking event loop
