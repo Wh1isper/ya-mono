@@ -124,6 +124,7 @@ def load_builtin_subagent_tools(
     model_settings: dict[str, Any] | str | None = None,
     history_processors: Sequence[HistoryProcessor[AgentContext]] | None = None,
     model_cfg: ModelConfig | None = None,
+    inherit_hooks: bool = False,
 ) -> list[type[BaseTool]]:
     """Load all builtin subagent tools from ya_agent_sdk/subagents/*.md.
 
@@ -159,6 +160,7 @@ def load_builtin_subagent_tools(
         model_settings=model_settings,
         history_processors=history_processors,
         model_cfg=model_cfg,
+        inherit_hooks=inherit_hooks,
     )
 
 
@@ -172,6 +174,7 @@ def load_unified_subagent_tool_from_dir(
     model_settings: dict[str, Any] | str | None = None,
     history_processors: Sequence[HistoryProcessor[AgentContext]] | None = None,
     model_cfg: ModelConfig | None = None,
+    inherit_hooks: bool = False,
 ) -> type[BaseTool]:
     """Load all subagent configs from a directory and create a unified tool.
 
@@ -211,6 +214,7 @@ def load_unified_subagent_tool_from_dir(
         model_settings=model_settings,
         history_processors=history_processors,
         model_cfg=model_cfg,
+        inherit_hooks=inherit_hooks,
     )
 
 
@@ -223,6 +227,7 @@ def load_builtin_unified_subagent_tool(
     model_settings: dict[str, Any] | str | None = None,
     history_processors: Sequence[HistoryProcessor[AgentContext]] | None = None,
     model_cfg: ModelConfig | None = None,
+    inherit_hooks: bool = False,
 ) -> type[BaseTool]:
     """Load all builtin subagents as a single unified tool.
 
@@ -260,6 +265,7 @@ def load_builtin_unified_subagent_tool(
         model_settings=model_settings,
         history_processors=history_processors,
         model_cfg=model_cfg,
+        inherit_hooks=inherit_hooks,
     )
 
 

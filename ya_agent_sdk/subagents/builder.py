@@ -76,6 +76,8 @@ def _collect_tools(config: SubagentConfig) -> list[str] | None:
 def _build_toolsets(
     config: SubagentConfig,
     parent_toolset: Toolset[Any],
+    *,
+    inherit_hooks: bool = False,
 ) -> list[Any]:
     """Build the toolset list for a subagent based on its configuration.
 
@@ -93,13 +95,15 @@ def _build_toolsets(
     if config.toolsets is not None:
         # When own toolsets exist and tools=None, only get auto_inherit (not all parent tools)
         if inherited_tools is None:
-            parent_subset = parent_toolset.subset([], include_auto_inherit=True)
+            parent_subset = parent_toolset.subset([], include_auto_inherit=True, inherit_hooks=inherit_hooks)
         else:
-            parent_subset = parent_toolset.subset(inherited_tools, include_auto_inherit=True)
+            parent_subset = parent_toolset.subset(
+                inherited_tools, include_auto_inherit=True, inherit_hooks=inherit_hooks
+            )
         return [*config.toolsets, parent_subset]
     else:
         # Current behavior: None means all parent tools
-        parent_subset = parent_toolset.subset(inherited_tools, include_auto_inherit=True)
+        parent_subset = parent_toolset.subset(inherited_tools, include_auto_inherit=True, inherit_hooks=inherit_hooks)
         return [parent_subset]
 
 
@@ -111,6 +115,7 @@ def build_subagent_agent(
     model_settings: ModelSettings | dict[str, Any] | str | None = None,
     history_processors: Sequence[HistoryProcessor[AgentContext]] | None = None,
     model_cfg: ModelConfig | None = None,
+    inherit_hooks: bool = False,
 ) -> tuple[Agent[AgentContext, str], ModelConfig | None]:
     """Build a pydantic-ai Agent from a SubagentConfig.
 
@@ -134,7 +139,7 @@ def build_subagent_agent(
     effective_model = _resolve_model(config, model)
     resolved_settings = _resolve_model_settings(config, model_settings)
     resolved_model_cfg = _resolve_model_cfg(config, model_cfg)
-    toolsets = _build_toolsets(config, parent_toolset)
+    toolsets = _build_toolsets(config, parent_toolset, inherit_hooks=inherit_hooks)
 
     agent: Agent[AgentContext, str] = Agent(
         model=infer_model(effective_model),

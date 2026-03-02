@@ -306,6 +306,7 @@ async def test_file_operator_get_context_instructions(tmp_path: Path) -> None:
 <file-system>
   <default-directory>/test/workspace</default-directory>
   <tmp-directory>/test/workspace</tmp-directory>
+  <tmp-directory-note>This is an agent-only temporary directory for intermediate files. Do not ask or expect users to interact with files in this directory.</tmp-directory-note>
   <file-trees>
     <directory path="/test/workspace">
 .git/ (skipped)

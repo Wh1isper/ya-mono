@@ -67,6 +67,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Sequence
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -161,6 +162,45 @@ Example::
     runtime = create_agent(
         "openai:gpt-4",
         model_wrapper=my_wrapper,
+    )
+"""
+
+
+# =============================================================================
+# Subagent Wrapper Type
+# =============================================================================
+
+
+SubagentWrapper = Callable[[str, str, dict[str, Any]], AbstractAsyncContextManager[None]]
+"""Type alias for subagent execution wrapper functions.
+
+A subagent wrapper receives agent_name, agent_id, and a metadata dict,
+and returns an async context manager that wraps the entire subagent execution.
+This enables creating observability spans (e.g., Langfuse agent observations)
+that properly nest all subagent activity underneath.
+
+Args:
+    agent_name: Name of the subagent (e.g., 'debugger', 'searcher').
+    agent_id: Unique identifier for this subagent invocation.
+    metadata: Context dict from get_wrapper_metadata().
+
+Returns:
+    An async context manager wrapping the subagent execution.
+
+Example::
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def trace_subagent(name: str, id: str, meta: dict[str, Any]):
+        with langfuse.start_as_current_observation(
+            name=f"agent:{name}", as_type="agent",
+        ):
+            yield
+
+    runtime = create_agent(
+        "openai:gpt-4",
+        subagent_wrapper=trace_subagent,
     )
 """
 
@@ -955,6 +995,38 @@ class AgentContext(BaseModel):
         runtime = create_agent(
             "openai:gpt-4",
             model_wrapper=my_wrapper,
+        )
+    """
+
+    subagent_wrapper: SubagentWrapper | None = Field(default=None, exclude=True)
+    """Optional wrapper applied around subagent execution.
+
+    When set, the SDK will call this wrapper as an async context manager
+    around the entire subagent run. This enables consumers to create
+    observability spans (e.g., Langfuse agent observations) that properly
+    nest all subagent activity underneath.
+
+    The wrapper receives agent_name, agent_id, and a metadata dict
+    from get_wrapper_metadata().
+
+    Note:
+        This field is excluded from serialization (not resumable).
+        Wrappers must be re-configured when restoring sessions.
+
+    Example::
+
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def trace_subagent(name: str, id: str, meta: dict[str, Any]):
+            with langfuse.start_as_current_observation(
+                name=f"agent:{name}", as_type="agent",
+            ):
+                yield
+
+        runtime = create_agent(
+            "openai:gpt-4",
+            subagent_wrapper=trace_subagent,
         )
     """
 

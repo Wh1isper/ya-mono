@@ -8,6 +8,7 @@ This module provides:
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Container
+from contextlib import AbstractAsyncContextManager, nullcontext
 from inspect import isawaitable
 from typing import Annotated, Any, cast
 from uuid import uuid4
@@ -266,29 +267,39 @@ def create_subagent_call_func(
                 )
             )
 
-            # Apply model wrapper if configured
-            original_model = agent.model
-            if deps.model_wrapper is not None:
+            # Wrap subagent execution with observability wrapper
+            subagent_ctx: AbstractAsyncContextManager[None] = nullcontext()
+            if deps.subagent_wrapper is not None:
                 wrapper_metadata = deps.get_wrapper_metadata()
-                wrapped = deps.model_wrapper(cast(Model, original_model), agent_name, wrapper_metadata)
-                agent.model = await wrapped if isawaitable(wrapped) else wrapped
+                subagent_ctx = deps.subagent_wrapper(agent_name, agent_id, wrapper_metadata)
+
+            # Save original model before entering wrapper so cleanup always works,
+            # even if subagent_wrapper.__aenter__ raises.
+            original_model = agent.model
 
             try:
-                result = await _run_subagent_iter(agent, sub_ctx, prompt, deps.subagent_history.get(agent_id))
-                result_output = result.output
-                request_count = result.usage().requests
+                async with subagent_ctx:
+                    # Apply model wrapper if configured
+                    if deps.model_wrapper is not None:
+                        wrapper_metadata = deps.get_wrapper_metadata()
+                        wrapped = deps.model_wrapper(cast(Model, original_model), agent_name, wrapper_metadata)
+                        agent.model = await wrapped if isawaitable(wrapped) else wrapped
 
-                # Store message history for future resume
-                deps.subagent_history[agent_id] = result.all_messages()
+                    result = await _run_subagent_iter(agent, sub_ctx, prompt, deps.subagent_history.get(agent_id))
+                    result_output = result.output
+                    request_count = result.usage().requests
 
-                # Record usage in extra_usages
-                if ctx.tool_call_id:
-                    model_id = cast(Model, agent.model).model_name
-                    deps.add_extra_usage(
-                        agent=agent_id,
-                        internal_usage=InternalUsage(model_id=model_id, usage=result.usage()),
-                        uuid=ctx.tool_call_id,
-                    )
+                    # Store message history for future resume
+                    deps.subagent_history[agent_id] = result.all_messages()
+
+                    # Record usage in extra_usages
+                    if ctx.tool_call_id:
+                        model_id = cast(Model, agent.model).model_name
+                        deps.add_extra_usage(
+                            agent=agent_id,
+                            internal_usage=InternalUsage(model_id=model_id, usage=result.usage()),
+                            uuid=ctx.tool_call_id,
+                        )
 
             except Exception as e:
                 success = False
