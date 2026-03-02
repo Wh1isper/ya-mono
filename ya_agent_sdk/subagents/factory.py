@@ -39,6 +39,7 @@ def create_subagent_tool_from_config(
     model_settings: ModelSettings | dict[str, Any] | str | None = None,
     history_processors: Sequence[HistoryProcessor[AgentContext]] | None = None,
     model_cfg: ModelConfig | None = None,
+    inherit_hooks: bool = False,
 ) -> type[BaseTool]:
     """Create a subagent tool from a SubagentConfig.
 
@@ -60,6 +61,7 @@ def create_subagent_tool_from_config(
         model_settings=model_settings,
         history_processors=history_processors,
         model_cfg=model_cfg,
+        inherit_hooks=inherit_hooks,
     )
 
     required_tools = config.tools
@@ -86,6 +88,7 @@ def create_subagent_tool_from_markdown(
     model_settings: dict[str, Any] | str | None = None,
     history_processors: Sequence[HistoryProcessor[AgentContext]] | None = None,
     model_cfg: ModelConfig | None = None,
+    inherit_hooks: bool = False,
 ) -> type[BaseTool]:
     """Create a subagent tool from markdown content or file path.
 
@@ -136,6 +139,7 @@ def create_subagent_tool_from_markdown(
         model_settings=model_settings,
         history_processors=history_processors,
         model_cfg=model_cfg,
+        inherit_hooks=inherit_hooks,
     )
 
 
@@ -147,6 +151,7 @@ def load_subagent_tools_from_dir(
     model_settings: dict[str, Any] | str | None = None,
     history_processors: Sequence[HistoryProcessor[AgentContext]] | None = None,
     model_cfg: ModelConfig | None = None,
+    inherit_hooks: bool = False,
 ) -> list[type[BaseTool]]:
     """Load all subagent tools from a directory.
 
@@ -183,6 +188,7 @@ def load_subagent_tools_from_dir(
             model_settings=model_settings,
             history_processors=history_processors,
             model_cfg=model_cfg,
+            inherit_hooks=inherit_hooks,
         )
         tools.append(tool)
 

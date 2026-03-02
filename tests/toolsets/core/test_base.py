@@ -526,3 +526,66 @@ def test_toolset_with_subagents_multiple_configs(agent_context: AgentContext) ->
     assert "dummy_tool" in result.tool_names
     assert "subagent_a" in result.tool_names
     assert "subagent_b" in result.tool_names
+
+
+def test_toolset_with_subagents_inherit_hooks(agent_context: AgentContext) -> None:
+    """Should pass inherit_hooks through to subagent toolsets."""
+    from unittest.mock import patch
+
+    from ya_agent_sdk.subagents import SubagentConfig
+
+    async def global_pre(ctx: Any, name: str, args: dict, metadata: dict) -> dict:
+        return args
+
+    toolset = Toolset(
+        tools=[DummyTool],
+        global_hooks=GlobalHooks(pre=global_pre),
+    )
+    config = SubagentConfig(
+        name="test_subagent",
+        description="A test subagent",
+        system_prompt="You are a test subagent.",
+        tools=["dummy_tool"],
+    )
+
+    # Track what inherit_hooks value reaches subset()
+    captured_kwargs: list[dict] = []
+    original_subset = Toolset.subset
+
+    def tracking_subset(self: Any, *args: Any, **kwargs: Any) -> Any:
+        captured_kwargs.append(kwargs)
+        return original_subset(self, *args, **kwargs)
+
+    with patch.object(Toolset, "subset", tracking_subset):
+        toolset.with_subagents([config], inherit_hooks=True)
+
+    # Verify inherit_hooks=True was passed to subset()
+    assert any(kw.get("inherit_hooks") is True for kw in captured_kwargs)
+
+
+def test_toolset_with_subagents_no_inherit_hooks_by_default(agent_context: AgentContext) -> None:
+    """Should default inherit_hooks=False in with_subagents."""
+    from unittest.mock import patch
+
+    from ya_agent_sdk.subagents import SubagentConfig
+
+    toolset = Toolset(tools=[DummyTool])
+    config = SubagentConfig(
+        name="test_subagent",
+        description="A test subagent",
+        system_prompt="You are a test subagent.",
+        tools=["dummy_tool"],
+    )
+
+    captured_kwargs: list[dict] = []
+    original_subset = Toolset.subset
+
+    def tracking_subset(self: Any, *args: Any, **kwargs: Any) -> Any:
+        captured_kwargs.append(kwargs)
+        return original_subset(self, *args, **kwargs)
+
+    with patch.object(Toolset, "subset", tracking_subset):
+        toolset.with_subagents([config])
+
+    # Verify inherit_hooks=False was passed (default)
+    assert any(kw.get("inherit_hooks") is False for kw in captured_kwargs)

@@ -38,6 +38,7 @@ from ya_agent_sdk.context import (
     ResumableState,
     RunContextMetadata,
     StreamEvent,
+    SubagentWrapper,
     ToolConfig,
 )
 from ya_agent_sdk.environment.local import LocalEnvironment
@@ -224,6 +225,7 @@ def create_agent(
     # --- Model Configuration ---
     model_settings: ModelSettings | None = None,
     model_wrapper: ModelWrapper | None = None,
+    subagent_wrapper: SubagentWrapper | None = None,
     output_type: OutputSpec[OutputT] = str,  # type: ignore[assignment]
     # --- Context ---
     context_type: type[AgentDepsT] = AgentContext,  # type: ignore[assignment]
@@ -253,6 +255,7 @@ def create_agent(
     subagent_configs: Sequence[SubagentConfig] | None = None,
     include_builtin_subagents: bool = False,
     unified_subagents: bool = False,
+    inherit_hooks: bool = True,
     # --- Agent ---
     agent_tools: Sequence[Any] | None = None,
     agent_name: str = "main",
@@ -379,6 +382,7 @@ def create_agent(
         model_cfg=effective_model_cfg,
         tool_config=effective_tool_config,
         model_wrapper=model_wrapper,
+        subagent_wrapper=subagent_wrapper,
         need_user_approve_tools=list(need_user_approve_tools) if need_user_approve_tools else [],
         need_user_approve_mcps=list(need_user_approve_mcps) if need_user_approve_mcps else [],
         **(extra_context_kwargs or {}),
@@ -440,6 +444,7 @@ def create_agent(
                 history_processors=cast(list[HistoryProcessor[AgentContext]], all_processors),
                 model_cfg=effective_model_cfg,
                 unified=unified_subagents,
+                inherit_hooks=inherit_hooks,
             )
 
     all_toolsets.append(core_toolset)

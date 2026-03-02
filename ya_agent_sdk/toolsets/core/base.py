@@ -296,6 +296,7 @@ class Toolset(BaseToolset[AgentDepsT]):
         history_processors: Sequence[HistoryProcessor[AgentContext]] | None = None,
         model_cfg: ModelConfig | None = None,
         unified: bool = False,
+        inherit_hooks: bool = False,
     ) -> Toolset[AgentDepsT]:
         """Create a new Toolset that includes subagent tools.
 
@@ -354,6 +355,7 @@ class Toolset(BaseToolset[AgentDepsT]):
                 model_settings=model_settings,
                 history_processors=history_processors,
                 model_cfg=model_cfg,
+                inherit_hooks=inherit_hooks,
             )
             subagent_tools = [unified_tool]
         else:
@@ -366,6 +368,7 @@ class Toolset(BaseToolset[AgentDepsT]):
                     model_settings=model_settings,
                     history_processors=history_processors,
                     model_cfg=model_cfg,
+                    inherit_hooks=inherit_hooks,
                 )
                 for cfg in configs
             ]

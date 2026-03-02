@@ -72,6 +72,7 @@ def _build_subagent_entry(
     model_settings: ModelSettings | dict[str, Any] | str | None = None,
     history_processors: Sequence[HistoryProcessor[AgentContext]] | None = None,
     model_cfg: ModelConfig | None = None,
+    inherit_hooks: bool = False,
 ) -> SubagentEntry:
     """Build a SubagentEntry from config."""
     agent, resolved_model_cfg = build_subagent_agent(
@@ -81,6 +82,7 @@ def _build_subagent_entry(
         model_settings=model_settings,
         history_processors=history_processors,
         model_cfg=model_cfg,
+        inherit_hooks=inherit_hooks,
     )
     call_func = create_subagent_call_func(agent, model_cfg=resolved_model_cfg)
 
@@ -136,6 +138,7 @@ def _build_registry(
     model_settings: ModelSettings | dict[str, Any] | str | None = None,
     history_processors: Sequence[HistoryProcessor[AgentContext]] | None = None,
     model_cfg: ModelConfig | None = None,
+    inherit_hooks: bool = False,
 ) -> dict[str, SubagentEntry]:
     """Build registry of subagent entries from configs."""
     registry: dict[str, SubagentEntry] = {}
@@ -147,6 +150,7 @@ def _build_registry(
             model_settings=model_settings,
             history_processors=history_processors,
             model_cfg=model_cfg,
+            inherit_hooks=inherit_hooks,
         )
         registry[config.name] = entry
     return registry
@@ -162,6 +166,7 @@ def create_unified_subagent_tool(
     model_settings: ModelSettings | dict[str, Any] | str | None = None,
     history_processors: Sequence[HistoryProcessor[AgentContext]] | None = None,
     model_cfg: ModelConfig | None = None,
+    inherit_hooks: bool = False,
 ) -> type[BaseTool]:
     """Create a unified subagent tool from multiple SubagentConfigs.
 
@@ -210,6 +215,7 @@ def create_unified_subagent_tool(
         model_settings=model_settings,
         history_processors=history_processors,
         model_cfg=model_cfg,
+        inherit_hooks=inherit_hooks,
     )
 
     # Store references for closure
