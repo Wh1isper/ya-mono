@@ -126,8 +126,8 @@ async def test_auto_load_files_handles_missing_file(tmp_path: Path) -> None:
             assert "Failed to load" in content
 
 
-async def test_auto_load_files_skips_tool_return(tmp_path: Path) -> None:
-    """Should skip injection when last request is tool return."""
+async def test_auto_load_files_injects_into_tool_return(tmp_path: Path) -> None:
+    """Should inject into last request even if it contains tool return parts."""
     test_file = tmp_path / "test.txt"
     test_file.write_text("Content")
 
@@ -142,7 +142,7 @@ async def test_auto_load_files_skips_tool_return(tmp_path: Path) -> None:
             mock_ctx = MagicMock()
             mock_ctx.deps = ctx
 
-            # Last request is a tool return
+            # Last request is a tool return (e.g. after handoff)
             user_request = ModelRequest(parts=[UserPromptPart(content="Do something")])
             response = ModelResponse(parts=[TextPart(content="Response")])
             tool_return = ModelRequest(parts=[ToolReturnPart(tool_call_id="tc1", tool_name="tool", content="result")])
@@ -151,11 +151,13 @@ async def test_auto_load_files_skips_tool_return(tmp_path: Path) -> None:
 
             await process_auto_load_files(mock_ctx, history)
 
-            # Should not inject into tool_return
-            assert len(tool_return.parts) == 1
+            # Should inject into last request regardless of ToolReturnPart
+            assert len(tool_return.parts) == 2
+            assert isinstance(tool_return.parts[1], UserPromptPart)
+            assert "auto-loaded-files" in tool_return.parts[1].content
 
-            # auto_load_files should NOT be cleared (waiting for user input)
-            assert ctx.auto_load_files == ["test.txt"]
+            # auto_load_files should be cleared
+            assert ctx.auto_load_files == []
 
 
 async def test_auto_load_files_no_file_operator(tmp_path: Path) -> None:

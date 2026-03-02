@@ -3,29 +3,102 @@
 This module provides a history processor that injects handoff summaries
 into the message history when a context reset occurs.
 
+Uses a virtual tool call pattern so the model understands handoff as a tool
+operation result, avoiding confusion when users mention "handoff" in conversation.
+
 Note:
     This processor must be used together with `ya_agent_sdk.toolsets.context.handoff.HandoffTool`.
     See HandoffTool for usage example.
 """
 
+from collections.abc import Sequence
 from uuid import uuid4
 
+from pydantic_ai import UserContent
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    SystemPromptPart,
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
 )
 from pydantic_ai.tools import RunContext
 
+from ya_agent_sdk._logger import get_logger
 from ya_agent_sdk.context import AgentContext
 from ya_agent_sdk.events import (
     HandoffCompleteEvent,
     HandoffFailedEvent,
     HandoffStartEvent,
 )
+
+logger = get_logger(__name__)
+
+
+def _build_handoff_messages(
+    summary: str,
+    original_prompt: str | Sequence[UserContent] | None = None,
+    steering_messages: list[str] | None = None,
+    tool_call_id: str = "handoff-ack",
+) -> list[ModelMessage]:
+    """Build compacted message history after handoff.
+
+    Uses a virtual tool call pattern:
+    1. Request with system prompt + original user prompt
+    2. Response with virtual handoff tool call
+    3. Request with handoff tool return (summary) + steering + handoff-complete marker
+
+    This structure makes it clear to the model that the handoff summary is a tool
+    result, not the model's own output, avoiding confusion when users mention "handoff".
+
+    Args:
+        summary: The handoff summary content.
+        original_prompt: The initial user prompt from the session.
+        steering_messages: Additional steering messages from user during execution.
+        tool_call_id: Tool call ID for the virtual handoff call.
+
+    Returns:
+        List of ModelMessage representing the compacted history.
+    """
+    # Message 1: system + original user prompt
+    # Placeholder will be replaced by create_system_prompt_filter downstream
+    request_parts: list[SystemPromptPart | UserPromptPart] = [
+        SystemPromptPart(content="Placeholder system prompt"),
+    ]
+    if original_prompt is not None:
+        request_parts.append(UserPromptPart(content=original_prompt))
+
+    # Message 2: virtual handoff tool call
+    tool_call = ToolCallPart(
+        tool_name="handoff",
+        args={"message": {"content": "[handoff summary injected as tool return]"}},
+        tool_call_id=tool_call_id,
+    )
+
+    # Message 3: handoff tool return + steering + handoff-complete
+    final_parts: list[ToolReturnPart | UserPromptPart] = [
+        ToolReturnPart(
+            tool_name="handoff",
+            content=summary,
+            tool_call_id=tool_call_id,
+        ),
+    ]
+
+    if steering_messages:
+        for steering in steering_messages:
+            final_parts.append(UserPromptPart(content=f"[User Steering] {steering}"))
+
+    final_parts.append(
+        UserPromptPart(content="<handoff-complete>Handoff done. Context restored. Resume task.</handoff-complete>")
+    )
+
+    return [
+        ModelRequest(parts=request_parts),
+        ModelResponse(parts=[tool_call]),
+        ModelRequest(parts=final_parts),
+    ]
 
 
 async def process_handoff_message(
@@ -37,6 +110,14 @@ async def process_handoff_message(
     This is a pydantic-ai history_processor that can be passed to Agent's
     history_processors parameter. When a handoff occurs, the previous context
     is cleared but a summary message is preserved in ctx.deps.handoff_message.
+
+    Uses a virtual tool call pattern:
+    1. Request with system prompt + original user prompt
+    2. Response with virtual handoff tool call
+    3. Request with handoff tool return (summary) + steering + handoff-complete marker
+
+    This ensures the model understands the handoff summary as a tool result,
+    and downstream filters like auto_load_files can append to the last request.
 
     Note: Subagents created via enter_subagent() have handoff_message cleared,
     so they won't be affected by the main agent's handoff state.
@@ -68,66 +149,26 @@ async def process_handoff_message(
         # Emit start event
         await agent_ctx.emit_event(HandoffStartEvent(event_id=event_id, message_count=original_message_count))
 
-        # Find the last true user input ModelRequest (has UserPromptPart, no ToolReturnPart)
-        last_user_request: ModelRequest | None = None
-        for msg in reversed(message_history):
-            if not isinstance(msg, ModelRequest):
-                continue
-            has_user_prompt = any(isinstance(p, UserPromptPart) for p in msg.parts)
-            has_tool_return = any(isinstance(p, ToolReturnPart) for p in msg.parts)
-            if has_user_prompt and not has_tool_return:
-                last_user_request = msg
-                break
-
-        if not last_user_request:
-            return message_history
-
         handoff_content = ctx.deps.handoff_message
-
-        # Append handoff summary after user's current request
-        handoff_part = UserPromptPart(
-            content=f"""<handoff-content>{handoff_content}</handoff-content>
-<system-reminder>Handoff done, continue the task and do not repeat the handoff.</system-reminder>""",
-        )
-        last_user_request.parts = [
-            UserPromptPart(content="<previous-user-request>"),
-            *last_user_request.parts,
-            UserPromptPart(content="</previous-user-request>"),
-            handoff_part,
-        ]
-        # Clear handoff state
-        ctx.deps.handoff_message = None
 
         # Virtual tool call ID for the handoff acknowledgment
         virtual_tool_call_id = f"handoff-ack-{event_id}"
 
-        # Return truncated history with:
-        # 1. User request with handoff content
-        # 2. Virtual handoff tool call (so model knows it already called handoff)
-        # 3. Virtual tool return (completes the tool call sequence)
-        result: list[ModelMessage] = [
-            last_user_request,
-            # Virtual ModelResponse: model "already" called handoff
-            ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="handoff",
-                        args={"message": {"content": "[handoff summary above]"}},
-                        tool_call_id=virtual_tool_call_id,
-                    )
-                ]
-            ),
-            # Virtual ModelRequest: tool return acknowledging handoff
-            ModelRequest(
-                parts=[
-                    ToolReturnPart(
-                        tool_name="handoff",
-                        content="Handoff acknowledged. Context restored. Continue with the task.",
-                        tool_call_id=virtual_tool_call_id,
-                    )
-                ]
-            ),
-        ]
+        # Build compacted messages using virtual tool call pattern
+        result = _build_handoff_messages(
+            handoff_content,
+            agent_ctx.user_prompts,
+            agent_ctx.steering_messages or None,
+            tool_call_id=virtual_tool_call_id,
+        )
+
+        if agent_ctx.steering_messages:
+            logger.debug("Including %d steering messages in handoff", len(agent_ctx.steering_messages))
+
+        # Clear handoff state
+        ctx.deps.handoff_message = None
+        # Clear steering_messages after successful handoff (content is now in summary)
+        agent_ctx.steering_messages.clear()
 
         # Emit complete event with the actual handoff content
         await agent_ctx.emit_event(
