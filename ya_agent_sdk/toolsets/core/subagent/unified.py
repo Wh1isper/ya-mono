@@ -127,6 +127,12 @@ def _generate_instruction(
             lines.append(instruction.strip())
             lines.append("</subagent>\n")
 
+    lines.append("<parallel-execution>")
+    lines.append("For independent tasks, launch multiple delegate calls in the same turn for parallel execution.")
+    lines.append("All subagents run concurrently; process their combined results after all complete.")
+    lines.append("Sequential delegate calls (one per turn) run serially -- only use when tasks depend on each other.")
+    lines.append("</parallel-execution>")
+
     return "\n".join(lines)
 
 
