@@ -25,22 +25,23 @@ Status: pending -> in_progress -> completed
 - Set up dependencies early when planning
 </dependencies>
 
-<parallel-with-subagents>
-For independent tasks, delegate to subagents for parallel execution:
+<delegate-with-subagents>
+Delegate calls are blocking -- the agent waits until the subagent finishes.
+Multiple delegate calls in the SAME response run concurrently (parallel-but-blocking).
 
 1. Create tasks and identify which can run in parallel
-2. Delegate multiple tasks simultaneously by calling delegate multiple times in the same turn:
+2. Call multiple delegates in a single response to run them concurrently:
    - `delegate(subagent_name="debugger", prompt="Work on T1: ...")`
    - `delegate(subagent_name="searcher", prompt="Research T2: ...")`
-3. When subagents return, update task status accordingly
+3. The agent is blocked until ALL delegates in that response complete
+4. When subagents return, update task status accordingly
 
-Note: True parallel execution requires calling multiple delegate tools in the same turn.
-Sequential delegate calls will execute serially.
+Note: Sequential delegate calls (one per turn) run serially.
 
 Best for:
 - Multiple independent investigations (e.g., debug + search docs)
 - Parallel code analysis across different files
 - Concurrent research on different topics
-</parallel-with-subagents>
+</delegate-with-subagents>
 
 </task-manager-guidelines>

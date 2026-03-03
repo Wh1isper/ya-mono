@@ -291,18 +291,20 @@ subagent_tools = load_builtin_subagent_tools(parent_toolset, model="anthropic:cl
 3. **Minimal Required Tools**: Only require essential tools; use `optional_tools` for nice-to-haves
 4. **Clear Instructions**: Write `instruction` to help parent agent decide when to delegate
 5. **Handle Missing Tools**: Subagents auto-disable when required tools are unavailable
-6. **Parallel Execution**: Use with task manager to delegate independent tasks to subagents in parallel
+6. **Execution Model**: Delegate calls are blocking. Multiple delegates in the same model response run concurrently (parallel-but-blocking), but the agent waits until all complete. This is not async/fire-and-forget.
 
 ## Integration with Task Manager
 
-Subagents work well with the task manager for parallel execution of independent tasks:
+Subagents work well with the task manager for concurrent execution of independent tasks.
+Note that delegate calls are **blocking** -- multiple delegates in the same model response
+run concurrently, but the agent cannot do other work while waiting for them.
 
 ```python
 # In your workflow:
 # 1. Create tasks with task_create
-# 2. Delegate independent tasks to subagents via delegate tool
-# 3. Each subagent works on its task concurrently
-# 4. Update task status when subagent returns
+# 2. Call multiple delegates in a single response for concurrent execution
+# 3. Agent is blocked until ALL delegates in that response complete
+# 4. Update task status when subagents return
 ```
 
 The task manager can assign tasks to subagents using the `owner` field:
