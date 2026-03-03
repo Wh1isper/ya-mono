@@ -78,6 +78,7 @@ from ya_agent_sdk.utils import get_latest_request_usage
 
 # Import state management from app.state (re-export TUIMode, TUIState for backward compatibility)
 from yaacli.app.state import TUIMode
+from yaacli.background import BACKGROUND_MANAGER_KEY, BackgroundTaskManager
 from yaacli.browser import BrowserManager
 from yaacli.config import ConfigManager, YaacliConfig
 from yaacli.display import EventRenderer, RichRenderer, ToolMessage
@@ -235,6 +236,9 @@ class TUIApp:
     _pending_approvals: list[ToolCallPart] = field(default_factory=list, init=False)
     _current_approval_index: int = field(default=0, init=False)
 
+    # Background task completion tracking
+    _pending_bus_check_needed: bool = field(default=False, init=False)
+
     @property
     def mode(self) -> TUIMode:
         """Current agent mode."""
@@ -289,6 +293,13 @@ class TUIApp:
 
         logger.info("TUIApp initialized")
         configure_tui_logging(log_queue, verbose=self.verbose)
+
+        # Set core_toolset on BackgroundTaskManager so it can find the delegate tool
+        bg_manager = self._get_background_manager()
+        if bg_manager and self._runtime:
+            bg_manager.set_core_toolset(self._runtime.core_toolset)
+            bg_manager.set_completion_callback(self._on_background_task_complete)
+
         return self
 
     async def __aexit__(
@@ -298,6 +309,11 @@ class TUIApp:
         exc_tb: TracebackType | None,
     ) -> bool | None:
         """Cleanup resources."""
+        # Clear completion callback
+        bg_manager = self._get_background_manager()
+        if bg_manager:
+            bg_manager.set_completion_callback(None)
+
         # Cancel any running agent task
         if self._agent_task and not self._agent_task.done():
             self._agent_task.cancel()
@@ -762,15 +778,24 @@ class TUIApp:
                 phase_display = {"thinking": "Thinking...", "tools": "Running tools..."}.get(
                     self._agent_phase, "Running..."
                 )
-                return [
+                parts = [
                     (mode_style, f" {self._mode.value.upper()} "),
                     ("class:status-bar", " | "),
                     ("class:status-bar", phase_display),
                     ("class:status-bar", " | "),
                     ("class:status-bar", f"Context: {context_pct}%"),
+                ]
+                bg_count = self._get_background_task_count()
+                if bg_count > 0:
+                    parts.extend([
+                        ("class:status-bar", " | "),
+                        ("class:status-bar.warning", f"BG: {bg_count} running"),
+                    ])
+                parts.extend([
                     ("class:status-bar", " | "),
                     ("class:status-bar", "Ctrl+C: Interrupt "),
-                ]
+                ])
+                return parts
         else:
             # IDLE: show input mode and scroll hint
             if self._input_mode == "send":
@@ -780,19 +805,28 @@ class TUIApp:
 
             scroll_hint = "Shift+Up/Down: Scroll" if sys.platform == "darwin" else "Ctrl+Up/Down: Scroll"
 
-            return [
+            parts = [
                 (mode_style, f" {self._mode.value.upper()} "),
                 ("class:status-bar", " | "),
                 ("class:status-bar", f"State: {state_text}"),
                 ("class:status-bar", " | "),
                 ("class:status-bar", f"Context: {context_pct}%"),
+            ]
+            bg_count = self._get_background_task_count()
+            if bg_count > 0:
+                parts.extend([
+                    ("class:status-bar", " | "),
+                    ("class:status-bar.warning", f"BG: {bg_count} running"),
+                ])
+            parts.extend([
                 ("class:status-bar", " | "),
                 ("class:status-bar", input_mode_text),
                 ("class:status-bar", " | "),
                 ("class:status-bar", scroll_hint),
                 ("class:status-bar", " | "),
                 ("class:status-bar", "Ctrl+C: Exit "),
-            ]
+            ])
+            return parts
 
     def _get_prompt(self) -> str:
         """Get the input prompt based on current state."""
@@ -880,6 +914,56 @@ class TUIApp:
 
         return parts
 
+    def _get_background_manager(self) -> BackgroundTaskManager | None:
+        """Get BackgroundTaskManager from environment resources."""
+        if self._runtime and self._runtime.env and self._runtime.env.resources:
+            resource = self._runtime.env.resources.get(BACKGROUND_MANAGER_KEY)
+            if isinstance(resource, BackgroundTaskManager):
+                return resource
+        return None
+
+    def _get_background_task_count(self) -> int:
+        """Get the number of active background tasks."""
+        manager = self._get_background_manager()
+        if manager is None:
+            return 0
+        return len(manager.active_tasks)
+
+    def _on_background_task_complete(self, agent_id: str) -> None:
+        """Callback invoked when a background task completes.
+
+        This is called synchronously from the asyncio event loop when
+        BackgroundDelegateTool finishes. If the agent is idle and there
+        are pending bus messages, we schedule a new agent turn.
+
+        Args:
+            agent_id: The ID of the completed background agent.
+        """
+        # Only trigger if agent is idle - if running, we set a flag to check
+        # after the current turn completes (see _check_pending_bus_messages)
+        if self._state != TUIState.IDLE:
+            logger.debug("Background task %s completed while agent running, will check after turn", agent_id)
+            self._pending_bus_check_needed = True
+            return
+
+        # Check if there are actually pending bus messages
+        ctx = self.runtime.ctx
+        if not ctx.message_bus.has_pending(ctx.agent_id):
+            logger.debug("Background task %s completed but no pending messages", agent_id)
+            return
+
+        logger.info("Background task %s completed, triggering agent turn", agent_id)
+
+        # Show UI notification that background task completed
+        self._append_system_output(f"Background task completed: {agent_id}")
+
+        # Set state atomically BEFORE create_task to prevent race
+        self._state = TUIState.RUNNING
+
+        # Schedule agent turn - empty prompt, the bus message IS the input
+        self._agent_task = asyncio.create_task(self._run_agent(""))
+        self._agent_task.add_done_callback(self._on_agent_task_done)
+
     def _on_agent_task_done(self, task: asyncio.Task[None]) -> None:
         """Callback when agent task completes - handles uncaught exceptions."""
         if task.cancelled():
@@ -894,9 +978,43 @@ class TUIApp:
             if self._app:
                 self._app.invalidate()
 
+    def _check_pending_bus_messages(self) -> None:
+        """Check for pending bus messages and trigger agent turn if needed.
+
+        Called after agent execution completes to handle messages that
+        arrived after the last LLM request (e.g., from background tasks
+        that completed while we were still running).
+        """
+        # Only proceed if flag was set (background task completed during run)
+        if not self._pending_bus_check_needed:
+            return
+        self._pending_bus_check_needed = False
+
+        # Must be idle now
+        if self._state != TUIState.IDLE:
+            return
+
+        # Check if there are actually pending bus messages
+        ctx = self.runtime.ctx
+        if not ctx.message_bus.has_pending(ctx.agent_id):
+            return
+
+        logger.info("Pending bus messages detected after agent turn, triggering new turn")
+
+        # Show UI notification
+        self._append_system_output("Processing pending messages from background tasks...")
+
+        # Set state atomically BEFORE create_task to prevent race
+        self._state = TUIState.RUNNING
+
+        # Schedule agent turn - empty prompt, the bus message IS the input
+        self._agent_task = asyncio.create_task(self._run_agent(""))
+        self._agent_task.add_done_callback(self._on_agent_task_done)
+
     async def _run_agent(self, user_input: str) -> None:
         """Execute agent with HITL inner loop for tool approvals."""
         self._state = TUIState.RUNNING
+        self._pending_bus_check_needed = False
         self._tool_messages.clear()
         self._printed_tool_calls.clear()
         self._subagent_states.clear()
@@ -939,14 +1057,22 @@ class TUIApp:
             self._finalize_streaming_thinking()
             # Reset all HITL state
             self._reset_hitl_state()
-            # Drain any pending bus messages to prevent leaking into next run
-            # (e.g., steering messages sent just before interruption)
-            self.runtime.ctx.consume_messages()
+            # NOTE: Do NOT call consume_messages() here.
+            # It would swallow background subagent results that arrived after
+            # the last LLM request. The inject_bus_messages filter already
+            # tracks consumed IDs for idempotency, so messages won't duplicate.
             self._steering_items.clear()
+            # Clear user steering messages that were not consumed this turn.
+            # These are messages injected via bus from user during execution.
+            # If not cleared, they would leak into unrelated future tasks.
+            self.runtime.ctx.steering_messages.clear()
             self._agent_phase = "idle"
             self._state = TUIState.IDLE
             if self._app:
                 self._app.invalidate()
+            # Check if we need to trigger a new turn for pending bus messages
+            # (e.g., background task completed while we were running)
+            self._check_pending_bus_messages()
 
     def _reset_hitl_state(self) -> None:
         """Reset all HITL-related state variables.
@@ -1315,17 +1441,33 @@ class TUIApp:
             self._update_block(line_index, rendered.rstrip())
             self._throttled_invalidate()
 
+    @staticmethod
+    def _is_background_agent(agent_id: str) -> bool:
+        """Check if an agent_id belongs to a background subagent."""
+        return "-bg-" in agent_id
+
     def _handle_stream_event(self, event: StreamEvent) -> None:
         """Handle a stream event from agent execution."""
         message_event = event.event
         agent_id = event.agent_id
 
+        # Suppress all events from background subagents.
+        # Their results are delivered via message bus, not streamed.
+        if self._is_background_agent(agent_id):
+            return
+
         # Handle subagent lifecycle events (from any agent)
         if isinstance(message_event, SubagentStartEvent):
+            # Suppress background subagent start events
+            if self._is_background_agent(message_event.agent_id):
+                return
             self._handle_subagent_start(message_event)
             return
 
         if isinstance(message_event, SubagentCompleteEvent):
+            # Suppress background subagent complete events
+            if self._is_background_agent(message_event.agent_id):
+                return
             self._handle_subagent_complete(message_event)
             return
 

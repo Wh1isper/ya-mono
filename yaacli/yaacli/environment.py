@@ -18,6 +18,7 @@ from pathlib import Path
 from y_agent_environment import ResourceFactory, ResourceRegistryState
 
 from ya_agent_sdk.environment.local import LocalEnvironment
+from yaacli.background import BACKGROUND_MANAGER_KEY, BackgroundTaskManager
 from yaacli.processes import PROCESS_MANAGER_KEY, ProcessManager
 
 
@@ -49,14 +50,18 @@ class TUIEnvironment(LocalEnvironment):
             resource_factories=resource_factories,
         )
         self._process_manager: ProcessManager | None = None
+        self._background_manager: BackgroundTaskManager | None = None
 
     async def _setup(self) -> None:
         await super()._setup()
         self._process_manager = ProcessManager()
         self.resources.set(PROCESS_MANAGER_KEY, self._process_manager)
+        self._background_manager = BackgroundTaskManager()
+        self.resources.set(BACKGROUND_MANAGER_KEY, self._background_manager)
 
     async def _teardown(self) -> None:
         self._process_manager = None
+        self._background_manager = None
         await super()._teardown()
 
     @property
@@ -65,3 +70,10 @@ class TUIEnvironment(LocalEnvironment):
         if self._process_manager is None:
             raise RuntimeError("TUIEnvironment not entered. Use 'async with TUIEnvironment() as env:'")
         return self._process_manager
+
+    @property
+    def background_manager(self) -> BackgroundTaskManager:
+        """Get the BackgroundTaskManager resource."""
+        if self._background_manager is None:
+            raise RuntimeError("TUIEnvironment not entered. Use 'async with TUIEnvironment() as env:'")
+        return self._background_manager
