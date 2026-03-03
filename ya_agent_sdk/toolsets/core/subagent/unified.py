@@ -127,11 +127,13 @@ def _generate_instruction(
             lines.append(instruction.strip())
             lines.append("</subagent>\n")
 
-    lines.append("<parallel-execution>")
-    lines.append("For independent tasks, launch multiple delegate calls in the same turn for parallel execution.")
-    lines.append("All subagents run concurrently; process their combined results after all complete.")
-    lines.append("Sequential delegate calls (one per turn) run serially -- only use when tasks depend on each other.")
-    lines.append("</parallel-execution>")
+    lines.append("<execution-model>")
+    lines.append("Delegate calls are BLOCKING -- the agent waits for each subagent to finish before proceeding.")
+    lines.append("Multiple delegate calls in the SAME model response run concurrently (parallel), but the agent")
+    lines.append("is still blocked until ALL of them complete. This is parallel-but-blocking, not async.")
+    lines.append("For independent tasks, call multiple delegates in a single response to run them in parallel.")
+    lines.append("Sequential delegate calls (one per turn) run serially.")
+    lines.append("</execution-model>")
 
     return "\n".join(lines)
 
