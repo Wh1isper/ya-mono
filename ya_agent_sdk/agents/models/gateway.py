@@ -40,10 +40,10 @@ def make_gateway_provider(
 
     Usage:
         # With extra headers (new client per call)
-        model = infer_model("gemini:...", extra_headers={"x-session-id": session_id})
+        model = infer_model("google-gla:...", extra_headers={"x-session-id": session_id})
 
         # Without extra headers (uses cached client)
-        model = infer_model("gemini:...")
+        model = infer_model("google-gla:...")
     """
     gateway_prefix = gateway_name.upper()
     api_key_env_var = f"{gateway_prefix}_API_KEY"
@@ -58,8 +58,8 @@ def make_gateway_provider(
         if not base_url:
             raise KeyError(f"Gateway URL not found, check environment variable: {base_url_env_var}.")
 
-        # Only gemini/bedrock need extra_headers via http_client (their providers don't support direct header injection)
-        needs_extra_headers_patch = provider_name in ("google-vertex", "gemini", "bedrock", "converse")
+        # Only google-gla/bedrock need extra_headers via http_client (their providers don't support direct header injection)
+        needs_extra_headers_patch = provider_name in ("google-vertex", "google-gla", "bedrock", "converse")
 
         if extra_headers and needs_extra_headers_patch:
             http_client = create_async_http_client(extra_headers=extra_headers)
@@ -97,7 +97,7 @@ def make_gateway_provider(
                 base_url=base_url,
                 region_name=gateway_name,  # Fake region name to avoid NoRegionError
             )
-        elif provider_name in ("google-vertex", "gemini"):
+        elif provider_name in ("google-vertex", "google-gla"):
             from pydantic_ai.providers.google import GoogleProvider
 
             return GoogleProvider(vertexai=True, api_key=api_key, base_url=base_url, http_client=http_client)
