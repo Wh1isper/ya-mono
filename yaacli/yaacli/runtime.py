@@ -55,6 +55,7 @@ from yaacli.environment import TUIEnvironment
 from yaacli.logging import get_logger
 from yaacli.mcp import build_mcp_servers
 from yaacli.session import TUIContext
+from yaacli.toolsets.background import background_tools
 
 if TYPE_CHECKING:
     from pydantic_ai.toolsets import AbstractToolset
@@ -297,6 +298,7 @@ def create_tui_runtime(
     all_tools: list[type[BaseTool]] = [
         *core_tools,
         *subagent_tools,  # SubagentInfoTool for introspection
+        *background_tools,  # BackgroundDelegateTool for async subagent execution
     ]
 
     # Load system prompt
