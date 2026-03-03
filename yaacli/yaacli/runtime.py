@@ -298,7 +298,7 @@ def create_tui_runtime(
     all_tools: list[type[BaseTool]] = [
         *core_tools,
         *subagent_tools,  # SubagentInfoTool for introspection
-        *background_tools,  # BackgroundDelegateTool for async subagent execution
+        *background_tools,  # SpawnDelegateTool for async subagent execution
     ]
 
     # Load system prompt

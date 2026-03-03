@@ -44,14 +44,14 @@ BACKGROUND_MANAGER_KEY = "background_task_manager"
 class BackgroundTaskManager(BaseResource):
     """Manages background subagent tasks as a CLI resource.
 
-    This resource tracks asyncio tasks spawned by BackgroundDelegateTool,
+    This resource tracks asyncio tasks spawned by SpawnDelegateTool,
     provides callback-based completion notification, and holds a reference
     to the core toolset for accessing the delegate tool.
 
     Lifecycle:
     - Created and registered during TUIEnvironment._setup()
     - core_toolset and completion_callback set after runtime entered (TUIApp.__aenter__)
-    - Tasks registered by BackgroundDelegateTool during agent execution
+    - Tasks registered by SpawnDelegateTool during agent execution
     - notify_completion() called when tasks complete
     - All tasks cancelled on close() (TUIEnvironment._teardown)
     """
@@ -85,7 +85,7 @@ class BackgroundTaskManager(BaseResource):
     def notify_completion(self, agent_id: str) -> None:
         """Notify that a background task has completed.
 
-        Called by BackgroundDelegateTool when a task finishes (success or failure).
+        Called by SpawnDelegateTool when a task finishes (success or failure).
         This invokes the registered callback if one exists.
 
         Args:

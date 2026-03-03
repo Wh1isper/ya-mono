@@ -1,4 +1,4 @@
-"""Tests for background task manager and background delegate tool."""
+"""Tests for background task manager and spawn delegate tool."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pytest
 from pydantic_ai import RunContext
 from yaacli.background import BACKGROUND_MANAGER_KEY, BackgroundTaskManager
 from yaacli.environment import TUIEnvironment
-from yaacli.toolsets.background import BackgroundDelegateTool
+from yaacli.toolsets.background import SpawnDelegateTool
 
 from ya_agent_sdk.context import AgentContext
 from ya_agent_sdk.toolsets.core.base import BaseTool
@@ -172,7 +172,7 @@ def test_manager_get_delegate_tool_not_found() -> None:
 
 
 # =============================================================================
-# BackgroundDelegateTool Tests
+# SpawnDelegateTool Tests
 # =============================================================================
 
 
@@ -198,23 +198,23 @@ def _make_run_ctx(
 
 
 def test_tool_not_available_without_manager() -> None:
-    """BackgroundDelegateTool should be unavailable without BackgroundTaskManager."""
-    tool = BackgroundDelegateTool()
+    """SpawnDelegateTool should be unavailable without BackgroundTaskManager."""
+    tool = SpawnDelegateTool()
     ctx = _make_run_ctx(manager=None)
     assert not tool.is_available(ctx)
 
 
 def test_tool_not_available_without_delegate() -> None:
-    """BackgroundDelegateTool should be unavailable if delegate tool doesn't exist."""
+    """SpawnDelegateTool should be unavailable if delegate tool doesn't exist."""
     manager = BackgroundTaskManager()
     # No core_toolset set -> no delegate tool
-    tool = BackgroundDelegateTool()
+    tool = SpawnDelegateTool()
     ctx = _make_run_ctx(manager=manager, agent_id="main")
     assert not tool.is_available(ctx)
 
 
 def test_tool_not_available_for_subagent() -> None:
-    """BackgroundDelegateTool should be unavailable for subagents."""
+    """SpawnDelegateTool should be unavailable for subagents."""
     manager = BackgroundTaskManager()
 
     mock_delegate = MagicMock(spec=BaseTool)
@@ -222,14 +222,14 @@ def test_tool_not_available_for_subagent() -> None:
     mock_toolset._get_tool_instance.return_value = mock_delegate
     manager.set_core_toolset(mock_toolset)
 
-    tool = BackgroundDelegateTool()
+    tool = SpawnDelegateTool()
     # Using a subagent id instead of "main"
     ctx = _make_run_ctx(manager=manager, agent_id="explorer-1234")
     assert not tool.is_available(ctx)
 
 
 def test_tool_available_with_delegate() -> None:
-    """BackgroundDelegateTool should be available when delegate tool exists and agent is main."""
+    """SpawnDelegateTool should be available when delegate tool exists and agent is main."""
     manager = BackgroundTaskManager()
 
     mock_delegate = MagicMock(spec=BaseTool)
@@ -237,14 +237,14 @@ def test_tool_available_with_delegate() -> None:
     mock_toolset._get_tool_instance.return_value = mock_delegate
     manager.set_core_toolset(mock_toolset)
 
-    tool = BackgroundDelegateTool()
+    tool = SpawnDelegateTool()
     ctx = _make_run_ctx(manager=manager, agent_id="main")
     assert tool.is_available(ctx)
 
 
 @pytest.mark.asyncio
 async def test_tool_call_launches_background_task() -> None:
-    """Calling BackgroundDelegateTool should launch a background task."""
+    """Calling SpawnDelegateTool should launch a background task."""
     manager = BackgroundTaskManager()
 
     # Create a mock delegate tool that returns a result
@@ -266,11 +266,11 @@ async def test_tool_call_launches_background_task() -> None:
     run_ctx = MagicMock(spec=RunContext)
     run_ctx.deps = mock_deps
 
-    tool = BackgroundDelegateTool()
+    tool = SpawnDelegateTool()
     result = await tool.call(run_ctx, subagent_name="explorer", prompt="Find stuff")
 
     # Should return immediately with a status message
-    assert "Background task started" in result
+    assert "Spawned delegate" in result
     assert "explorer" in result
 
     # A background task should be registered
@@ -293,8 +293,8 @@ async def test_tool_call_launches_background_task() -> None:
 
 @pytest.mark.asyncio
 async def test_tool_call_no_manager() -> None:
-    """Calling BackgroundDelegateTool without manager should return error."""
-    tool = BackgroundDelegateTool()
+    """Calling SpawnDelegateTool without manager should return error."""
+    tool = SpawnDelegateTool()
     ctx = _make_run_ctx(manager=None)
     result = await tool.call(ctx, subagent_name="explorer", prompt="Find stuff")
     assert "Error" in result
@@ -302,9 +302,9 @@ async def test_tool_call_no_manager() -> None:
 
 @pytest.mark.asyncio
 async def test_tool_call_no_delegate() -> None:
-    """Calling BackgroundDelegateTool without delegate tool should return error."""
+    """Calling SpawnDelegateTool without delegate tool should return error."""
     manager = BackgroundTaskManager()
-    tool = BackgroundDelegateTool()
+    tool = SpawnDelegateTool()
     ctx = _make_run_ctx(manager=manager)
     result = await tool.call(ctx, subagent_name="explorer", prompt="Find stuff")
     assert "Error" in result

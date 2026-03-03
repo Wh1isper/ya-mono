@@ -5,9 +5,9 @@ the main agent. Results are delivered via message bus when complete.
 
 Example:
     from ya_agent_sdk.toolsets.core.base import Toolset
-    from yaacli.toolsets.background import BackgroundDelegateTool
+    from yaacli.toolsets.background import SpawnDelegateTool
 
-    toolset = Toolset(tools=[..., BackgroundDelegateTool])
+    toolset = Toolset(tools=[..., SpawnDelegateTool])
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from yaacli.logging import get_logger
 logger = get_logger(__name__)
 
 
-class BackgroundDelegateTool(BaseTool):
+class SpawnDelegateTool(BaseTool):
     """Launch a subagent in the background without blocking.
 
     This tool wraps the SDK's `delegate` tool and runs it as an asyncio task.
@@ -36,8 +36,8 @@ class BackgroundDelegateTool(BaseTool):
     Results are delivered via message bus when the subagent completes.
     """
 
-    name = "background_delegate"
-    description = "Launch a subagent in the background (non-blocking). Result delivered via message bus."
+    name = "spawn_delegate"
+    description = "Spawn a subagent in the background (non-blocking). Result delivered via message bus."
 
     def is_available(self, ctx: RunContext[AgentContext]) -> bool:
         """Available only for main agent with BackgroundTaskManager and delegate tool.
@@ -54,7 +54,7 @@ class BackgroundDelegateTool(BaseTool):
         return manager is not None and manager.has_delegate_tool
 
     async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
-        """Generate instruction for background delegate."""
+        """Generate instruction for spawn delegate."""
         manager = self._get_manager(ctx)
         if manager is None:
             return None
@@ -63,7 +63,7 @@ class BackgroundDelegateTool(BaseTool):
         task_info = manager.get_context_instruction()
 
         lines = [
-            "<background-delegate-tool>",
+            "<spawn-delegate-tool>",
             "Same subagent names as the `delegate` tool.",
             "Use this for long-running tasks where you don't need immediate results.",
             "The subagent runs in the background and its result is delivered via message bus.",
@@ -72,7 +72,7 @@ class BackgroundDelegateTool(BaseTool):
         if task_info:
             lines.append("")
             lines.append(task_info)
-        lines.append("</background-delegate-tool>")
+        lines.append("</spawn-delegate-tool>")
         return "\n".join(lines)
 
     async def call(
@@ -113,12 +113,12 @@ class BackgroundDelegateTool(BaseTool):
                         target=deps.agent_id,
                     )
                 )
-                logger.info("Background subagent '%s' (%s) completed", subagent_name, agent_id)
+                logger.info("Spawned delegate '%s' (%s) completed", subagent_name, agent_id)
             except Exception as e:
-                logger.warning("Background subagent '%s' (%s) failed: %s", subagent_name, agent_id, e)
+                logger.warning("Spawned delegate '%s' (%s) failed: %s", subagent_name, agent_id, e)
                 deps.send_message(
                     BusMessage(
-                        content=f"Background subagent '{subagent_name}' (id: {agent_id}) failed: {e}",
+                        content=f"Spawned delegate '{subagent_name}' (id: {agent_id}) failed: {e}",
                         source=agent_id,
                         target=deps.agent_id,
                     )
@@ -131,7 +131,7 @@ class BackgroundDelegateTool(BaseTool):
         manager.register_task(agent_id, task)
 
         return (
-            f"Background task started: {subagent_name} (id: {agent_id}). "
+            f"Spawned delegate: {subagent_name} (id: {agent_id}). "
             "Result will be delivered via message bus when complete. "
             "You can continue with other work."
         )
@@ -146,4 +146,4 @@ class BackgroundDelegateTool(BaseTool):
         return None
 
 
-background_tools: list[type[BaseTool]] = [BackgroundDelegateTool]
+background_tools: list[type[BaseTool]] = [SpawnDelegateTool]
