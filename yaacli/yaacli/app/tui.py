@@ -933,7 +933,7 @@ class TUIApp:
         """Callback invoked when a background task completes.
 
         This is called synchronously from the asyncio event loop when
-        BackgroundDelegateTool finishes. If the agent is idle and there
+        SpawnDelegateTool finishes. If the agent is idle and there
         are pending bus messages, we schedule a new agent turn.
 
         Args:
