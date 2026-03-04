@@ -10,9 +10,10 @@ import pytest
 from pydantic_ai import RunContext
 from yaacli.background import BACKGROUND_MANAGER_KEY, BackgroundTaskManager
 from yaacli.environment import TUIEnvironment
-from yaacli.toolsets.background import SpawnDelegateTool
+from yaacli.toolsets.background import SpawnDelegateTool, SteerSubagentTool
 
 from ya_agent_sdk.context import AgentContext
+from ya_agent_sdk.context.agent import AgentInfo
 from ya_agent_sdk.toolsets.core.base import BaseTool
 
 # =============================================================================
@@ -367,8 +368,6 @@ async def test_env_background_tasks_cleaned_on_exit(tmp_path: Path) -> None:
 
 def test_steer_not_available_without_manager() -> None:
     """SteerSubagentTool should be unavailable without BackgroundTaskManager."""
-    from yaacli.toolsets.background import SteerSubagentTool
-
     tool = SteerSubagentTool()
     ctx = _make_run_ctx(manager=None)
     assert not tool.is_available(ctx)
@@ -376,8 +375,6 @@ def test_steer_not_available_without_manager() -> None:
 
 def test_steer_not_available_without_active_tasks() -> None:
     """SteerSubagentTool should be unavailable when no background tasks are running."""
-    from yaacli.toolsets.background import SteerSubagentTool
-
     manager = BackgroundTaskManager()
     tool = SteerSubagentTool()
     ctx = _make_run_ctx(manager=manager, agent_id="main")
@@ -386,8 +383,6 @@ def test_steer_not_available_without_active_tasks() -> None:
 
 def test_steer_not_available_for_subagent() -> None:
     """SteerSubagentTool should be unavailable for subagents."""
-    from yaacli.toolsets.background import SteerSubagentTool
-
     manager = BackgroundTaskManager()
     tool = SteerSubagentTool()
     ctx = _make_run_ctx(manager=manager, agent_id="explorer-1234")
@@ -397,8 +392,6 @@ def test_steer_not_available_for_subagent() -> None:
 @pytest.mark.asyncio
 async def test_steer_available_with_active_tasks() -> None:
     """SteerSubagentTool should be available when background tasks are running."""
-    from yaacli.toolsets.background import SteerSubagentTool
-
     manager = BackgroundTaskManager()
 
     async def sleeper() -> None:
@@ -419,8 +412,6 @@ async def test_steer_available_with_active_tasks() -> None:
 @pytest.mark.asyncio
 async def test_steer_sends_bus_message() -> None:
     """Steering a running subagent should send a targeted BusMessage."""
-    from yaacli.toolsets.background import SteerSubagentTool
-
     manager = BackgroundTaskManager()
 
     async def sleeper() -> None:
@@ -459,8 +450,6 @@ async def test_steer_sends_bus_message() -> None:
 @pytest.mark.asyncio
 async def test_steer_finished_agent_suggests_resume() -> None:
     """Steering a finished subagent should suggest spawn_delegate resume."""
-    from yaacli.toolsets.background import SteerSubagentTool
-
     manager = BackgroundTaskManager()
 
     # Create and immediately complete a task
@@ -494,8 +483,6 @@ async def test_steer_finished_agent_suggests_resume() -> None:
 @pytest.mark.asyncio
 async def test_steer_unknown_agent_suggests_resume() -> None:
     """Steering an unknown agent_id should suggest resume."""
-    from yaacli.toolsets.background import SteerSubagentTool
-
     manager = BackgroundTaskManager()
 
     mock_deps = MagicMock()
@@ -517,10 +504,6 @@ async def test_steer_unknown_agent_suggests_resume() -> None:
 @pytest.mark.asyncio
 async def test_steer_uses_agent_registry_for_name() -> None:
     """Resume suggestion should look up agent_name from agent_registry."""
-    from yaacli.toolsets.background import SteerSubagentTool
-
-    from ya_agent_sdk.context.agent import AgentInfo
-
     manager = BackgroundTaskManager()
 
     mock_deps = MagicMock()
@@ -543,8 +526,6 @@ async def test_steer_uses_agent_registry_for_name() -> None:
 @pytest.mark.asyncio
 async def test_steer_shows_active_tasks_hint() -> None:
     """Resume suggestion should mention other active tasks if any."""
-    from yaacli.toolsets.background import SteerSubagentTool
-
     manager = BackgroundTaskManager()
 
     async def sleeper() -> None:
@@ -656,8 +637,6 @@ async def test_spawn_delegate_without_agent_id_generates_new() -> None:
 @pytest.mark.asyncio
 async def test_steer_instruction_only_with_active_tasks() -> None:
     """get_instruction should return None when no active tasks."""
-    from yaacli.toolsets.background import SteerSubagentTool
-
     manager = BackgroundTaskManager()
     tool = SteerSubagentTool()
     ctx = _make_run_ctx(manager=manager, agent_id="main")

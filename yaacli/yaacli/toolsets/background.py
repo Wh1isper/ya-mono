@@ -31,6 +31,16 @@ from yaacli.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _get_background_manager(ctx: RunContext[AgentContext]) -> BackgroundTaskManager | None:
+    """Get BackgroundTaskManager from resources."""
+    if ctx.deps.resources is None:
+        return None
+    resource = ctx.deps.resources.get(BACKGROUND_MANAGER_KEY)
+    if isinstance(resource, BackgroundTaskManager):
+        return resource
+    return None
+
+
 class SpawnDelegateTool(BaseTool):
     """Launch a subagent in the background without blocking.
 
@@ -56,12 +66,12 @@ class SpawnDelegateTool(BaseTool):
         # Only available for main agent to avoid unreachable messages
         if ctx.deps.agent_id != "main":
             return False
-        manager = self._get_manager(ctx)
+        manager = _get_background_manager(ctx)
         return manager is not None and manager.has_delegate_tool
 
     async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         """Generate instruction for spawn delegate."""
-        manager = self._get_manager(ctx)
+        manager = _get_background_manager(ctx)
         if manager is None:
             return None
 
@@ -89,7 +99,7 @@ class SpawnDelegateTool(BaseTool):
         ] = None,
     ) -> str:
         """Launch a subagent in the background."""
-        manager = self._get_manager(ctx)
+        manager = _get_background_manager(ctx)
         if manager is None:
             return "Error: BackgroundTaskManager not available"
 
@@ -100,11 +110,10 @@ class SpawnDelegateTool(BaseTool):
         deps = ctx.deps
 
         # Use provided agent_id for resume, or generate a new one
+        is_resume = agent_id is not None and agent_id in deps.subagent_history
         if not agent_id:
             short_id = generate_unique_id(deps.subagent_history)
             agent_id = f"{subagent_name}-bg-{short_id}"
-
-        effective_agent_id = agent_id
 
         async def _run_background() -> None:
             """Background coroutine that runs the subagent and posts result to bus."""
@@ -113,49 +122,44 @@ class SpawnDelegateTool(BaseTool):
                     ctx,
                     subagent_name=subagent_name,
                     prompt=prompt,
-                    agent_id=effective_agent_id,
+                    agent_id=agent_id,
                 )
                 # Post result to message bus for the main agent
                 deps.send_message(
                     BusMessage(
                         content=result,
-                        source=effective_agent_id,
+                        source=agent_id,
                         target=deps.agent_id,
                     )
                 )
-                logger.info("Spawned delegate '%s' (%s) completed", subagent_name, effective_agent_id)
+                logger.info("Spawned delegate '%s' (%s) completed", subagent_name, agent_id)
             except Exception as e:
-                logger.warning("Spawned delegate '%s' (%s) failed: %s", subagent_name, effective_agent_id, e)
+                logger.warning("Spawned delegate '%s' (%s) failed: %s", subagent_name, agent_id, e)
                 deps.send_message(
                     BusMessage(
-                        content=f"Spawned delegate '{subagent_name}' (id: {effective_agent_id}) failed: {e}",
-                        source=effective_agent_id,
+                        content=f"Spawned delegate '{subagent_name}' (id: {agent_id}) failed: {e}",
+                        source=agent_id,
                         target=deps.agent_id,
                     )
                 )
             finally:
                 # Notify completion so TUI can trigger a new agent turn if idle
-                manager.notify_completion(effective_agent_id)
+                manager.notify_completion(agent_id)
 
         task = asyncio.create_task(_run_background())
-        manager.register_task(effective_agent_id, task)
+        manager.register_task(agent_id, task)
 
-        is_resume = effective_agent_id in deps.subagent_history
         action = "Resumed" if is_resume else "Spawned"
         return (
-            f"{action} delegate: {subagent_name} (id: {effective_agent_id}). "
+            f"{action} delegate: {subagent_name} (id: {agent_id}). "
             "Result will be delivered via message bus when complete. "
             "You can continue with other work."
         )
 
-    def _get_manager(self, ctx: RunContext[AgentContext]) -> BackgroundTaskManager | None:
+    @staticmethod
+    def _get_manager(ctx: RunContext[AgentContext]) -> BackgroundTaskManager | None:
         """Get BackgroundTaskManager from resources."""
-        if ctx.deps.resources is None:
-            return None
-        resource = ctx.deps.resources.get(BACKGROUND_MANAGER_KEY)
-        if isinstance(resource, BackgroundTaskManager):
-            return resource
-        return None
+        return _get_background_manager(ctx)
 
 
 class SteerSubagentTool(BaseTool):
@@ -175,12 +179,12 @@ class SteerSubagentTool(BaseTool):
         """Available only for main agent with active background tasks."""
         if ctx.deps.agent_id != "main":
             return False
-        manager = self._get_manager(ctx)
+        manager = _get_background_manager(ctx)
         return manager is not None and manager.has_active_tasks
 
     async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         """Only show instruction when there are active background tasks."""
-        manager = self._get_manager(ctx)
+        manager = _get_background_manager(ctx)
         if manager is None or not manager.has_active_tasks:
             return None
         return (
@@ -196,12 +200,13 @@ class SteerSubagentTool(BaseTool):
         message: Annotated[str, Field(description="Steering guidance to send")],
     ) -> str:
         """Send steering message to a running background subagent."""
-        manager = self._get_manager(ctx)
+        manager = _get_background_manager(ctx)
         if manager is None:
             return "Error: BackgroundTaskManager not available"
 
-        # Verify the target agent is actually running
-        if agent_id not in manager.active_tasks or manager.active_tasks[agent_id].done():
+        # Verify the target agent is actually running (single snapshot to avoid race)
+        tasks = manager.active_tasks
+        if agent_id not in tasks or tasks[agent_id].done():
             return self._suggest_resume(ctx, agent_id, message, manager)
 
         # Send targeted message via shared bus
@@ -225,14 +230,15 @@ class SteerSubagentTool(BaseTool):
         """Build error message suggesting resume for finished agents."""
         # Look up agent_name from registry for the delegate call
         agent_info = ctx.deps.agent_registry.get(agent_id)
-        agent_name = agent_info.agent_name if agent_info else agent_id.split("-bg-")[0]
+        agent_name = agent_info.agent_name if agent_info else agent_id.rsplit("-bg-", 1)[0]
 
         # Check if there are other active tasks to mention
         active = [aid for aid, t in manager.active_tasks.items() if not t.done()]
         active_hint = f" Active tasks: {', '.join(active)}" if active else ""
 
-        # Truncate message for the suggestion if too long
+        # Truncate message for the suggestion if too long, and escape quotes
         prompt_preview = message[:80] + "..." if len(message) > 80 else message
+        prompt_preview = prompt_preview.replace('"', '\\"')
 
         return (
             f"'{agent_id}' has already completed and cannot be steered.{active_hint}\n"
@@ -242,14 +248,10 @@ class SteerSubagentTool(BaseTool):
             f'  delegate(subagent_name="{agent_name}", prompt="{prompt_preview}", agent_id="{agent_id}")'
         )
 
-    def _get_manager(self, ctx: RunContext[AgentContext]) -> BackgroundTaskManager | None:
+    @staticmethod
+    def _get_manager(ctx: RunContext[AgentContext]) -> BackgroundTaskManager | None:
         """Get BackgroundTaskManager from resources."""
-        if ctx.deps.resources is None:
-            return None
-        resource = ctx.deps.resources.get(BACKGROUND_MANAGER_KEY)
-        if isinstance(resource, BackgroundTaskManager):
-            return resource
-        return None
+        return _get_background_manager(ctx)
 
 
 background_tools: list[type[BaseTool]] = [SpawnDelegateTool, SteerSubagentTool]
