@@ -637,8 +637,8 @@ class RunContextMetadata(TypedDict, total=False):
     """Metadata for RunContext passed to get_context_instructions.
 
     This TypedDict defines the expected structure of metadata passed via
-    pydantic-ai's Agent metadata parameter. It enables handoff threshold
-    warnings when the context window usage exceeds the configured threshold.
+    pydantic-ai's Agent metadata parameter. It enables context management
+    reminders when the context window usage exceeds the configured threshold.
 
     Example:
         Using with Agent and HandoffTool for automatic context management::
@@ -669,14 +669,14 @@ class RunContextMetadata(TypedDict, total=False):
                     deps_type=AgentContext,
                     toolsets=[toolset],
                     history_processors=[process_handoff_message],
-                    # Set context management tool name - triggers threshold warning
-                    metadata=lambda _: {'context_manage_tool': 'handoff'},
+                    # Set context management tool name - triggers threshold reminder
+                    metadata=lambda _: {'context_manage_tool': 'summarize'},
                 )
                 result = await agent.run('Your prompt here', deps=ctx)
     """
 
     context_manage_tool: str
-    """Name of the context management tool to use (e.g., 'handoff')."""
+    """Name of the context management tool to use (e.g., 'summarize')."""
 
 
 # =============================================================================
@@ -1290,6 +1290,7 @@ class AgentContext(BaseModel):
         )
 
         # Handoff threshold warning
+        # (internal name kept for compatibility; user-facing text says 'summarize')
         if (
             (context_manage_tool := metadata.get("context_manage_tool"))
             and self.model_cfg.context_window is not None
@@ -1302,9 +1303,12 @@ class AgentContext(BaseModel):
                 self.model_cfg.context_window * self.model_cfg.proactive_context_management_threshold
             )
             if request_usage.total_tokens >= threshold_tokens:
+                usage_pct = int(request_usage.total_tokens / self.model_cfg.context_window * 100)
+                compact_pct = int(self.model_cfg.compact_threshold * 100)
                 reminders.append(
-                    f"IMPORTANT: **You have reached the handoff threshold, please calling the `{context_manage_tool}` tool "
-                    "to summarize then continue the task at the appropriate time.**"
+                    f"Context usage is at {usage_pct}% ({request_usage.total_tokens:,} / {self.model_cfg.context_window:,} tokens). "
+                    f"Auto-compaction will trigger at {compact_pct}%. "
+                    f"Please use the `{context_manage_tool}` tool to summarize progress and continue when appropriate."
                 )
 
         if reminders:

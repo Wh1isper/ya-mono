@@ -184,17 +184,17 @@ class EventRenderer:
         """Render handoff start notification (single line)."""
         text = Text()
         text.append("> ", style="magenta")
-        text.append(f"Preparing context handoff from {message_count} messages...", style="dim")
+        text.append(f"Summarizing progress ({message_count} messages)...", style="dim")
         return self._renderer.render(text)
 
     def render_handoff_complete(self, content: str) -> str:
         """Render handoff complete panel."""
         panel_content = Text()
-        panel_content.append("Context reset with preserved state\n", style="bold green")
+        panel_content.append("Progress summarized, continuing with fresh context\n", style="bold green")
         if content:
             panel_content.append(content, style="dim")
         panel = Panel(
-            panel_content, border_style="magenta", title="[magenta]Handoff Complete[/magenta]", title_align="left"
+            panel_content, border_style="magenta", title="[magenta]Summary Complete[/magenta]", title_align="left"
         )
         return self._renderer.render(panel)
 
@@ -202,7 +202,7 @@ class EventRenderer:
         """Render handoff failed notification (single line)."""
         text = Text()
         text.append("x ", style="red")
-        text.append("Handoff failed: ", style="bold red")
+        text.append("Summary failed: ", style="bold red")
         text.append(error[:100], style="dim")
         return self._renderer.render(text)
 

@@ -40,7 +40,7 @@ ya_agent_sdk/
 │   ├── core/              # Core toolsets collection
 │   │   ├── base.py        # BaseTool, Toolset, GlobalHooks (base classes)
 │   │   ├── content/       # Content loading tools
-│   │   ├── context/       # Context management tools (handoff)
+│   │   ├── context/       # Context management tools (summarize)
 │   │   ├── document/      # Document processing tools
 │   │   ├── enhance/       # Enhancement tools (todo, thinking)
 │   │   ├── filesystem/    # File system operation tools
@@ -167,7 +167,7 @@ See [docs/streaming.md](docs/streaming.md) for details:
 See [docs/events.md](docs/events.md) for details:
 
 - Lifecycle events: `AgentExecutionStartEvent`, `ModelRequestStartEvent`, `ToolCallsStartEvent`, etc.
-- Sideband events: compact, handoff, subagent, message bus events
+- Sideband events: compact, summarize, subagent, message bus events
 - Event correlation via `event_id`
 - Creating custom events
 

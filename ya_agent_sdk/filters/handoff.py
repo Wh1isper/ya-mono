@@ -47,10 +47,10 @@ def _build_handoff_messages(
 
     Uses a virtual tool call pattern:
     1. Request with system prompt + original user prompt
-    2. Response with virtual handoff tool call
-    3. Request with handoff tool return (summary) + steering + handoff-complete marker
+    2. Response with virtual summarize tool call
+    3. Request with summarize tool return (summary) + steering + summary-complete marker
 
-    This structure makes it clear to the model that the handoff summary is a tool
+    This structure makes it clear to the model that the summary is a tool
     result, not the model's own output, avoiding confusion when users mention "handoff".
 
     Args:
@@ -72,15 +72,15 @@ def _build_handoff_messages(
 
     # Message 2: virtual handoff tool call
     tool_call = ToolCallPart(
-        tool_name="handoff",
-        args={"message": {"content": "[handoff summary injected as tool return]"}},
+        tool_name="summarize",
+        args={"message": {"content": "[summary injected as tool return]"}},
         tool_call_id=tool_call_id,
     )
 
-    # Message 3: handoff tool return + steering + handoff-complete
+    # Message 3: summarize tool return + steering + summary-complete
     final_parts: list[ToolReturnPart | UserPromptPart] = [
         ToolReturnPart(
-            tool_name="handoff",
+            tool_name="summarize",
             content=summary,
             tool_call_id=tool_call_id,
         ),
@@ -91,7 +91,7 @@ def _build_handoff_messages(
             final_parts.append(UserPromptPart(content=f"[User Steering] {steering}"))
 
     final_parts.append(
-        UserPromptPart(content="<handoff-complete>Handoff done. Context restored. Resume task.</handoff-complete>")
+        UserPromptPart(content="<summary-complete>Summary done. Context restored. Resume task.</summary-complete>")
     )
 
     return [
@@ -113,10 +113,10 @@ async def process_handoff_message(
 
     Uses a virtual tool call pattern:
     1. Request with system prompt + original user prompt
-    2. Response with virtual handoff tool call
-    3. Request with handoff tool return (summary) + steering + handoff-complete marker
+    2. Response with virtual summarize tool call
+    3. Request with summarize tool return (summary) + steering + summary-complete marker
 
-    This ensures the model understands the handoff summary as a tool result,
+    This ensures the model understands the summary as a tool result,
     and downstream filters like auto_load_files can append to the last request.
 
     Note: Subagents created via enter_subagent() have handoff_message cleared,

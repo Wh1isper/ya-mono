@@ -67,7 +67,7 @@ async def process_auto_load_files(
 
     # Note: we inject into any last ModelRequest regardless of whether it contains
     # ToolReturnPart. This is needed for handoff compatibility, where the last message
-    # is a ToolReturn + UserPromptPart (handoff-complete marker).
+    # is a ToolReturn + UserPromptPart (summary-complete marker).
 
     # Load files
     file_contents: list[str] = []

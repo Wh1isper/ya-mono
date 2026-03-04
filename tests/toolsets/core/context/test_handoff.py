@@ -14,7 +14,7 @@ def test_handoff_message_render() -> None:
         content="## User Intent\nBuild a REST API\n\n## Current State\nInitial setup complete",
     )
     result = msg.render()
-    assert "# Context Handoff" in result
+    assert "# Context Summary" in result
     assert "Build a REST API" in result
     assert "Initial setup complete" in result
 
@@ -26,7 +26,7 @@ def test_handoff_message_render_with_auto_load_files() -> None:
         auto_load_files=["main.py", "config.py"],
     )
     result = msg.render()
-    assert "# Context Handoff" in result
+    assert "# Context Summary" in result
     assert "Working on API implementation" in result
     # auto_load_files should not be in the rendered output
     # They are stored separately for the filter to process
@@ -35,7 +35,7 @@ def test_handoff_message_render_with_auto_load_files() -> None:
 
 def test_handoff_tool_attributes(agent_context: AgentContext) -> None:
     """Should have correct name and description."""
-    assert HandoffTool.name == "handoff"
+    assert HandoffTool.name == "summarize"
     assert "Summarize current work" in HandoffTool.description
     assert "clear context" in HandoffTool.description
 
@@ -43,7 +43,7 @@ def test_handoff_tool_attributes(agent_context: AgentContext) -> None:
 def test_handoff_tool_initialization(agent_context: AgentContext) -> None:
     """Should initialize with context."""
     tool = HandoffTool()
-    assert tool.name == "handoff"
+    assert tool.name == "summarize"
 
 
 def test_handoff_tool_is_available(agent_context: AgentContext, mock_run_ctx) -> None:
@@ -61,7 +61,7 @@ async def test_handoff_tool_get_instruction(agent_context: AgentContext) -> None
     # Verify instruction is loaded and contains expected content
     assert instruction is not None
     assert len(instruction) > 0
-    assert "handoff" in instruction.lower()
+    assert "summarize" in instruction.lower()
 
 
 async def test_handoff_tool_call(agent_context: AgentContext) -> None:
@@ -79,12 +79,12 @@ async def test_handoff_tool_call(agent_context: AgentContext) -> None:
 
     # Verify handoff message is stored in context
     assert agent_context.handoff_message is not None
-    assert "# Context Handoff" in agent_context.handoff_message
+    assert "# Context Summary" in agent_context.handoff_message
     assert "Build API" in agent_context.handoff_message
 
     # Verify return value contains summary
-    assert "Handoff complete" in result
-    assert "# Context Handoff" in result
+    assert "Summary complete" in result
+    assert "# Context Summary" in result
 
 
 async def test_handoff_tool_call_sets_auto_load_files(agent_context: AgentContext) -> None:

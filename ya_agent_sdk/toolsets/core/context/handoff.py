@@ -47,11 +47,15 @@ def _load_instruction() -> str:
 
 
 class HandoffMessage(BaseModel):
-    """Structured summary for context handoff between conversation sessions."""
+    """Structured summary for context handoff between conversation sessions.
+
+    Note: The class name 'HandoffMessage' is an internal implementation detail.
+    The user-facing tool name is 'summarize'.
+    """
 
     content: str = Field(
         ...,
-        description="""Context summary to preserve across handoff. Should include:
+        description="""Context summary to preserve across context reset. Should include:
 1. User's primary request and intent
 2. Current state and completed work
 3. Key technical decisions
@@ -62,7 +66,7 @@ class HandoffMessage(BaseModel):
 
     auto_load_files: list[str] = Field(
         default_factory=list,
-        description="""File paths to auto-load after handoff.
+        description="""File paths to auto-load after summary.
 Files will be read and injected into context on next request.
 Use for: key config files, source code being edited, important references.
 """,
@@ -70,17 +74,18 @@ Use for: key config files, source code being edited, important references.
 
     def render(self) -> str:
         """Render handoff message as Markdown for context injection."""
-        return f"# Context Handoff\n\n{self.content}"
+        return f"# Context Summary\n\n{self.content}"
 
 
 class HandoffTool(BaseTool):
     """Tool for context handoff between sessions."""
 
-    name = "handoff"
+    name = "summarize"
     description = """Summarize current work and clear context to start fresh.
 
 Use this tool when context is getting large and you need to preserve essential information
-before resetting. The handoff message will be injected into the new context automatically.
+before resetting, or when switching focus to a different topic or task.
+The summary will be injected into the new context automatically.
 """
     auto_inherit = True
 
@@ -102,4 +107,4 @@ before resetting. The handoff message will be injected into the new context auto
         # Append auto_load_files for the auto_load_files filter to process
         # Use extend instead of assignment to preserve any files set by external callers
         ctx.deps.auto_load_files.extend(message.auto_load_files)
-        return f"Handoff complete. Summary:\n\n{rendered}"
+        return f"Summary complete. Context refreshed.\n\n{rendered}"
