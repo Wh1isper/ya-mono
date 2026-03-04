@@ -358,3 +358,324 @@ async def test_env_background_tasks_cleaned_on_exit(tmp_path: Path) -> None:
     # After exit, task should be cancelled (manager.close() called by resource registry)
     assert task_ref is not None
     assert task_ref.cancelled() or task_ref.done()
+
+
+# =============================================================================
+# SteerSubagentTool Tests
+# =============================================================================
+
+
+def test_steer_not_available_without_manager() -> None:
+    """SteerSubagentTool should be unavailable without BackgroundTaskManager."""
+    from yaacli.toolsets.background import SteerSubagentTool
+
+    tool = SteerSubagentTool()
+    ctx = _make_run_ctx(manager=None)
+    assert not tool.is_available(ctx)
+
+
+def test_steer_not_available_without_active_tasks() -> None:
+    """SteerSubagentTool should be unavailable when no background tasks are running."""
+    from yaacli.toolsets.background import SteerSubagentTool
+
+    manager = BackgroundTaskManager()
+    tool = SteerSubagentTool()
+    ctx = _make_run_ctx(manager=manager, agent_id="main")
+    assert not tool.is_available(ctx)
+
+
+def test_steer_not_available_for_subagent() -> None:
+    """SteerSubagentTool should be unavailable for subagents."""
+    from yaacli.toolsets.background import SteerSubagentTool
+
+    manager = BackgroundTaskManager()
+    tool = SteerSubagentTool()
+    ctx = _make_run_ctx(manager=manager, agent_id="explorer-1234")
+    assert not tool.is_available(ctx)
+
+
+@pytest.mark.asyncio
+async def test_steer_available_with_active_tasks() -> None:
+    """SteerSubagentTool should be available when background tasks are running."""
+    from yaacli.toolsets.background import SteerSubagentTool
+
+    manager = BackgroundTaskManager()
+
+    async def sleeper() -> None:
+        await asyncio.sleep(100)
+
+    task = asyncio.create_task(sleeper())
+    manager.register_task("searcher-bg-a1b2", task)
+
+    tool = SteerSubagentTool()
+    ctx = _make_run_ctx(manager=manager, agent_id="main")
+    assert tool.is_available(ctx)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_steer_sends_bus_message() -> None:
+    """Steering a running subagent should send a targeted BusMessage."""
+    from yaacli.toolsets.background import SteerSubagentTool
+
+    manager = BackgroundTaskManager()
+
+    async def sleeper() -> None:
+        await asyncio.sleep(100)
+
+    task = asyncio.create_task(sleeper())
+    manager.register_task("searcher-bg-a1b2", task)
+
+    mock_deps = MagicMock()
+    mock_deps.resources = MagicMock()
+    mock_deps.resources.get.return_value = manager
+    mock_deps.agent_id = "main"
+    mock_deps.send_message = MagicMock()
+
+    run_ctx = MagicMock(spec=RunContext)
+    run_ctx.deps = mock_deps
+
+    tool = SteerSubagentTool()
+    result = await tool.call(run_ctx, agent_id="searcher-bg-a1b2", message="also check docs folder")
+
+    assert "Steering message sent" in result
+    assert "searcher-bg-a1b2" in result
+
+    # Verify BusMessage was sent with correct target
+    mock_deps.send_message.assert_called_once()
+    sent_msg = mock_deps.send_message.call_args[0][0]
+    assert sent_msg.target == "searcher-bg-a1b2"
+    assert sent_msg.source == "main"
+    assert sent_msg.content == "also check docs folder"
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_steer_finished_agent_suggests_resume() -> None:
+    """Steering a finished subagent should suggest spawn_delegate resume."""
+    from yaacli.toolsets.background import SteerSubagentTool
+
+    manager = BackgroundTaskManager()
+
+    # Create and immediately complete a task
+    async def quick() -> None:
+        pass
+
+    task = asyncio.create_task(quick())
+    manager.register_task("searcher-bg-a1b2", task)
+    await task
+    await asyncio.sleep(0)  # Allow done callback to fire
+
+    mock_deps = MagicMock()
+    mock_deps.resources = MagicMock()
+    mock_deps.resources.get.return_value = manager
+    mock_deps.agent_id = "main"
+    mock_deps.agent_registry = {}
+
+    run_ctx = MagicMock(spec=RunContext)
+    run_ctx.deps = mock_deps
+
+    tool = SteerSubagentTool()
+    result = await tool.call(run_ctx, agent_id="searcher-bg-a1b2", message="dig deeper")
+
+    assert "already completed" in result
+    assert "spawn_delegate" in result
+    assert "agent_id" in result
+    assert "searcher-bg-a1b2" in result
+    assert "delegate" in result
+
+
+@pytest.mark.asyncio
+async def test_steer_unknown_agent_suggests_resume() -> None:
+    """Steering an unknown agent_id should suggest resume."""
+    from yaacli.toolsets.background import SteerSubagentTool
+
+    manager = BackgroundTaskManager()
+
+    mock_deps = MagicMock()
+    mock_deps.resources = MagicMock()
+    mock_deps.resources.get.return_value = manager
+    mock_deps.agent_id = "main"
+    mock_deps.agent_registry = {}
+
+    run_ctx = MagicMock(spec=RunContext)
+    run_ctx.deps = mock_deps
+
+    tool = SteerSubagentTool()
+    result = await tool.call(run_ctx, agent_id="nonexistent-bg-0000", message="hello")
+
+    assert "already completed" in result
+    assert "spawn_delegate" in result
+
+
+@pytest.mark.asyncio
+async def test_steer_uses_agent_registry_for_name() -> None:
+    """Resume suggestion should look up agent_name from agent_registry."""
+    from yaacli.toolsets.background import SteerSubagentTool
+
+    from ya_agent_sdk.context.agent import AgentInfo
+
+    manager = BackgroundTaskManager()
+
+    mock_deps = MagicMock()
+    mock_deps.resources = MagicMock()
+    mock_deps.resources.get.return_value = manager
+    mock_deps.agent_id = "main"
+    mock_deps.agent_registry = {
+        "searcher-bg-a1b2": AgentInfo(agent_id="searcher-bg-a1b2", agent_name="searcher", parent_agent_id="main"),
+    }
+
+    run_ctx = MagicMock(spec=RunContext)
+    run_ctx.deps = mock_deps
+
+    tool = SteerSubagentTool()
+    result = await tool.call(run_ctx, agent_id="searcher-bg-a1b2", message="check more")
+
+    assert 'subagent_name="searcher"' in result
+
+
+@pytest.mark.asyncio
+async def test_steer_shows_active_tasks_hint() -> None:
+    """Resume suggestion should mention other active tasks if any."""
+    from yaacli.toolsets.background import SteerSubagentTool
+
+    manager = BackgroundTaskManager()
+
+    async def sleeper() -> None:
+        await asyncio.sleep(100)
+
+    active_task = asyncio.create_task(sleeper())
+    manager.register_task("debugger-bg-c3d1", active_task)
+
+    mock_deps = MagicMock()
+    mock_deps.resources = MagicMock()
+    mock_deps.resources.get.return_value = manager
+    mock_deps.agent_id = "main"
+    mock_deps.agent_registry = {}
+
+    run_ctx = MagicMock(spec=RunContext)
+    run_ctx.deps = mock_deps
+
+    tool = SteerSubagentTool()
+    # Try to steer a non-existent agent while another is active
+    result = await tool.call(run_ctx, agent_id="searcher-bg-a1b2", message="hello")
+
+    assert "Active tasks: debugger-bg-c3d1" in result
+
+    active_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await active_task
+
+
+# =============================================================================
+# SpawnDelegateTool Resume Tests
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_spawn_delegate_with_agent_id_resume() -> None:
+    """SpawnDelegateTool should pass agent_id through for resume."""
+    manager = BackgroundTaskManager()
+
+    mock_delegate = AsyncMock(spec=BaseTool)
+    mock_delegate.call = AsyncMock(return_value="Resumed result")
+
+    mock_toolset = MagicMock()
+    mock_toolset._get_tool_instance.return_value = mock_delegate
+    manager.set_core_toolset(mock_toolset)
+
+    mock_deps = MagicMock()
+    mock_deps.resources = MagicMock()
+    mock_deps.resources.get.return_value = manager
+    mock_deps.subagent_history = {"searcher-bg-a1b2": []}  # Existing history
+    mock_deps.agent_id = "main"
+    mock_deps.send_message = MagicMock()
+
+    run_ctx = MagicMock(spec=RunContext)
+    run_ctx.deps = mock_deps
+
+    tool = SpawnDelegateTool()
+    result = await tool.call(run_ctx, subagent_name="searcher", prompt="dig deeper", agent_id="searcher-bg-a1b2")
+
+    # Should indicate resume
+    assert "Resumed" in result
+    assert "searcher-bg-a1b2" in result
+
+    # Wait for background task
+    tasks = list(manager.active_tasks.values())
+    await asyncio.gather(*tasks, return_exceptions=True)
+    await asyncio.sleep(0)
+
+    # Delegate should have been called with the provided agent_id
+    mock_delegate.call.assert_called_once()
+    call_kwargs = mock_delegate.call.call_args
+    assert call_kwargs[1]["agent_id"] == "searcher-bg-a1b2"
+
+
+@pytest.mark.asyncio
+async def test_spawn_delegate_without_agent_id_generates_new() -> None:
+    """SpawnDelegateTool without agent_id should generate a new one."""
+    manager = BackgroundTaskManager()
+
+    mock_delegate = AsyncMock(spec=BaseTool)
+    mock_delegate.call = AsyncMock(return_value="New result")
+
+    mock_toolset = MagicMock()
+    mock_toolset._get_tool_instance.return_value = mock_delegate
+    manager.set_core_toolset(mock_toolset)
+
+    mock_deps = MagicMock()
+    mock_deps.resources = MagicMock()
+    mock_deps.resources.get.return_value = manager
+    mock_deps.subagent_history = {}
+    mock_deps.agent_id = "main"
+    mock_deps.send_message = MagicMock()
+
+    run_ctx = MagicMock(spec=RunContext)
+    run_ctx.deps = mock_deps
+
+    tool = SpawnDelegateTool()
+    result = await tool.call(run_ctx, subagent_name="explorer", prompt="Find stuff")
+
+    # Should indicate spawned (not resumed)
+    assert "Spawned" in result
+    assert "explorer" in result
+
+    # Wait for background task
+    tasks = list(manager.active_tasks.values())
+    await asyncio.gather(*tasks, return_exceptions=True)
+    await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_steer_instruction_only_with_active_tasks() -> None:
+    """get_instruction should return None when no active tasks."""
+    from yaacli.toolsets.background import SteerSubagentTool
+
+    manager = BackgroundTaskManager()
+    tool = SteerSubagentTool()
+    ctx = _make_run_ctx(manager=manager, agent_id="main")
+
+    instruction = await tool.get_instruction(ctx)
+    assert instruction is None
+
+    # Add an active task
+    async def sleeper() -> None:
+        await asyncio.sleep(100)
+
+    task = asyncio.create_task(sleeper())
+    manager.register_task("searcher-bg-a1b2", task)
+
+    instruction = await tool.get_instruction(ctx)
+    assert instruction is not None
+    assert "Send additional guidance" in instruction
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
