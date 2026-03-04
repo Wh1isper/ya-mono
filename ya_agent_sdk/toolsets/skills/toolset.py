@@ -37,6 +37,10 @@ logger = get_logger(__name__)
 # Default subdirectory name to scan for skills
 SKILLS_DIR_NAME = "skills"
 
+# Shared skills directory following the Agent Skills open standard
+# See: https://agentskills.io/
+SHARED_SKILLS_DIR_NAME = ".agents/skills"
+
 # Type alias for pre-scan hook (can be sync or async)
 # Receives (toolset, ctx) to access toolset config like skills_dir_name
 PreScanHook = (
@@ -94,6 +98,7 @@ class SkillToolset(BaseToolset[AgentContext]):
         self,
         skills_dir_name: str = SKILLS_DIR_NAME,
         *,
+        extra_dir_names: list[str] | None = None,
         toolset_id: str | None = None,
         pre_scan_hook: PreScanHook | None = None,
     ) -> None:
@@ -102,6 +107,11 @@ class SkillToolset(BaseToolset[AgentContext]):
         Args:
             skills_dir_name: Name of the subdirectory to scan for skills.
                 Defaults to "skills".
+            extra_dir_names: Additional subdirectory patterns to scan under each
+                allowed path. For example, [".agents/skills"] enables discovery
+                of shared skills following the Agent Skills open standard.
+                Extra dirs are scanned before the primary dir, so skills in
+                the primary dir override those in extra dirs (higher priority).
             toolset_id: Optional unique ID for this toolset instance.
             pre_scan_hook: Optional hook called before scanning skills.
                 Can be sync or async. Receives (toolset, ctx) as arguments.
@@ -110,6 +120,7 @@ class SkillToolset(BaseToolset[AgentContext]):
                 Hook can access toolset.skills_dir_name and ctx.deps.file_operator.
         """
         self._skills_dir_name = skills_dir_name
+        self._extra_dir_names = extra_dir_names or []
         self._skills_cache: dict[str, SkillConfig] = {}
         self._last_scan_paths: frozenset[str] = frozenset()
         self._toolset_id = toolset_id
@@ -132,26 +143,36 @@ class SkillToolset(BaseToolset[AgentContext]):
     async def _get_skills_directories(self, file_operator: FileOperator) -> list[str]:
         """Get all skills directories from FileOperator's allowed paths.
 
+        For each allowed path, scans extra_dir_names first (lower priority),
+        then the primary skills_dir_name (higher priority). This ensures that
+        tool-specific skills override shared skills when names conflict.
+
         Uses FileOperator's async methods to support remote filesystems.
 
         Args:
             file_operator: The FileOperator instance.
 
         Returns:
-            List of paths (as strings) to skills directories that exist.
+            List of paths (as strings) to skills directories that exist,
+            ordered from lowest to highest priority.
         """
         skills_dirs: list[str] = []
 
         # Access the internal _allowed_paths attribute
         allowed_paths: list[Path] = file_operator._allowed_paths
 
-        for allowed_path in allowed_paths:
-            skills_dir = str(allowed_path / self._skills_dir_name)
+        # Build ordered list of dir names: extra dirs first (lower priority),
+        # then primary dir (higher priority)
+        dir_names = [*self._extra_dir_names, self._skills_dir_name]
 
-            # Use FileOperator's async methods
-            if await file_operator.exists(skills_dir) and await file_operator.is_dir(skills_dir):
-                skills_dirs.append(skills_dir)
-                logger.debug(f"Found skills directory: {skills_dir}")
+        for allowed_path in allowed_paths:
+            for dir_name in dir_names:
+                skills_dir = str(allowed_path / dir_name)
+
+                # Use FileOperator's async methods
+                if await file_operator.exists(skills_dir) and await file_operator.is_dir(skills_dir):
+                    skills_dirs.append(skills_dir)
+                    logger.debug(f"Found skills directory: {skills_dir}")
 
         return skills_dirs
 

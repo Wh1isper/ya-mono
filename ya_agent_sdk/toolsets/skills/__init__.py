@@ -35,9 +35,10 @@ from ya_agent_sdk.toolsets.skills.config import (
     load_skills_from_dir,
     parse_skill_markdown,
 )
-from ya_agent_sdk.toolsets.skills.toolset import PreScanHook, SkillToolset
+from ya_agent_sdk.toolsets.skills.toolset import SHARED_SKILLS_DIR_NAME, PreScanHook, SkillToolset
 
 __all__ = [
+    "SHARED_SKILLS_DIR_NAME",
     "PreScanHook",
     "SkillConfig",
     "SkillToolset",

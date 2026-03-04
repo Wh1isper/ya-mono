@@ -93,29 +93,63 @@ When reviewing code, analyze the following aspects:
 
 ## Directory Structure
 
-Skills are discovered from `skills/` subdirectory in each of FileOperator's `allowed_paths`:
+Skills are discovered from `skills/` subdirectory in each of FileOperator's `allowed_paths`. Additionally, SkillToolset supports `extra_dir_names` to scan shared directories like `.agents/skills/` following the [Agent Skills open standard](https://agentskills.io/).
 
 ```
 # Typical setup with local environment
 allowed_paths:
-  - /home/user/project          # Project directory
-  - /home/user/.yaacli            # Config directory
+  - /home/user/.agents            # Shared agent skills (cross-tool)
+  - /home/user/.yaacli            # Tool-specific config directory
+  - /home/user/project            # Project directory
 
-# Skills will be scanned from:
-/home/user/project/skills/
-  skill-one/
-    SKILL.md
-    reference.md
-  skill-two/
-    SKILL.md
-/home/user/.yaacli/skills/
-  global-skill/
-    SKILL.md
+# Skills will be scanned from (lowest to highest priority):
+/home/user/.agents/skills/        # Shared user skills
+/home/user/.yaacli/skills/        # Tool-specific user skills
+/home/user/project/.agents/skills/  # Shared project skills
+/home/user/project/skills/        # Tool-specific project skills
+```
+
+Each skill is a directory with `SKILL.md` as the entrypoint:
+
+```
+skill-name/
+  SKILL.md           # Main instructions (required)
+  scripts/           # Executable code (optional)
+  references/        # Documentation loaded on demand (optional)
+  assets/            # Files used in output (optional)
+```
+
+### Shared Skills (.agents/skills)
+
+The `.agents/skills/` directory follows the [Agent Skills open standard](https://agentskills.io/), an open specification adopted by multiple AI tools including OpenAI Codex, Gemini CLI, Cursor, VS Code, and others. Skills placed in `.agents/skills/` can be discovered by any compatible agent tool.
+
+| Scope                | Path                        | Description                                   |
+| -------------------- | --------------------------- | --------------------------------------------- |
+| USER (shared)        | `~/.agents/skills/`         | Personal skills shared across all agent tools |
+| USER (tool-specific) | `~/.yaacli/skills/`         | Skills specific to this tool                  |
+| REPO (shared)        | `<project>/.agents/skills/` | Project skills shared across all agent tools  |
+| REPO (tool-specific) | `<project>/skills/`         | Project skills specific to this tool          |
+
+To enable shared skill discovery, pass `extra_dir_names` to SkillToolset:
+
+```python
+from ya_agent_sdk.toolsets.skills import SHARED_SKILLS_DIR_NAME, SkillToolset
+
+skill_toolset = SkillToolset(extra_dir_names=[SHARED_SKILLS_DIR_NAME])
 ```
 
 ### Skill Priority
 
-When multiple directories contain skills with the same name, later directories in `allowed_paths` take precedence. This allows project-level skills to override global skills.
+When multiple directories contain skills with the same name, later directories take precedence. Within each `allowed_path`, extra dirs (`.agents/skills/`) are scanned before the primary dir (`skills/`), so tool-specific skills override shared skills.
+
+Priority chain (lowest to highest):
+
+```mermaid
+flowchart LR
+    A["~/.agents/skills/"] -->|overridden by| B["~/.yaacli/skills/"]
+    B -->|overridden by| C["project/.agents/skills/"]
+    C -->|overridden by| D["project/skills/"]
+```
 
 ## Architecture Assumption
 
