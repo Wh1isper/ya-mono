@@ -48,7 +48,7 @@ from ya_agent_sdk.toolsets.core.multimodal import tools as multimodal_tools
 from ya_agent_sdk.toolsets.core.shell import tools as shell_tools
 from ya_agent_sdk.toolsets.core.subagent import tools as subagent_tools
 from ya_agent_sdk.toolsets.core.web import tools as web_tools
-from ya_agent_sdk.toolsets.skills.toolset import SkillToolset
+from ya_agent_sdk.toolsets.skills.toolset import SHARED_SKILLS_DIR_NAME, SkillToolset
 from yaacli.browser import BrowserManager
 from yaacli.config import ConfigManager, MCPConfig, SubagentsConfig, YaacliConfig
 from yaacli.environment import TUIEnvironment
@@ -201,7 +201,9 @@ def create_tui_runtime(
                     print(event)
     """
     # Collect toolsets
-    toolsets: list[AbstractToolset[Any] | MCPServer] = [SkillToolset(toolset_id="skills")]
+    toolsets: list[AbstractToolset[Any] | MCPServer] = [
+        SkillToolset(toolset_id="skills", extra_dir_names=[SHARED_SKILLS_DIR_NAME]),
+    ]
 
     # Add MCP servers
     if mcp_config:
@@ -217,16 +219,20 @@ def create_tui_runtime(
             logger.info("Added browser toolset (cdp_url=%s)", browser_manager.cdp_url)
 
     # Environment configuration
-    # Include global config dir in allowed_paths so agent can modify configs directly
+    # Include global config dir in allowed_paths so agent can modify configs directly.
+    # Include ~/.agents for shared skills following the Agent Skills open standard.
+    # Order matters for skill priority (later = higher priority):
+    #   ~/.agents < ~/.yaacli < project dir
     global_config_dir = ConfigManager.DEFAULT_CONFIG_DIR
+    shared_agents_dir = Path.home() / ".agents"
     env_kwargs: dict[str, Any] = {}
     if working_dir:
         env_kwargs["default_path"] = working_dir
-        env_kwargs["allowed_paths"] = [working_dir, global_config_dir]
+        env_kwargs["allowed_paths"] = [shared_agents_dir, global_config_dir, working_dir]
     else:
         cwd = Path.cwd()
         env_kwargs["default_path"] = cwd
-        env_kwargs["allowed_paths"] = [cwd, global_config_dir]
+        env_kwargs["allowed_paths"] = [shared_agents_dir, global_config_dir, cwd]
 
     # Model configuration - resolve from preset name or dict
     model_cfg = _resolve_model_cfg(config.general.model_cfg)
