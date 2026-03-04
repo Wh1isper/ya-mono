@@ -125,7 +125,7 @@ class BaseTool(ABC):
 
     When True, this tool will be automatically included in subagent toolsets
     without being explicitly listed in the subagent's tools or optional_tools.
-    Useful for management/utility tools like task_*, handoff, etc.
+    Useful for management/utility tools like task_*, summarize, etc.
     """
 
     def is_available(self, ctx: RunContext[AgentContext]) -> bool:

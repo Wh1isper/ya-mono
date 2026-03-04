@@ -487,7 +487,7 @@ async def test_get_context_instructions_with_handoff_warning(tmp_path: Path) -> 
             # Create mock run_context with high token usage
             mock_run_context = MagicMock()
             mock_run_context.deps = ctx
-            mock_run_context.metadata = {"context_manage_tool": "handoff"}
+            mock_run_context.metadata = {"context_manage_tool": "summarize"}
             mock_run_context.messages = [
                 ModelRequest(parts=[UserPromptPart(content="Hello")]),
                 ModelResponse(
@@ -507,13 +507,13 @@ async def test_get_context_instructions_with_handoff_warning(tmp_path: Path) -> 
             assert "<context-window>200000</context-window>" in instructions
             assert "<total-tokens>110000</total-tokens>" in instructions
             assert "</runtime-context>" in instructions
-            # Verify handoff warning
+            # Verify context management reminder
             assert "<system-reminder>" in instructions
-            assert "handoff" in instructions.lower()
+            assert "summarize" in instructions
 
 
 async def test_get_context_instructions_no_handoff_warning_below_threshold(tmp_path: Path) -> None:
-    """Should not include handoff warning when below threshold."""
+    """Should not include reminder when below threshold."""
     from unittest.mock import MagicMock
 
     from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
@@ -535,7 +535,7 @@ async def test_get_context_instructions_no_handoff_warning_below_threshold(tmp_p
         ) as ctx:
             mock_run_context = MagicMock()
             mock_run_context.deps = ctx
-            mock_run_context.metadata = {"context_manage_tool": "handoff"}
+            mock_run_context.metadata = {"context_manage_tool": "summarize"}
             mock_run_context.messages = [
                 ModelRequest(parts=[UserPromptPart(content="Hello")]),
                 ModelResponse(
@@ -551,11 +551,11 @@ async def test_get_context_instructions_no_handoff_warning_below_threshold(tmp_p
 
             # Should not contain system-reminder
             assert "<system-reminder>" not in instructions
-            assert "handoff" not in instructions
+            assert "summarize" not in instructions
 
 
 async def test_get_context_instructions_no_handoff_warning_when_disabled(tmp_path: Path) -> None:
-    """Should not include handoff warning when context_manage_tool is False."""
+    """Should not include reminder when context_manage_tool is False."""
     from unittest.mock import MagicMock
 
     from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
@@ -591,7 +591,7 @@ async def test_get_context_instructions_no_handoff_warning_when_disabled(tmp_pat
 
             instructions = await ctx.get_context_instructions(mock_run_context)
 
-            # No system-reminder when handoff disabled
+            # No system-reminder when context management disabled
             assert "<system-reminder>" not in instructions
 
 

@@ -1,49 +1,52 @@
-<handoff-guidelines>
+<summarize-guidelines>
 
 <overview>
-Handoff preserves essential context when conversation history becomes too large.
-It clears message history while injecting a structured summary into the new context.
+The summarize tool captures current progress and starts fresh with a clean context.
+Use it for two purposes: managing context size, and switching focus between topics or tasks.
 </overview>
 
-<when-to-handoff>
-**Proactive triggers**:
+<communication>
+When summarizing, communicate naturally with the user:
+- "The conversation is getting long. Let me summarize our progress and continue."
+- "Before we switch to the new task, let me summarize what we've done so far."
+- "Let me organize our progress, then we can move on to [next topic]."
+
+Do NOT use technical jargon like "context reset", "context window", or "token limit" with the user.
+</communication>
+
+<when-to-summarize>
+**Context management** -- keep conversations productive:
 - System reminder indicates approaching context limit
-- Major task phase completed, starting new phase
-- Topic transition to completely unrelated work
+- Conversation has accumulated a lot of back-and-forth that is no longer relevant
+- About to begin multi-step work that benefits from clean context
 
-**Before complex tasks**:
-- Context contains irrelevant prior conversation
-- About to begin multi-step work benefiting from clean context
-</when-to-handoff>
+**Focus switching** -- transition cleanly between topics:
+- User asks to work on a different topic or task
+- Major task phase completed, moving to the next phase
+- User explicitly asks to summarize and continue
+</when-to-summarize>
 
-<when-not-to-handoff>
-- Handoff already occurred in current conversation (context-handoff tag exists)
-- Current task is direct continuation with relevant context
+<when-not-to-summarize>
+- Summary already occurred in current conversation (context restored tag exists)
+- Current task is a direct continuation with all context still relevant
 - Simple follow-up questions or minor adjustments
-</when-not-to-handoff>
+</when-not-to-summarize>
 
-<pre-handoff-checklist>
-Before calling handoff, ensure pending work is properly captured:
+<before-summarizing>
+1. **Capture remaining work as tasks** if applicable:
+   - Review existing tasks with `task_list`
+   - Create new tasks for pending items with `task_create`
 
-1. **Capture remaining work as tasks**:
-   - If tasks exist: call `task_list` to review current status
-   - If no tasks yet: use `task_create` to record remaining work items
-   - Update task status/description if needed with `task_update`
+2. **Identify key files** being actively edited or referenced
 
-2. **Identify key files**:
-   - Files being actively edited
-   - Configuration files critical to current work
+3. **Note important decisions** -- architecture choices, user preferences
 
-3. **Note important decisions**:
-   - Architecture choices made during conversation
-   - User preferences expressed
-
-Task states are automatically preserved across handoff. Creating tasks ensures
-the new context has a structured understanding of what needs to be done.
-</pre-handoff-checklist>
+Task states are automatically preserved. Creating tasks ensures structured
+continuity in the new context.
+</before-summarizing>
 
 <content-structure>
-The `content` field should be a concise but complete summary:
+The `content` field should be concise but complete:
 
 ```
 ## User Intent
@@ -57,32 +60,20 @@ The `content` field should be a concise but complete summary:
 - [Decision 2]: [Rationale]
 
 ## Next Step
-[Immediate action to take after handoff]
+[Immediate action to take after summary]
 ```
 
-Note: Pending tasks are captured via task tools and auto-preserved.
-Only include task context in content if additional explanation is needed.
+Only include task context in content if additional explanation is needed beyond
+what the task descriptions already capture.
 </content-structure>
 
 <auto-load-files>
-Use `auto_load_files` for files that should be automatically read after handoff:
-
-**Good candidates**:
+Use `auto_load_files` for files needed immediately after summary:
 - Source files being actively edited
-- Key configuration files (package.json, pyproject.toml)
+- Key configuration files
 - Important reference documents
 
-**Avoid**:
-- Large files (content is injected into context)
-- Files already fully described in content
-- Temporary or generated files
+Avoid large files, files already described in content, or temporary files.
 </auto-load-files>
 
-<best-practices>
-- Capture work structure in tasks, context in content
-- Be specific: include file paths, concrete details
-- Be actionable: next step should be clear and executable
-- Avoid redundancy: don't repeat what's in tasks or auto_load_files
-</best-practices>
-
-</handoff-guidelines>
+</summarize-guidelines>

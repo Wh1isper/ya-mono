@@ -259,7 +259,7 @@ Import from `ya_agent_sdk.toolsets.core.*`:
 | `web`        | search_with_tavily, search_with_google, visit_webpage, save_web_files |
 | `document`   | pdf_convert, office_to_markdown                                       |
 | `content`    | validate_json                                                         |
-| `context`    | thinking, handoff, to_do_read, to_do_write                            |
+| `context`    | thinking, summarize, to_do_read, to_do_write                          |
 | `enhance`    | screenshot                                                            |
 | `multimodal` | view (images, video, audio)                                           |
 

@@ -49,7 +49,7 @@ graph TB
     OutputPane --> Events[Event Notifications]
 
     AgentPanel --> AgentTree[Agent Tree View]
-    AgentPanel --> CompactStatus[Compact/Handoff Status]
+    AgentPanel --> CompactStatus[Compact/Summary Status]
 
     InputArea --> PromptInput[User Input]
     InputArea --> SteeringIndicator[Steering Mode Indicator]
@@ -230,7 +230,7 @@ def render_code_block(self, code: str, language: str = "") -> str:
 └──────────────────────────────────────────────────────────┘
 ```
 
-### Compact/Handoff Status
+### Compact/Summary Status
 
 ```
 ┌─ Context Management ─────────────────────────────────────┐
@@ -240,10 +240,10 @@ def render_code_block(self, code: str, language: str = "") -> str:
 ```
 
 ```
-┌─ Context Handoff ────────────────────────────────────────┐
-│ → Preparing handoff summary...                           │
+┌─ Summary Complete ───────────────────────────────────────┐
+│ → Summarizing progress (42 messages)...                  │
 │   Preserving: 5 key decisions, 12 file modifications     │
-│ ✓ Handoff complete. Context reset.                       │
+│ ✓ Progress summarized, continuing with fresh context     │
 └──────────────────────────────────────────────────────────┘
 ```
 

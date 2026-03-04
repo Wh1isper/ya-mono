@@ -56,7 +56,7 @@ async def test_process_handoff_with_handoff_message(tmp_path: Path) -> None:
 
             result = await process_handoff_message(mock_ctx, history)
 
-            # Should return 3 messages: system+user, tool call, tool return+handoff-complete
+            # Should return 3 messages: system+user, tool call, tool return+summary-complete
             assert len(result) == 3
 
             # First message: system prompt placeholder (no user prompt since user_prompts is None)
@@ -69,19 +69,19 @@ async def test_process_handoff_with_handoff_message(tmp_path: Path) -> None:
             assert isinstance(second_msg, ModelResponse)
             assert len(second_msg.parts) == 1
             assert isinstance(second_msg.parts[0], ToolCallPart)
-            assert second_msg.parts[0].tool_name == "handoff"
+            assert second_msg.parts[0].tool_name == "summarize"
 
-            # Third message: tool return with summary + handoff-complete
+            # Third message: tool return with summary + summary-complete
             third_msg = result[2]
             assert isinstance(third_msg, ModelRequest)
             tool_return_parts = [p for p in third_msg.parts if isinstance(p, ToolReturnPart)]
             assert len(tool_return_parts) == 1
-            assert tool_return_parts[0].tool_name == "handoff"
+            assert tool_return_parts[0].tool_name == "summarize"
             assert "Previous context summary here" in tool_return_parts[0].content
-            # handoff-complete marker
+            # summary-complete marker
             user_parts = [p for p in third_msg.parts if isinstance(p, UserPromptPart)]
             assert len(user_parts) == 1
-            assert "handoff-complete" in user_parts[0].content
+            assert "summary-complete" in user_parts[0].content
 
             # Tool call IDs should match
             assert second_msg.parts[0].tool_call_id == tool_return_parts[0].tool_call_id
@@ -142,15 +142,15 @@ async def test_process_handoff_with_steering_messages(tmp_path: Path) -> None:
 
             assert len(result) == 3
 
-            # Third message should contain tool return, steering, and handoff-complete
+            # Third message should contain tool return, steering, and summary-complete
             third_msg = result[2]
             assert isinstance(third_msg, ModelRequest)
             user_parts = [p for p in third_msg.parts if isinstance(p, UserPromptPart)]
-            # 2 steering + handoff-complete
+            # 2 steering + summary-complete
             assert len(user_parts) == 3
             assert "[User Steering] Focus on tests" in user_parts[0].content
             assert "[User Steering] Skip docs" in user_parts[1].content
-            assert "handoff-complete" in user_parts[2].content
+            assert "summary-complete" in user_parts[2].content
 
             # Steering messages should be cleared
             assert ctx.steering_messages == []
@@ -310,16 +310,16 @@ def test_build_handoff_messages_basic() -> None:
     # Second: response with tool call
     assert isinstance(result[1], ModelResponse)
     assert isinstance(result[1].parts[0], ToolCallPart)
-    assert result[1].parts[0].tool_name == "handoff"
+    assert result[1].parts[0].tool_name == "summarize"
     assert result[1].parts[0].tool_call_id == "test-id"
 
-    # Third: request with tool return + handoff-complete
+    # Third: request with tool return + summary-complete
     assert isinstance(result[2], ModelRequest)
     tool_returns = [p for p in result[2].parts if isinstance(p, ToolReturnPart)]
     assert len(tool_returns) == 1
     assert tool_returns[0].content == "Test summary"
     assert tool_returns[0].tool_call_id == "test-id"
-    assert any(isinstance(p, UserPromptPart) and "handoff-complete" in p.content for p in result[2].parts)
+    assert any(isinstance(p, UserPromptPart) and "summary-complete" in p.content for p in result[2].parts)
 
 
 def test_build_handoff_messages_with_prompt_and_steering() -> None:
@@ -341,5 +341,5 @@ def test_build_handoff_messages_with_prompt_and_steering() -> None:
     third_msg = result[2]
     assert isinstance(third_msg, ModelRequest)
     user_parts = [p for p in third_msg.parts if isinstance(p, UserPromptPart)]
-    assert len(user_parts) == 2  # steering + handoff-complete
+    assert len(user_parts) == 2  # steering + summary-complete
     assert "[User Steering] Use click library" in user_parts[0].content

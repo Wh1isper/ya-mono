@@ -590,7 +590,7 @@ def test_event_renderer_render_handoff_start():
     renderer = EventRenderer()
     result = renderer.render_handoff_start(75)
     assert "75" in result
-    assert "handoff" in result.lower()
+    assert "summarizing" in result.lower()
 
 
 def test_event_renderer_render_handoff_complete():

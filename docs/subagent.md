@@ -6,7 +6,7 @@ Hierarchical agent architectures where a main agent delegates specialized tasks 
 
 - **Markdown-based Configuration**: Define subagents using markdown files with YAML frontmatter
 - **Tool Inheritance**: Subagents inherit tools from parent toolset with optional filtering
-- **Auto-Inherit Tools**: Management tools (task\_\*, handoff) are automatically inherited by all subagents
+- **Auto-Inherit Tools**: Management tools (task\_\*, summarize) are automatically inherited by all subagents
 - **Model Flexibility**: Subagents can use different models or inherit from parent
 - **Dynamic Availability**: Subagent tools are automatically disabled when required tools are unavailable
 - **Unified Delegation** (Recommended): Single `delegate` tool to call any subagent by name
@@ -189,20 +189,20 @@ You are an expert debugger specializing in systematic root cause analysis.
 
 - **Required tools** (`tools`): ALL must be available in parent toolset for subagent to be enabled
 - **Optional tools** (`optional_tools`): Included if available, not required for availability
-- **Auto-inherit tools**: Tools with `auto_inherit=True` are automatically included in all subagents (e.g., `task_*`, `handoff`)
+- **Auto-inherit tools**: Tools with `auto_inherit=True` are automatically included in all subagents (e.g., `task_*`, `summarize`)
 - **No tools specified**: Subagent inherits all tools from parent and is always available
 
 ### Auto-Inherit Tools
 
 Some management tools are automatically inherited by all subagents without explicit configuration:
 
-| Tool          | Purpose                                |
-| ------------- | -------------------------------------- |
-| `task_create` | Create tasks for tracking work         |
-| `task_update` | Update task status and dependencies    |
-| `task_list`   | List all tasks                         |
-| `task_get`    | Get task details                       |
-| `handoff`     | Context handoff for session management |
+| Tool          | Purpose                                  |
+| ------------- | ---------------------------------------- |
+| `task_create` | Create tasks for tracking work           |
+| `task_update` | Update task status and dependencies      |
+| `task_list`   | List all tasks                           |
+| `task_get`    | Get task details                         |
+| `summarize`   | Summarize context for session management |
 
 To create a custom auto-inherit tool:
 
