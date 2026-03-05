@@ -2099,13 +2099,15 @@ class TUIApp:
         has_content = False
 
         # --- Section 1: Agent Tasks (from task_manager) ---
+        task_manager = None
+        all_tasks = []
         try:
             task_manager = self.runtime.ctx.task_manager
             all_tasks = task_manager.list_all()
         except RuntimeError:
-            all_tasks = []
+            pass
 
-        if all_tasks:
+        if all_tasks and task_manager:
             has_content = True
             header = Text("Agent Tasks", style="bold cyan")
             lines.append(self._renderer.render(header).rstrip())
@@ -2139,10 +2141,10 @@ class TUIApp:
 
         # --- Section 2: Background Subagents ---
         bg_manager = self._get_background_manager()
-        bg_tasks: dict[str, object] = {}
+        bg_active: dict[str, asyncio.Task[Any]] = {}
         bg_infos: dict[str, BackgroundTaskInfo] = {}
         if bg_manager:
-            bg_tasks = bg_manager.active_tasks
+            bg_active = bg_manager.active_tasks
             bg_infos = bg_manager.task_infos
 
         # Show all known background subagents (running + recently completed)
@@ -2162,7 +2164,7 @@ class TUIApp:
 
             now = datetime.now()
             for agent_id, info in bg_infos.items():
-                is_running = agent_id in bg_tasks and not bg_tasks[agent_id].done()
+                is_running = agent_id in bg_active and not bg_active[agent_id].done()
                 if is_running:
                     status_text = Text("running", style="cyan")
                 else:
