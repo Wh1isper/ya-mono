@@ -147,7 +147,7 @@ class SpawnDelegateTool(BaseTool):
                 manager.notify_completion(agent_id)
 
         task = asyncio.create_task(_run_background())
-        manager.register_task(agent_id, task)
+        manager.register_task(agent_id, task, subagent_name=subagent_name, prompt=prompt, is_resume=is_resume)
 
         action = "Resumed" if is_resume else "Spawned"
         return (

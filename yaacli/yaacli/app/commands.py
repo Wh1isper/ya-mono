@@ -140,6 +140,7 @@ BUILTIN_COMMANDS = frozenset({
     "help",
     "clear",
     "cost",
+    "tasks",
     "dump",
     "load",
     "exit",
