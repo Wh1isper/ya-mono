@@ -27,6 +27,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from y_agent_environment import BaseResource
@@ -39,6 +41,17 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 BACKGROUND_MANAGER_KEY = "background_task_manager"
+
+
+@dataclass
+class BackgroundTaskInfo:
+    """Metadata for a background subagent task."""
+
+    agent_id: str
+    subagent_name: str
+    prompt: str
+    started_at: datetime = field(default_factory=datetime.now)
+    is_resume: bool = False
 
 
 class BackgroundTaskManager(BaseResource):
@@ -58,6 +71,7 @@ class BackgroundTaskManager(BaseResource):
 
     def __init__(self) -> None:
         self._tasks: dict[str, asyncio.Task[Any]] = {}
+        self._task_info: dict[str, BackgroundTaskInfo] = {}
         self._core_toolset: Toolset[Any] | None = None
         self._completion_callback: Callable[[str], None] | None = None
 
@@ -126,18 +140,41 @@ class BackgroundTaskManager(BaseResource):
         """Active background tasks, keyed by agent_id (copy)."""
         return dict(self._tasks)
 
-    def register_task(self, agent_id: str, task: asyncio.Task[Any]) -> None:
+    @property
+    def task_infos(self) -> dict[str, BackgroundTaskInfo]:
+        """All background task metadata, keyed by agent_id (copy)."""
+        return dict(self._task_info)
+
+    def register_task(
+        self,
+        agent_id: str,
+        task: asyncio.Task[Any],
+        *,
+        subagent_name: str = "",
+        prompt: str = "",
+        is_resume: bool = False,
+    ) -> None:
         """Register a background task for tracking.
 
-        The task is auto-removed from the registry when it completes.
+        The asyncio task is auto-removed when it completes.
+        Task info is preserved for display purposes.
 
         Args:
             agent_id: Unique identifier for the background subagent.
             task: The asyncio.Task running the subagent.
+            subagent_name: Name of the subagent (e.g., "searcher").
+            prompt: The prompt sent to the subagent.
+            is_resume: Whether this is resuming a previous conversation.
         """
         self._tasks[agent_id] = task
+        self._task_info[agent_id] = BackgroundTaskInfo(
+            agent_id=agent_id,
+            subagent_name=subagent_name,
+            prompt=prompt,
+            is_resume=is_resume,
+        )
         task.add_done_callback(lambda _t: self._tasks.pop(agent_id, None))
-        logger.debug("Registered background task: %s", agent_id)
+        logger.debug("Registered background task: %s (%s)", agent_id, subagent_name)
 
     async def close(self) -> None:
         """Cancel all background tasks and clean up."""
@@ -148,6 +185,7 @@ class BackgroundTaskManager(BaseResource):
             await asyncio.gather(*tasks, return_exceptions=True)
             logger.debug("Cancelled %d background tasks", len(tasks))
         self._tasks.clear()
+        self._task_info.clear()
         self._core_toolset = None
         self._completion_callback = None
 

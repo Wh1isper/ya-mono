@@ -57,6 +57,7 @@ from pydantic_ai.messages import (
     ToolCallPart,
 )
 from pydantic_ai.models import Model
+from rich.table import Table
 from rich.text import Text
 
 from ya_agent_sdk.agents.main import AgentRuntime, stream_agent
@@ -78,7 +79,7 @@ from ya_agent_sdk.utils import get_latest_request_usage
 
 # Import state management from app.state (re-export TUIMode, TUIState for backward compatibility)
 from yaacli.app.state import TUIMode
-from yaacli.background import BACKGROUND_MANAGER_KEY, BackgroundTaskManager
+from yaacli.background import BACKGROUND_MANAGER_KEY, BackgroundTaskInfo, BackgroundTaskManager
 from yaacli.browser import BrowserManager
 from yaacli.config import ConfigManager, YaacliConfig
 from yaacli.display import EventRenderer, RichRenderer, ToolMessage
@@ -87,6 +88,7 @@ from yaacli.events import ContextUpdateEvent
 from yaacli.hooks import emit_context_update
 from yaacli.logging import configure_tui_logging, get_logger
 from yaacli.perf import perf_log_report, perf_report, perf_timer
+from yaacli.processes import PROCESS_MANAGER_KEY, ProcessManager
 from yaacli.runtime import create_tui_runtime
 from yaacli.session import TUIContext
 from yaacli.usage import SessionUsage
@@ -1898,6 +1900,9 @@ class TUIApp:
                 self._append_user_input(command)
                 self.switch_mode(TUIMode.PLAN)
                 self._append_system_output("Mode changed to PLAN")
+            case "/tasks":
+                self._append_user_input(command)
+                self._show_tasks()
             case _:
                 # Check custom commands
                 cmd_name = cmd[1:]  # Remove leading /
@@ -1916,6 +1921,7 @@ class TUIApp:
                     self._append_user_input(command)
                     self._append_system_output(f"Unknown command: {cmd}")
 
+        self._scroll_to_bottom()
         if self._app:
             self._app.invalidate()
 
@@ -2000,6 +2006,7 @@ class TUIApp:
         sys_table.add_row("/help", "Show this help")
         sys_table.add_row("/clear", "Clear output and history")
         sys_table.add_row("/cost", "Show cost summary")
+        sys_table.add_row("/tasks", "Show background tasks and processes")
         sys_table.add_row("/perf", "Show performance stats (YAACLI_PERF=1)")
         sys_table.add_row("/session [id]", "List sessions or restore by ID")
         sys_table.add_row("/dump [folder]", "Export session to folder")
@@ -2085,6 +2092,131 @@ class TUIApp:
         """Show token usage summary for the current session."""
         summary = self._session_usage.format_summary()
         self._append_system_output(summary)
+
+    def _show_tasks(self) -> None:
+        """Show all background tasks, subagents, and processes."""
+        lines: list[str] = []
+        has_content = False
+
+        # --- Section 1: Agent Tasks (from task_manager) ---
+        task_manager = None
+        all_tasks = []
+        try:
+            task_manager = self.runtime.ctx.task_manager
+            all_tasks = task_manager.list_all()
+        except RuntimeError:
+            pass
+
+        if all_tasks and task_manager:
+            has_content = True
+            header = Text("Agent Tasks", style="bold cyan")
+            lines.append(self._renderer.render(header).rstrip())
+
+            table = Table(show_header=True, box=None, padding=(0, 2))
+            table.add_column("ID", style="dim")
+            table.add_column("Status", style="bold")
+            table.add_column("Subject")
+            table.add_column("Owner", style="dim")
+
+            status_styles = {
+                "pending": "yellow",
+                "in_progress": "cyan",
+                "completed": "green",
+            }
+
+            for task in all_tasks:
+                status_text = Text(task.status.value, style=status_styles.get(task.status.value, ""))
+                blocked_suffix = ""
+                if task.blocked_by:
+                    active_blockers = [
+                        bid for bid in task.blocked_by if (b := task_manager.get(bid)) and b.status != "completed"
+                    ]
+                    if active_blockers:
+                        blocked_suffix = f" (blocked by {','.join(active_blockers)})"
+                subject = task.subject + blocked_suffix
+                owner = task.owner or ""
+                table.add_row(f"T{task.id}", status_text, subject, owner)
+
+            lines.append(self._renderer.render(table).rstrip())
+
+        # --- Section 2: Background Subagents ---
+        bg_manager = self._get_background_manager()
+        bg_active: dict[str, asyncio.Task[Any]] = {}
+        bg_infos: dict[str, BackgroundTaskInfo] = {}
+        if bg_manager:
+            bg_active = bg_manager.active_tasks
+            bg_infos = bg_manager.task_infos
+
+        # Show all known background subagents (running + recently completed)
+        if bg_infos:
+            has_content = True
+            if lines:
+                lines.append("")
+            header = Text("Background Subagents", style="bold cyan")
+            lines.append(self._renderer.render(header).rstrip())
+
+            table = Table(show_header=True, box=None, padding=(0, 2))
+            table.add_column("Agent ID", style="dim")
+            table.add_column("Subagent", style="bold")
+            table.add_column("Status")
+            table.add_column("Elapsed", style="dim")
+            table.add_column("Prompt", style="dim")
+
+            now = datetime.now()
+            for agent_id, info in bg_infos.items():
+                is_running = agent_id in bg_active and not bg_active[agent_id].done()
+                if is_running:
+                    status_text = Text("running", style="cyan")
+                else:
+                    status_text = Text("completed", style="green")
+                elapsed = now - info.started_at
+                elapsed_str = f"{int(elapsed.total_seconds())}s"
+                prompt_preview = info.prompt[:60] + "..." if len(info.prompt) > 60 else info.prompt
+                name = info.subagent_name
+                if info.is_resume:
+                    name += " (resume)"
+                table.add_row(agent_id, name, status_text, elapsed_str, prompt_preview)
+
+            lines.append(self._renderer.render(table).rstrip())
+
+        # --- Section 3: Background Processes ---
+        process_list = []
+        try:
+            if self._runtime and self._runtime.env and self._runtime.env.resources:
+                resource = self._runtime.env.resources.get(PROCESS_MANAGER_KEY)
+                if isinstance(resource, ProcessManager):
+                    process_list = resource.list_processes()
+        except RuntimeError:
+            pass
+
+        if process_list:
+            has_content = True
+            if lines:
+                lines.append("")
+            header = Text("Background Processes", style="bold cyan")
+            lines.append(self._renderer.render(header).rstrip())
+
+            table = Table(show_header=True, box=None, padding=(0, 2))
+            table.add_column("ID", style="dim")
+            table.add_column("Status", style="bold")
+            table.add_column("Command")
+            table.add_column("PID", style="dim")
+
+            for proc in process_list:
+                if proc.is_running:
+                    status_text = Text("running", style="cyan")
+                else:
+                    code = proc.exit_code if proc.exit_code is not None else "?"
+                    status_text = Text(f"exited ({code})", style="green" if code == 0 else "red")
+                cmd = f"{proc.command} {' '.join(proc.args)}".strip()
+                table.add_row(proc.process_id, status_text, cmd, str(proc.pid))
+
+            lines.append(self._renderer.render(table).rstrip())
+
+        if not has_content:
+            self._append_system_output("No active tasks, subagents, or processes.")
+        else:
+            self._append_output("\n".join(lines))
 
     def _dump_history(self, folder_path: str | None) -> None:
         """Dump session state to a folder.
