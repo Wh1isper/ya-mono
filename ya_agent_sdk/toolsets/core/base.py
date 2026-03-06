@@ -141,6 +141,7 @@ class Toolset(BaseToolset[AgentDepsT]):
         timeout: float | None = None,
         toolset_id: str | None = None,
         skip_unavailable: bool = True,
+        description: str | None = None,
     ) -> None:
         """Initialize the toolset.
 
@@ -153,11 +154,13 @@ class Toolset(BaseToolset[AgentDepsT]):
             timeout: Default timeout for tool execution.
             toolset_id: Optional unique ID for the toolset.
             skip_unavailable: If True, skip tools where is_available() returns False in get_tools().
+            description: Optional human-readable description for the toolset.
         """
         self.max_retries = max_retries
         self.timeout = timeout
         self._id = toolset_id
         self._skip_unavailable = skip_unavailable
+        self._description = description
 
         self.pre_hooks = pre_hooks or {}
         self.post_hooks = post_hooks or {}
@@ -183,6 +186,11 @@ class Toolset(BaseToolset[AgentDepsT]):
     def id(self) -> str | None:
         """Get the toolset ID."""
         return self._id
+
+    @property
+    def description(self) -> str | None:
+        """Get the toolset description."""
+        return self._description
 
     @property
     def tool_names(self) -> list[str]:
@@ -383,6 +391,7 @@ class Toolset(BaseToolset[AgentDepsT]):
             max_retries=self.max_retries,
             timeout=self.timeout,
             toolset_id=self._id,
+            description=self._description,
         )
 
     def _create_pydantic_tool(self, name: str, tool_instance: BaseTool) -> Tool[AgentDepsT]:

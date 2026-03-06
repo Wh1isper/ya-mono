@@ -741,6 +741,12 @@ class ResumableState(BaseModel):
     tasks: dict[str, dict[str, Any]] = Field(default_factory=dict)
     """Serialized tasks from TaskManager, keyed by task ID."""
 
+    tool_search_loaded_tools: list[str] = Field(default_factory=list)
+    """Tool names loaded via tool_search during the session."""
+
+    tool_search_loaded_namespaces: list[str] = Field(default_factory=list)
+    """Namespace IDs loaded via tool_search during the session."""
+
     def to_subagent_history(self) -> dict[str, list[ModelMessage]]:
         """Deserialize subagent_history to ModelMessage objects.
 
@@ -783,6 +789,8 @@ class ResumableState(BaseModel):
         ctx.auto_load_files = list(self.auto_load_files)
         # Restore task_manager from serialized tasks (always reset to avoid stale state)
         ctx.task_manager = TaskManager.from_exported(self.tasks) if self.tasks else TaskManager()
+        ctx.tool_search_loaded_tools = list(self.tool_search_loaded_tools)
+        ctx.tool_search_loaded_namespaces = list(self.tool_search_loaded_namespaces)
 
 
 # =============================================================================
@@ -937,6 +945,12 @@ class AgentContext(BaseModel):
 
     task_manager: TaskManager = Field(default_factory=TaskManager)
     """Task manager for tracking tasks and dependencies within the session."""
+
+    tool_search_loaded_tools: list[str] = Field(default_factory=list)
+    """Tool names loaded via tool_search during the session. Used for session restore."""
+
+    tool_search_loaded_namespaces: list[str] = Field(default_factory=list)
+    """Namespace IDs loaded via tool_search during the session. Used for session restore."""
 
     tool_tags: set[str] = Field(default_factory=set)
     """Active capability tags from available tools.
@@ -1636,6 +1650,8 @@ class AgentContext(BaseModel):
             need_user_approve_mcps=list(self.need_user_approve_mcps),
             auto_load_files=list(self.auto_load_files),
             tasks=self.task_manager.export_tasks(),
+            tool_search_loaded_tools=list(self.tool_search_loaded_tools),
+            tool_search_loaded_namespaces=list(self.tool_search_loaded_namespaces),
         )
 
     def with_state(self, state: ResumableState | None) -> Self:

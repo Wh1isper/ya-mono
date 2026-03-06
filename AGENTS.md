@@ -171,6 +171,15 @@ See [docs/events.md](docs/events.md) for details:
 - Event correlation via `event_id`
 - Creating custom events
 
+### Tool Search
+
+See [docs/tool-search.md](docs/tool-search.md) for details:
+
+- `ToolSearchToolSet` wrapper for dynamic tool loading
+- `KeywordSearchStrategy` (default, zero deps) and `EmbeddingSearchStrategy` (FastEmbed)
+- Category/namespace support for tool organization
+- Per-session state management for loaded tools
+
 ### Toolset Architecture
 
 See [docs/toolset.md](docs/toolset.md) for details:

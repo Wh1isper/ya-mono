@@ -164,6 +164,25 @@ class MCPServerConfig(MCPServerSpec):
     Inherits from SDK's MCPServerSpec. CLI-specific fields can be added here.
     """
 
+    description: str = ""
+    """Human-readable description of this MCP server's purpose.
+
+    Used as namespace description when MCP servers are wrapped in ToolSearchToolSet.
+    If empty, falls back to MCP server's instructions or auto-generated description.
+
+    Example in mcp.json::
+
+        {
+            "servers": {
+                "filesystem": {
+                    "command": "uvx",
+                    "args": ["mcp-server-filesystem"],
+                    "description": "File system operations (read, write, search)"
+                }
+            }
+        }
+    """
+
 
 class MCPConfig(BaseModel):
     """MCP configuration from mcp.json."""

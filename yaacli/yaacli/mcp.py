@@ -133,6 +133,26 @@ def build_mcp_server(
             return None
 
 
+def extract_mcp_descriptions(mcp_config: MCPConfig) -> dict[str, str]:
+    """Extract namespace descriptions from MCP server configurations.
+
+    Reads the ``description`` field from each MCPServerConfig for use
+    as namespace_descriptions in ToolSearchToolSet.
+
+    Args:
+        mcp_config: MCP configuration containing server definitions.
+
+    Returns:
+        Dict mapping server name to description. Only includes servers
+        with non-empty description fields.
+    """
+    descriptions: dict[str, str] = {}
+    for name, config in mcp_config.servers.items():
+        if config.description:
+            descriptions[name] = config.description
+    return descriptions
+
+
 def build_mcp_servers(
     mcp_config: MCPConfig,
     need_approval_mcps: list[str] | None = None,
