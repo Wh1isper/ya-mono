@@ -228,6 +228,18 @@ class BaseToolset(AbstractToolset[AgentDepsT], ABC):
                 return content
     """
 
+    @property
+    def description(self) -> str | None:
+        """Human-readable description of this toolset.
+
+        Used by ToolSearchToolSet for namespace description resolution.
+        Override in subclasses to provide a description.
+
+        Returns:
+            Description string or None.
+        """
+        return None
+
     async def get_instructions(self, ctx: RunContext[AgentDepsT]) -> str | None:
         """Get instructions to inject into the system prompt.
 

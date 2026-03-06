@@ -31,7 +31,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from pydantic_ai import DeferredToolRequests, ModelSettings
-from pydantic_ai.mcp import MCPServer
 from pydantic_ai.output import OutputSpec
 
 from ya_agent_sdk.agents.main import AgentRuntime, create_agent
@@ -49,11 +48,13 @@ from ya_agent_sdk.toolsets.core.shell import tools as shell_tools
 from ya_agent_sdk.toolsets.core.subagent import tools as subagent_tools
 from ya_agent_sdk.toolsets.core.web import tools as web_tools
 from ya_agent_sdk.toolsets.skills.toolset import SHARED_SKILLS_DIR_NAME, SkillToolset
+from ya_agent_sdk.toolsets.tool_search import create_best_strategy
+from ya_agent_sdk.toolsets.tool_search.toolset import ToolSearchToolSet
 from yaacli.browser import BrowserManager
 from yaacli.config import ConfigManager, MCPConfig, SubagentsConfig, YaacliConfig
 from yaacli.environment import TUIEnvironment
 from yaacli.logging import get_logger
-from yaacli.mcp import build_mcp_servers
+from yaacli.mcp import build_mcp_servers, extract_mcp_descriptions
 from yaacli.session import TUIContext
 from yaacli.toolsets.background import background_tools
 
@@ -201,15 +202,26 @@ def create_tui_runtime(
                     print(event)
     """
     # Collect toolsets
-    toolsets: list[AbstractToolset[Any] | MCPServer] = [
+    toolsets: list[AbstractToolset[Any]] = [
         SkillToolset(toolset_id="skills", extra_dir_names=[SHARED_SKILLS_DIR_NAME]),
     ]
 
-    # Add MCP servers
+    # Add MCP servers wrapped in ToolSearchToolSet for on-demand loading
     if mcp_config:
         mcp_servers = build_mcp_servers(mcp_config, need_approval_mcps=config.tools.need_approval_mcps)
-        toolsets.extend(mcp_servers)
-        logger.info("Added %d MCP servers to runtime", len(mcp_servers))
+        if mcp_servers:
+            mcp_descriptions = extract_mcp_descriptions(mcp_config)
+            mcp_toolsearch = ToolSearchToolSet(
+                toolsets=mcp_servers,
+                namespace_descriptions=mcp_descriptions if mcp_descriptions else None,
+                search_strategy=create_best_strategy(),
+            )
+            toolsets.append(mcp_toolsearch)
+            logger.info(
+                "Added %d MCP servers via ToolSearchToolSet (descriptions: %d)",
+                len(mcp_servers),
+                len(mcp_descriptions),
+            )
 
     # Add browser toolset if available
     if browser_manager and browser_manager.is_available:
