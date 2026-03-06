@@ -115,11 +115,16 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
     # -------------------------------------------------------------------------
 
     async def get_tools(self, ctx: RunContext[AgentContext]) -> dict[str, ToolsetTool[AgentContext]]:
-        """Return visible tools: loaded tools + tool_search.
+        """Return visible tools: tool_search first, then loaded tools.
 
         Collects all tools from wrapped toolsets, builds the search index,
         but only exposes tools that have been loaded via search (stored in
         AgentContext) and the ``tool_search`` tool itself.
+
+        ``tool_search`` is always the **first** entry in the returned dict so
+        that it occupies a stable position in the model's tool list regardless
+        of how many tools have been dynamically loaded.  Newly loaded tools
+        are appended after it.
         """
         all_tools = await self._collect_and_index_tools(ctx)
 
@@ -131,18 +136,11 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
         loaded_tools = set(ctx.deps.tool_search_loaded_tools)
         loaded_namespaces = set(ctx.deps.tool_search_loaded_namespaces)
 
-        # Filter: only return tools that are loaded
+        # tool_search is always FIRST for stable positioning in the tool list.
+        # Dynamically loaded tools are appended after it.
         visible: dict[str, ToolsetTool[AgentContext]] = {}
-        for name, tool in all_tools.items():
-            meta = self._search_entries.get(name)
-            if not meta:
-                continue
-            if (meta.namespace and meta.namespace in loaded_namespaces) or (
-                not meta.namespace and name in loaded_tools
-            ):
-                visible[name] = tool
 
-        # Add tool_search tool
+        # Add tool_search tool first
         search_tool_def = await self._search_pydantic_tool.prepare_tool_def(ctx)
         if search_tool_def:
             visible[_TOOL_SEARCH_NAME] = ToolsetTool(
@@ -151,6 +149,16 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
                 max_retries=3,
                 args_validator=self._search_pydantic_tool.function_schema.validator,
             )
+
+        # Append loaded tools after tool_search
+        for name, tool in all_tools.items():
+            meta = self._search_entries.get(name)
+            if not meta:
+                continue
+            if (meta.namespace and meta.namespace in loaded_namespaces) or (
+                not meta.namespace and name in loaded_tools
+            ):
+                visible[name] = tool
 
         deferred_count = len(all_tools) - (len(visible) - 1)  # -1 excludes tool_search from visible count
         logger.debug(
