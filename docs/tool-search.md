@@ -244,6 +244,44 @@ class MySearchStrategy:
 
 ## Architecture
 
+### Tool Ordering
+
+ToolSearchToolSet is designed for stable, append-only tool positioning:
+
+- **`tool_search` is always the first tool** returned by `get_tools()`. This gives it a fixed position in the model's tool list regardless of how many tools have been dynamically loaded.
+- **Loaded tools are appended after `tool_search`**. Each time the model discovers new tools, they appear after existing tools in the list, never before.
+
+To ensure dynamically loaded tools do not shift the positions of other toolsets, **register ToolSearchToolSet as the last toolset**:
+
+```python
+# Always-visible core tools
+core_toolset = Toolset(tools=[ViewTool, EditTool, ShellTool])
+
+# Dynamic tools via search -- LAST in the list
+search_toolset = ToolSearchToolSet(
+    toolsets=[web_toolset, db_toolset, cloud_toolset],
+    namespace_descriptions={...},
+)
+
+# Combine: core first, search last
+async with create_agent(
+    "openai:gpt-4o",
+    toolsets=[core_toolset, search_toolset],
+) as runtime:
+    ...
+```
+
+This produces a stable tool order:
+
+```mermaid
+graph LR
+    A["Core tools<br/>(stable)"] --> B["tool_search<br/>(stable)"] --> C["Loaded tools<br/>(append-only)"]
+```
+
+If ToolSearchToolSet were placed before other toolsets, dynamically loaded tools would shift those toolsets' positions in the tool list on each load.
+
+### Separation of Concerns
+
 ToolSearchToolSet is purely for dynamic loading. Always-visible tools should be placed in separate toolsets passed directly to `create_agent`:
 
 ```python

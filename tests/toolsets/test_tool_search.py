@@ -398,6 +398,31 @@ async def test_toolset_all_deferred_initially(weather_toolset, mock_run_context)
 
 
 @pytest.mark.anyio
+async def test_tool_search_always_first_in_tool_list(weather_toolset, loose_toolset, mock_run_context):
+    """tool_search must always be the first tool for stable positioning."""
+    ts = ToolSearchToolSet(
+        toolsets=[weather_toolset, loose_toolset],
+        namespace_descriptions={"weather": "Weather tools"},
+    )
+
+    # Initially: tool_search is first (and only)
+    tools = await ts.get_tools(mock_run_context)
+    assert next(iter(tools.keys())) == "tool_search"
+
+    # After loading namespace: tool_search still first
+    await ts.call_tool("tool_search", {"query": "weather"}, mock_run_context, tools["tool_search"])
+    tools = await ts.get_tools(mock_run_context)
+    assert next(iter(tools.keys())) == "tool_search"
+    assert "get_weather" in tools
+    assert "get_forecast" in tools
+
+    # After loading loose tools: tool_search still first
+    await ts.call_tool("tool_search", {"query": "file"}, mock_run_context, tools["tool_search"])
+    tools = await ts.get_tools(mock_run_context)
+    assert next(iter(tools.keys())) == "tool_search"
+
+
+@pytest.mark.anyio
 async def test_toolset_namespace_search_loads_all_tools(weather_toolset, mock_run_context):
     """Searching by namespace name should load all tools in that namespace."""
     ts = ToolSearchToolSet(

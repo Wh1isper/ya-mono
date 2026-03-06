@@ -202,11 +202,23 @@ def create_tui_runtime(
                     print(event)
     """
     # Collect toolsets
+    # Order matters: ToolSearchToolSet must be LAST so dynamically loaded
+    # tools are appended to the end of the model's tool list. Within
+    # ToolSearchToolSet, tool_search is the first tool for stable positioning.
     toolsets: list[AbstractToolset[Any]] = [
         SkillToolset(toolset_id="skills", extra_dir_names=[SHARED_SKILLS_DIR_NAME]),
     ]
 
-    # Add MCP servers wrapped in ToolSearchToolSet for on-demand loading
+    # Add browser toolset if available (before ToolSearchToolSet)
+    if browser_manager and browser_manager.is_available:
+        browser_toolset = browser_manager.get_browser_toolset()
+        if browser_toolset:
+            toolsets.append(browser_toolset)
+            logger.info("Added browser toolset (cdp_url=%s)", browser_manager.cdp_url)
+
+    # Add MCP servers wrapped in ToolSearchToolSet for on-demand loading.
+    # This is intentionally last: dynamically loaded tools append to the end
+    # of the tool list, keeping all existing tool positions stable.
     if mcp_config:
         mcp_servers = build_mcp_servers(mcp_config, need_approval_mcps=config.tools.need_approval_mcps)
         if mcp_servers:
@@ -222,13 +234,6 @@ def create_tui_runtime(
                 len(mcp_servers),
                 len(mcp_descriptions),
             )
-
-    # Add browser toolset if available
-    if browser_manager and browser_manager.is_available:
-        browser_toolset = browser_manager.get_browser_toolset()
-        if browser_toolset:
-            toolsets.append(browser_toolset)
-            logger.info("Added browser toolset (cdp_url=%s)", browser_manager.cdp_url)
 
     # Environment configuration
     # Include global config dir in allowed_paths so agent can modify configs directly.
