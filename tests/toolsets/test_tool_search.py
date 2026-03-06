@@ -774,10 +774,21 @@ np = pytest.importorskip("numpy", reason="numpy not installed")
 
 @pytest.fixture(scope="module")
 def embedding_strategy():
-    """Create an EmbeddingSearchStrategy (slow model init, reuse across tests)."""
+    """Create an EmbeddingSearchStrategy (slow model init, reuse across tests).
+
+    Skips if model download or loading fails (e.g., in CI without network
+    access or with incomplete model cache).
+    """
     from ya_agent_sdk.toolsets.tool_search.strategies.embedding import EmbeddingSearchStrategy
 
-    return EmbeddingSearchStrategy()
+    strategy = EmbeddingSearchStrategy()
+    try:
+        # Trigger model download/load and a test embed to detect failures early
+        model = strategy._get_model()
+        list(model.embed(["test"]))
+    except Exception as exc:
+        pytest.skip(f"Embedding model not available: {exc}")
+    return strategy
 
 
 @pytest.fixture
@@ -902,7 +913,7 @@ def test_embedding_build_index_rebuild(embedding_strategy, indexed_candidates):
 
 
 @pytest.mark.anyio
-async def test_toolset_with_embedding_strategy(weather_toolset, finance_toolset, mock_run_context):
+async def test_toolset_with_embedding_strategy(weather_toolset, finance_toolset, mock_run_context, embedding_strategy):
     """ToolSearchToolSet should work with EmbeddingSearchStrategy."""
     from ya_agent_sdk.toolsets.tool_search.strategies.embedding import EmbeddingSearchStrategy
 
