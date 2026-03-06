@@ -12,13 +12,17 @@ Yet Another Agent SDK for building AI agents with [Pydantic AI](https://ai.pydan
 
 ## Key Features
 
-- **Environment-based Architecture**: Protocol-based design for file operations, shell access, and resources. Built-in `LocalEnvironment` and `DockerEnvironment`, easily extensible for custom backends (SSH, S3, cloud VMs, etc.)
+- **Environment-based Architecture**: Protocol-based design for file operations, shell access, and resources. Built-in `LocalEnvironment` and `SandboxEnvironment`, easily extensible for custom backends (SSH, S3, cloud VMs, etc.)
 - **Fully Typed**: Complete type annotations validated with pyright (standard mode). Enjoy full IDE autocompletion and catch errors before runtime
 - **Resumable Sessions**: Export and restore `AgentContext` state for multi-turn conversations across restarts
 - **Hierarchical Agents**: Subagent system with task delegation, tool inheritance, and markdown-based configuration
+- **Tool Search**: Dynamic tool discovery for large tool libraries -- agents find and load only the tools they need, reducing context bloat by 85%+ while maintaining accuracy across hundreds of tools
 - **Skills System**: Markdown-based instruction files with hot reload and progressive loading
 - **Human-in-the-Loop**: Built-in approval workflows for sensitive tool operations
 - **Toolset Architecture**: Extensible tool system with pre/post hooks for logging, validation, and error handling
+- **Event System**: Lifecycle and sideband events for execution tracking, with streaming support for real-time monitoring
+- **Media Upload**: Pluggable media upload (S3, custom backends) with automatic binary-to-URL conversion for images and videos
+- **Message Bus**: Inter-agent communication with subscriber-based delivery, supporting multimodal content and user steering
 - **Resumable Resources**: Export and restore resource states (like browser sessions) across process restarts
 - **Browser Automation**: Docker-based headless Chrome sandbox for safe browser automation
 - **Streaming Support**: Real-time streaming of agent responses and tool executions
@@ -31,9 +35,11 @@ pip install ya-agent-sdk[all]
 uv add ya-agent-sdk[all]
 
 # Or install individual extras as needed
-pip install ya-agent-sdk[docker]    # Docker sandbox support
-pip install ya-agent-sdk[web]       # Web tools (tavily, firecrawl, markitdown)
-pip install ya-agent-sdk[document]  # Document processing (pymupdf, markitdown)
+pip install ya-agent-sdk[docker]       # Docker sandbox support
+pip install ya-agent-sdk[web]          # Web tools (tavily, firecrawl, markitdown)
+pip install ya-agent-sdk[document]     # Document processing (pymupdf, markitdown)
+pip install ya-agent-sdk[s3]           # S3 media upload (boto3)
+pip install ya-agent-sdk[tool-search]  # Semantic tool search (fastembed)
 ```
 
 ## Project Structure
@@ -107,10 +113,13 @@ Copy `examples/.env.example` to `examples/.env` and configure your API keys.
 
 - [AgentContext & Sessions](docs/context.md) - Session state, resumable sessions, extending context
 - [Streaming & Hooks](docs/streaming.md) - Real-time streaming, lifecycle hooks, event handling
+- [Events](docs/events.md) - Lifecycle events, sideband events, event correlation, custom events
 - [Toolset Architecture](docs/toolset.md) - Create tools, use hooks, handle errors, extend Toolset
+- [Tool Search](docs/tool-search.md) - Dynamic tool discovery with keyword and embedding search strategies
 - [Subagent System](docs/subagent.md) - Hierarchical agents, builtin presets, markdown configuration
-- [Message Bus](docs/message-bus.md) - Inter-agent communication, user steering during execution
 - [Skills System](docs/skills.md) - Markdown-based skills, hot reload, pre-scan hooks
+- [Message Bus](docs/message-bus.md) - Inter-agent communication, multimodal messages, user steering
+- [Media Upload](docs/media.md) - S3 media upload, custom backends, history filter integration
 - [Custom Environments](docs/environment.md) - Environment lifecycle, resource management
 - [Resumable Resources](docs/resumable-resources.md) - Export and restore resource states across restarts
 - [Model Configuration](docs/model.md) - Provider setup, gateway mode
