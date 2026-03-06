@@ -48,6 +48,7 @@ from ya_agent_sdk.toolsets.core.shell import tools as shell_tools
 from ya_agent_sdk.toolsets.core.subagent import tools as subagent_tools
 from ya_agent_sdk.toolsets.core.web import tools as web_tools
 from ya_agent_sdk.toolsets.skills.toolset import SHARED_SKILLS_DIR_NAME, SkillToolset
+from ya_agent_sdk.toolsets.tool_search import create_best_strategy
 from ya_agent_sdk.toolsets.tool_search.toolset import ToolSearchToolSet
 from yaacli.browser import BrowserManager
 from yaacli.config import ConfigManager, MCPConfig, SubagentsConfig, YaacliConfig
@@ -213,6 +214,7 @@ def create_tui_runtime(
             mcp_toolsearch = ToolSearchToolSet(
                 toolsets=mcp_servers,
                 namespace_descriptions=mcp_descriptions if mcp_descriptions else None,
+                search_strategy=create_best_strategy(),
             )
             toolsets.append(mcp_toolsearch)
             logger.info(

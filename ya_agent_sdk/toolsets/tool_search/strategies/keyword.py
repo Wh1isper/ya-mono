@@ -27,15 +27,22 @@ class KeywordSearchStrategy:
     Example::
 
         strategy = KeywordSearchStrategy()
-        results = strategy.search("weather", candidates)
+        results = await strategy.search("weather", candidates)
         # Matches tools with "weather" in name, description, or params
     """
 
-    def build_index(self, tools: list[ToolMetadata]) -> None:
+    async def build_index(self, tools: list[ToolMetadata]) -> None:
         """No-op for keyword strategy (no pre-computation needed)."""
         pass
 
-    def search(
+    def get_search_hint(self) -> str:
+        """Hint for keyword search usage."""
+        return (
+            "Search uses keyword matching. Use specific tool names, action verbs, or "
+            'parameter names as query terms. Regex patterns are supported (e.g., "get_.*data").'
+        )
+
+    async def search(
         self,
         query: str,
         candidates: list[ToolMetadata],

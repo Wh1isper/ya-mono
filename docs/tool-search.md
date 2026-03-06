@@ -190,6 +190,21 @@ Custom model:
 strategy = EmbeddingSearchStrategy(model_name="BAAI/bge-base-en-v1.5")
 ```
 
+### Automatic Strategy Selection
+
+Use `create_best_strategy()` to automatically select the best available strategy. It tries `EmbeddingSearchStrategy` first (including model loading verification), and falls back to `KeywordSearchStrategy` if fastembed is not installed or the model fails to load.
+
+```python
+from ya_agent_sdk.toolsets.tool_search import ToolSearchToolSet, create_best_strategy
+
+ts = ToolSearchToolSet(
+    toolsets=[...],
+    search_strategy=create_best_strategy(),
+)
+```
+
+This is the recommended approach for applications that want the best search quality when available without hard-depending on fastembed.
+
 ### Custom Strategy
 
 Implement the `SearchStrategy` protocol:

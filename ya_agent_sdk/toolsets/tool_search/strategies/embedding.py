@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import anyio
+
 from ya_agent_sdk._logger import get_logger
 from ya_agent_sdk.toolsets.tool_search.metadata import ToolMetadata
 
@@ -27,6 +29,9 @@ class EmbeddingSearchStrategy:
     Pre-computes tool embeddings at index build time. Query embedding
     is computed on each search call (~5ms). Cosine similarity for ranking.
 
+    All CPU-bound embedding computations are offloaded to a thread pool
+    via ``anyio.to_thread.run_sync`` to avoid blocking the event loop.
+
     Requires the ``fastembed`` package::
 
         pip install fastembed
@@ -34,8 +39,8 @@ class EmbeddingSearchStrategy:
     Example::
 
         strategy = EmbeddingSearchStrategy()
-        strategy.build_index(tool_metadata_list)
-        results = strategy.search("get weather info", candidates)
+        await strategy.build_index(tool_metadata_list)
+        results = await strategy.search("get weather info", candidates)
 
     Args:
         model_name: FastEmbed model name. Default: BAAI/bge-small-en-v1.5
@@ -49,6 +54,14 @@ class EmbeddingSearchStrategy:
         self._model: Any = None  # Lazy init
         self._embeddings: Any = None  # NDArray[np.float32] | None, lazy numpy
         self._indexed_tools: list[ToolMetadata] = []
+
+    def get_search_hint(self) -> str:
+        """Hint for semantic search usage."""
+        return (
+            "Search uses semantic similarity. Describe what you need in natural language "
+            '(e.g., "send a message to someone" or "convert between currencies"). '
+            "Exact tool names are not required."
+        )
 
     @staticmethod
     def _import_numpy() -> Any:
@@ -82,11 +95,13 @@ class EmbeddingSearchStrategy:
             logger.debug("FastEmbed model loaded")
         return self._model
 
-    def build_index(self, tools: list[ToolMetadata]) -> None:
+    async def build_index(self, tools: list[ToolMetadata]) -> None:
         """Build embedding index from tool metadata.
 
         Computes embeddings for all tool searchable texts and stores them
         as a numpy array for fast cosine similarity computation.
+
+        The CPU-bound embedding computation is offloaded to a thread pool.
 
         Args:
             tools: List of tool metadata to index.
@@ -101,12 +116,15 @@ class EmbeddingSearchStrategy:
         texts = [t.searchable_text for t in tools]
 
         logger.debug(f"Computing embeddings for {len(texts)} tools")
-        embeddings_iter = model.embed(texts)
-        self._embeddings = np.array(list(embeddings_iter), dtype=np.float32)
+
+        def _compute() -> Any:
+            return np.array(list(model.embed(texts)), dtype=np.float32)
+
+        self._embeddings = await anyio.to_thread.run_sync(_compute)  # type: ignore[reportAttributeAccessIssue]
         self._indexed_tools = list(tools)
         logger.debug(f"Embedding index built: shape={self._embeddings.shape}")
 
-    def search(
+    async def search(
         self,
         query: str,
         candidates: list[ToolMetadata],
@@ -117,6 +135,9 @@ class EmbeddingSearchStrategy:
         Computes cosine similarity between the query embedding and all
         candidate tool embeddings. Returns top-k results above a
         minimum similarity threshold.
+
+        The CPU-bound embedding and similarity computations are offloaded
+        to a thread pool.
 
         Args:
             query: Natural language search query.
@@ -136,26 +157,30 @@ class EmbeddingSearchStrategy:
         np = self._import_numpy()
         model = self._get_model()
 
-        # Compute query embedding
-        query_embedding = np.array(list(model.embed([query])), dtype=np.float32)[0]
+        # Build candidate identity set for filtering
+        candidate_ids = {id(t) for t in candidates}
+        indexed_tools = self._indexed_tools
+        embeddings = self._embeddings
 
-        # Build candidate name set for filtering
-        candidate_names = {t.name for t in candidates}
+        def _compute_similarities() -> list[tuple[float, ToolMetadata]]:
+            # Compute query embedding
+            query_embedding = np.array(list(model.embed([query])), dtype=np.float32)[0]
 
-        # Compute similarities against indexed tools
-        # Normalize for cosine similarity (FastEmbed models typically return normalized vectors)
-        query_norm = query_embedding / (np.linalg.norm(query_embedding) + 1e-10)
-        index_norms = self._embeddings / (np.linalg.norm(self._embeddings, axis=1, keepdims=True) + 1e-10)
-        similarities = index_norms @ query_norm
+            # Normalize for cosine similarity
+            query_norm = query_embedding / (np.linalg.norm(query_embedding) + 1e-10)
+            index_norms = embeddings / (np.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-10)
+            similarities = index_norms @ query_norm
 
-        # Filter to candidates and sort by similarity
-        scored: list[tuple[float, ToolMetadata]] = []
-        for idx, tool in enumerate(self._indexed_tools):
-            if tool.name in candidate_names:
-                scored.append((float(similarities[idx]), tool))
+            # Filter to candidates and sort by similarity
+            scored: list[tuple[float, ToolMetadata]] = []
+            for idx, tool in enumerate(indexed_tools):
+                if id(tool) in candidate_ids:
+                    scored.append((float(similarities[idx]), tool))
 
-        # Sort by score descending
-        scored.sort(key=lambda x: -x[0])
+            scored.sort(key=lambda x: -x[0])
+            return scored
+
+        scored = await anyio.to_thread.run_sync(_compute_similarities)  # type: ignore[reportAttributeAccessIssue]
 
         # Return top-k with minimum similarity threshold
         min_similarity = 0.1

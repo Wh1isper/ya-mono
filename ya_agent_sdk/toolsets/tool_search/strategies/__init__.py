@@ -15,14 +15,14 @@ from ya_agent_sdk.toolsets.tool_search.metadata import ToolMetadata
 class SearchStrategy(Protocol):
     """Protocol for pluggable tool search strategies.
 
-    Implementations must provide a `search` method that takes a query string
-    and a list of candidate ToolMetadata, returning ranked results.
+    Implementations must provide async ``search`` and ``build_index`` methods,
+    plus a ``get_search_hint`` method that returns a brief usage hint for the model.
 
-    Optionally implement `build_index` for strategies that need pre-computation
+    Optionally implement ``build_index`` for strategies that need pre-computation
     (e.g., embedding vectors).
     """
 
-    def build_index(self, tools: list[ToolMetadata]) -> None:
+    async def build_index(self, tools: list[ToolMetadata]) -> None:
         """Build or rebuild the search index from tool metadata.
 
         Called when the tool registry changes. Strategies that need
@@ -32,7 +32,7 @@ class SearchStrategy(Protocol):
         """
         ...
 
-    def search(
+    async def search(
         self,
         query: str,
         candidates: list[ToolMetadata],
@@ -47,6 +47,13 @@ class SearchStrategy(Protocol):
 
         Returns:
             List of matching ToolMetadata, ranked by relevance.
+        """
+        ...
+
+    def get_search_hint(self) -> str:
+        """Return a brief hint for the model on how to formulate search queries.
+
+        Included in the tool_search instruction to guide query style.
         """
         ...
 

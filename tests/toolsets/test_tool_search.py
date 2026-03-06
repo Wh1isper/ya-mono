@@ -252,78 +252,87 @@ def test_extract_metadata_empty_schema():
 # ---------------------------------------------------------------------------
 
 
-def test_keyword_search_basic():
+@pytest.mark.anyio
+async def test_keyword_search_basic():
     strategy = KeywordSearchStrategy()
     candidates = [
         ToolMetadata(name="get_weather", description="Get current weather for a location"),
         ToolMetadata(name="get_stock_price", description="Get stock price for a ticker"),
         ToolMetadata(name="convert_currency", description="Convert between currencies"),
     ]
-    results = strategy.search("weather", candidates)
+    results = await strategy.search("weather", candidates)
     assert len(results) >= 1
     assert results[0].name == "get_weather"
 
 
-def test_keyword_search_regex():
+@pytest.mark.anyio
+async def test_keyword_search_regex():
     strategy = KeywordSearchStrategy()
     candidates = [
         ToolMetadata(name="get_weather", description="Get current weather"),
         ToolMetadata(name="get_forecast", description="Get weather forecast"),
         ToolMetadata(name="get_stock_price", description="Get stock price"),
     ]
-    results = strategy.search("get_.*cast", candidates)
+    results = await strategy.search("get_.*cast", candidates)
     assert len(results) == 1
     assert results[0].name == "get_forecast"
 
 
-def test_keyword_search_invalid_regex_fallback():
+@pytest.mark.anyio
+async def test_keyword_search_invalid_regex_fallback():
     strategy = KeywordSearchStrategy()
     candidates = [
         ToolMetadata(name="get_weather", description="Get current weather"),
         ToolMetadata(name="test[tool", description="A tool with brackets in name"),
     ]
-    results = strategy.search("test[tool", candidates)
+    results = await strategy.search("test[tool", candidates)
     assert len(results) == 1
     assert results[0].name == "test[tool"
 
 
-def test_keyword_search_scoring_name_beats_description():
+@pytest.mark.anyio
+async def test_keyword_search_scoring_name_beats_description():
     strategy = KeywordSearchStrategy()
     candidates = [
         ToolMetadata(name="weather_tool", description="Some tool"),
         ToolMetadata(name="other_tool", description="Does weather stuff"),
     ]
-    results = strategy.search("weather", candidates)
+    results = await strategy.search("weather", candidates)
     assert len(results) == 2
     assert results[0].name == "weather_tool"
 
 
-def test_keyword_search_max_results():
+@pytest.mark.anyio
+async def test_keyword_search_max_results():
     strategy = KeywordSearchStrategy()
     candidates = [ToolMetadata(name=f"tool_{i}", description="Generic tool") for i in range(10)]
-    results = strategy.search("tool", candidates, max_results=3)
+    results = await strategy.search("tool", candidates, max_results=3)
     assert len(results) == 3
 
 
-def test_keyword_search_no_match():
+@pytest.mark.anyio
+async def test_keyword_search_no_match():
     strategy = KeywordSearchStrategy()
     candidates = [ToolMetadata(name="get_weather", description="Get weather")]
-    results = strategy.search("database", candidates)
+    results = await strategy.search("database", candidates)
     assert len(results) == 0
 
 
-def test_keyword_search_empty_query():
+@pytest.mark.anyio
+async def test_keyword_search_empty_query():
     strategy = KeywordSearchStrategy()
     candidates = [ToolMetadata(name="tool", description="A tool")]
-    assert strategy.search("", candidates) == []
+    assert await strategy.search("", candidates) == []
 
 
-def test_keyword_search_empty_candidates():
+@pytest.mark.anyio
+async def test_keyword_search_empty_candidates():
     strategy = KeywordSearchStrategy()
-    assert strategy.search("weather", []) == []
+    assert await strategy.search("weather", []) == []
 
 
-def test_keyword_search_parameter_match():
+@pytest.mark.anyio
+async def test_keyword_search_parameter_match():
     strategy = KeywordSearchStrategy()
     candidates = [
         ToolMetadata(
@@ -334,23 +343,25 @@ def test_keyword_search_parameter_match():
         ),
         ToolMetadata(name="get_weather", description="Get weather"),
     ]
-    results = strategy.search("recipient", candidates)
+    results = await strategy.search("recipient", candidates)
     assert len(results) == 1
     assert results[0].name == "send_email"
 
 
-def test_keyword_search_namespace_match():
+@pytest.mark.anyio
+async def test_keyword_search_namespace_match():
     strategy = KeywordSearchStrategy()
     candidates = [
         ToolMetadata(name="list_orders", description="List orders", namespace="crm"),
         ToolMetadata(name="get_weather", description="Get weather", namespace="weather"),
     ]
-    results = strategy.search("crm", candidates)
+    results = await strategy.search("crm", candidates)
     assert len(results) == 1
     assert results[0].name == "list_orders"
 
 
-def test_keyword_search_namespace_entry():
+@pytest.mark.anyio
+async def test_keyword_search_namespace_entry():
     strategy = KeywordSearchStrategy()
     candidates = [
         ToolMetadata(
@@ -362,7 +373,7 @@ def test_keyword_search_namespace_entry():
         ),
         ToolMetadata(name="get_stock_price", description="Get stock price"),
     ]
-    results = strategy.search("weather", candidates)
+    results = await strategy.search("weather", candidates)
     assert len(results) >= 1
     # Namespace entry should match (name match + description match)
     ns_results = [r for r in results if r.is_namespace_entry]
@@ -792,7 +803,7 @@ def embedding_strategy():
 
 
 @pytest.fixture
-def indexed_candidates(embedding_strategy):
+async def indexed_candidates(embedding_strategy):
     """Build an embedding index with test tools."""
     candidates = [
         ToolMetadata(
@@ -834,82 +845,92 @@ def indexed_candidates(embedding_strategy):
             },
         ),
     ]
-    embedding_strategy.build_index(candidates)
+    await embedding_strategy.build_index(candidates)
     return candidates
 
 
-def test_embedding_search_weather(embedding_strategy, indexed_candidates):
+@pytest.mark.anyio
+async def test_embedding_search_weather(embedding_strategy, indexed_candidates):
     """Semantic search for 'weather' should rank weather tools first."""
-    results = embedding_strategy.search("check the weather", indexed_candidates, max_results=3)
+    results = await embedding_strategy.search("check the weather", indexed_candidates, max_results=3)
     assert len(results) >= 1
     result_names = [r.name for r in results]
     assert "get_weather" in result_names or "get_forecast" in result_names
 
 
-def test_embedding_search_finance(embedding_strategy, indexed_candidates):
+@pytest.mark.anyio
+async def test_embedding_search_finance(embedding_strategy, indexed_candidates):
     """Semantic search for finance should rank finance tools first."""
-    results = embedding_strategy.search("stock market price", indexed_candidates, max_results=3)
+    results = await embedding_strategy.search("stock market price", indexed_candidates, max_results=3)
     assert len(results) >= 1
     assert results[0].name == "get_stock_price"
 
 
-def test_embedding_search_currency(embedding_strategy, indexed_candidates):
+@pytest.mark.anyio
+async def test_embedding_search_currency(embedding_strategy, indexed_candidates):
     """Semantic search for currency conversion."""
-    results = embedding_strategy.search("convert dollars to euros", indexed_candidates, max_results=3)
+    results = await embedding_strategy.search("convert dollars to euros", indexed_candidates, max_results=3)
     assert len(results) >= 1
     assert results[0].name == "convert_currency"
 
 
-def test_embedding_search_email(embedding_strategy, indexed_candidates):
+@pytest.mark.anyio
+async def test_embedding_search_email(embedding_strategy, indexed_candidates):
     """Semantic search for email should find send_email."""
-    results = embedding_strategy.search("send a message to someone", indexed_candidates, max_results=3)
+    results = await embedding_strategy.search("send a message to someone", indexed_candidates, max_results=3)
     assert len(results) >= 1
     assert results[0].name == "send_email"
 
 
-def test_embedding_search_max_results(embedding_strategy, indexed_candidates):
+@pytest.mark.anyio
+async def test_embedding_search_max_results(embedding_strategy, indexed_candidates):
     """Should respect max_results parameter."""
-    results = embedding_strategy.search("tool", indexed_candidates, max_results=2)
+    results = await embedding_strategy.search("tool", indexed_candidates, max_results=2)
     assert len(results) <= 2
 
 
-def test_embedding_search_empty_query(embedding_strategy, indexed_candidates):
+@pytest.mark.anyio
+async def test_embedding_search_empty_query(embedding_strategy, indexed_candidates):
     """Empty query should return empty results."""
-    assert embedding_strategy.search("", indexed_candidates) == []
+    assert await embedding_strategy.search("", indexed_candidates) == []
 
 
-def test_embedding_search_empty_candidates(embedding_strategy):
+@pytest.mark.anyio
+async def test_embedding_search_empty_candidates(embedding_strategy):
     """Empty candidates should return empty results."""
-    assert embedding_strategy.search("weather", []) == []
+    assert await embedding_strategy.search("weather", []) == []
 
 
-def test_embedding_search_candidate_filtering(embedding_strategy, indexed_candidates):
+@pytest.mark.anyio
+async def test_embedding_search_candidate_filtering(embedding_strategy, indexed_candidates):
     """Should only return tools from the candidates list, not all indexed tools."""
     weather_only = [t for t in indexed_candidates if "weather" in t.name or "forecast" in t.name]
-    results = embedding_strategy.search("stock price", weather_only, max_results=5)
+    results = await embedding_strategy.search("stock price", weather_only, max_results=5)
     result_names = {r.name for r in results}
     assert "get_stock_price" not in result_names
 
 
-def test_embedding_build_index_empty(embedding_strategy):
+@pytest.mark.anyio
+async def test_embedding_build_index_empty(embedding_strategy):
     """Building index with empty list should not crash."""
-    embedding_strategy.build_index([])
-    results = embedding_strategy.search("anything", [])
+    await embedding_strategy.build_index([])
+    results = await embedding_strategy.search("anything", [])
     assert results == []
 
 
-def test_embedding_build_index_rebuild(embedding_strategy, indexed_candidates):
+@pytest.mark.anyio
+async def test_embedding_build_index_rebuild(embedding_strategy, indexed_candidates):
     """Rebuilding index should replace previous index."""
     new_tools = [
         ToolMetadata(name="ping", description="Ping a server to check if it is alive"),
     ]
-    embedding_strategy.build_index(new_tools)
-    results = embedding_strategy.search("ping server", new_tools, max_results=3)
+    await embedding_strategy.build_index(new_tools)
+    results = await embedding_strategy.search("ping server", new_tools, max_results=3)
     assert len(results) == 1
     assert results[0].name == "ping"
 
     # Rebuild with original for other tests
-    embedding_strategy.build_index(indexed_candidates)
+    await embedding_strategy.build_index(indexed_candidates)
 
 
 @pytest.mark.anyio

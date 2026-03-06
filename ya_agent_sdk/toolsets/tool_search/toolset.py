@@ -125,7 +125,7 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
 
         # Rebuild search index
         all_metadata = list(self._search_entries.values())
-        self._strategy.build_index(all_metadata)
+        await self._strategy.build_index(all_metadata)
 
         # Get loaded state from context
         loaded_tools = set(ctx.deps.tool_search_loaded_tools)
@@ -371,7 +371,7 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
         if not candidates:
             return "All available tools are already loaded. No additional tools to discover."
 
-        results = self._strategy.search(query, candidates, max_results=self._max_results)
+        results = await self._strategy.search(query, candidates, max_results=self._max_results)
         if not results:
             return f"No tools found matching query: {query!r}. Try different keywords."
 
@@ -457,13 +457,18 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
         return header + "\n".join(lines)
 
     def _build_search_instruction(self) -> str:
-        """Build the tool_search instruction with namespace info."""
+        """Build the tool_search instruction with namespace and strategy info."""
         parts: list[str] = []
 
         # Load base instruction
         prompt_file = _PROMPTS_DIR / "tool_search.md"
         if prompt_file.exists():
             parts.append(prompt_file.read_text().strip())
+
+        # Add strategy-specific search hint
+        search_hint = self._strategy.get_search_hint()
+        if search_hint:
+            parts.append(f"\n{search_hint}")
 
         # Add deferred tool count
         total_tools = len([k for k in self._search_entries if not k.startswith(_NS_KEY_PREFIX)])
