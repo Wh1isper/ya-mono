@@ -10,7 +10,6 @@ State is stored in AgentContext for automatic session restore via ResumableState
 
 from __future__ import annotations
 
-import functools
 from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
@@ -341,7 +340,6 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
         """Create the pydantic-ai Tool for tool_search."""
         toolset_ref = self
 
-        @functools.wraps(toolset_ref._execute_search_tool)
         async def _tool_search(
             ctx: RunContext[AgentContext],
             query: Annotated[str, Field(description="Natural language or keyword query to search for tools")],
