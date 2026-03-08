@@ -4117,7 +4117,7 @@ wheels = [
 
 [[package]]
 name = "y-agent-environment"
-version = "0.4.2"
+version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -4125,9 +4125,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b4/48/e64d128c78ed59f0e5c41e0f79a7e04011f76eec28aae0d6773dc7b61a1a/y_agent_environment-0.4.2.tar.gz", hash = "sha256:86412724771e9476160cba41f35da7d72dd888d9663e19bfce62d23e7e921140", size = 78683, upload-time = "2026-03-04T04:51:10.734Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c1/b0/b3615a32ecf7b3490e7d21b6b6106b3e4911361aaac705dc4942aa9fdb9a/y_agent_environment-0.6.0.tar.gz", hash = "sha256:af9ec1de4a06b5b94f32fbf217f9175d1452f8deeaf89898a30ee55fc5f42c45", size = 80474, upload-time = "2026-03-08T16:51:58.643Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/17/51/53a61afd0a43e250abd0eddbb49e2c65d9833c759ccf4d571a66aab5d0ea/y_agent_environment-0.4.2-py3-none-any.whl", hash = "sha256:1568f5b5ca4bbba05624dfbdf7630c8fc26c2ab252933b0b8af7965bea727962", size = 24661, upload-time = "2026-03-04T04:51:09.893Z" },
+    { url = "https://files.pythonhosted.org/packages/b6/95/46e3c9b991b3b1793267c43fe20ca6bb50eb5ae21f3c185bafdf083006cb/y_agent_environment-0.6.0-py3-none-any.whl", hash = "sha256:beb6f0fde6dddd1b93a8f73e4c4be7fcc6fd39bc7d566d5742800ac4443fab91", size = 25043, upload-time = "2026-03-08T16:51:57.403Z" },
 ]
 
 [[package]]
@@ -4254,7 +4254,7 @@ requires-dist = [
     { name = "tavily-python", marker = "extra == 'web'", specifier = ">=0.7.0" },
     { name = "tenacity", specifier = ">=9.0.0" },
     { name = "typing-extensions", specifier = ">=4.15.0" },
-    { name = "y-agent-environment", specifier = "==0.4.2" },
+    { name = "y-agent-environment", specifier = "==0.6.0" },
 ]
 provides-extras = ["all", "docker", "document", "examples", "s3", "tool-search", "web"]
 

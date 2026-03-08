@@ -45,7 +45,7 @@ class LocalFileOperator(FileOperator):
 
     def __init__(
         self,
-        default_path: Path,
+        default_path: Path | None = None,
         allowed_paths: list[Path] | None = None,
         instructions_skip_dirs: frozenset[str] | None = None,
         instructions_max_depth: int = 3,
@@ -55,14 +55,19 @@ class LocalFileOperator(FileOperator):
         """Initialize LocalFileOperator.
 
         Args:
-            default_path: Default working directory for operations. Required.
+            default_path: Default working directory for operations.
+                If None, no real filesystem access is available (only tmp operations).
             allowed_paths: Directories accessible for file operations.
-                If None, defaults to [default_path].
+                If None, defaults to [default_path] when default_path is set.
             instructions_skip_dirs: Directories to skip in file tree generation.
             instructions_max_depth: Maximum depth for file tree generation.
             tmp_dir: Directory for temporary files.
             tmp_file_operator: Operator for tmp file operations.
         """
+        # Fallback: use first allowed_path as default when only allowed_paths is provided
+        if default_path is None and allowed_paths:
+            default_path = allowed_paths[0]
+
         super().__init__(
             default_path=default_path,
             allowed_paths=allowed_paths,
@@ -74,6 +79,8 @@ class LocalFileOperator(FileOperator):
 
     def _resolve_path(self, path: str) -> Path:
         """Resolve path and validate against allowed directories."""
+        if self._default_path is None:
+            raise PathNotAllowedError(path, [])
         target = Path(path)
         if not target.is_absolute():
             target = self._default_path / target
@@ -310,8 +317,12 @@ class LocalFileOperator(FileOperator):
 
     async def _glob_impl(self, pattern: str) -> list[str]:
         """Find files matching glob pattern."""
+        if self._default_path is None:
+            return []
+
         matches = []
         pattern_path = Path(pattern)
+        default_path = self._default_path
 
         # Handle absolute paths - Python 3.13's pathlib.glob() doesn't support them
         if pattern_path.is_absolute():
@@ -323,9 +334,9 @@ class LocalFileOperator(FileOperator):
                     matches.append(p_str)
         else:
             # Use pathlib for relative patterns
-            for p in self._default_path.glob(pattern):
+            for p in default_path.glob(pattern):
                 try:
-                    rel = p.relative_to(self._default_path)
+                    rel = p.relative_to(default_path)
                     matches.append(str(rel))
                 except ValueError:
                     matches.append(str(p))
@@ -333,7 +344,7 @@ class LocalFileOperator(FileOperator):
         # Sort by modification time (newest first)
         def get_mtime(x: str) -> float:
             try:
-                p = Path(x) if Path(x).is_absolute() else (self._default_path / x)
+                p = Path(x) if Path(x).is_absolute() else (default_path / x)
                 return p.stat().st_mtime
             except (OSError, FileNotFoundError):
                 return 0.0
@@ -416,15 +427,11 @@ class VirtualLocalFileOperator(FileOperator):
             instructions_max_depth: Maximum depth for file tree generation.
             tmp_dir: Directory for temporary files.
             tmp_file_operator: Operator for tmp file operations.
-
-        Raises:
-            ValueError: If mounts is empty.
         """
-        if not mounts:
-            raise ValueError("At least one mount is required")
-
         self._mounts = mounts
-        default_vp = default_virtual_path if default_virtual_path is not None else mounts[0].virtual_path
+        default_vp = (
+            default_virtual_path if default_virtual_path is not None else (mounts[0].virtual_path if mounts else None)
+        )
 
         super().__init__(
             default_path=default_vp,
@@ -475,8 +482,11 @@ class VirtualLocalFileOperator(FileOperator):
             Normalized absolute virtual Path.
 
         Raises:
-            PathNotAllowedError: If the path is outside all mount virtual paths.
+            PathNotAllowedError: If the path is outside all mount virtual paths,
+                or if no default path is configured for relative path resolution.
         """
+        if self._default_path is None:
+            raise PathNotAllowedError(path, [])
         target = Path(path)
         if not target.is_absolute():
             target = self._default_path / target
@@ -557,10 +567,12 @@ class VirtualLocalFileOperator(FileOperator):
             rel = host_path.relative_to(found.host_path.resolve())
             virtual_abs = found.virtual_path / rel
             # Return relative to default_path if possible
-            try:
-                return str(virtual_abs.relative_to(self._default_path))
-            except ValueError:
-                return str(virtual_abs)
+            if self._default_path is not None:
+                try:
+                    return str(virtual_abs.relative_to(self._default_path))
+                except ValueError:
+                    pass
+            return str(virtual_abs)
         # Path is outside all mounts - return None to avoid leaking host paths
         return None
 
@@ -763,7 +775,7 @@ class VirtualLocalFileOperator(FileOperator):
         except OSError as e:
             raise FileOperationError("stat", path, str(e)) from e
 
-    async def _glob_impl(self, pattern: str) -> list[str]:
+    async def _glob_impl(self, pattern: str) -> list[str]:  # noqa: C901
         """Find files matching glob pattern.
 
         Relative patterns are globbed against the default mount's host path.
@@ -771,6 +783,9 @@ class VirtualLocalFileOperator(FileOperator):
         Results are returned as relative paths for relative patterns,
         or absolute virtual paths for absolute patterns.
         """
+        if self._default_path is None:
+            return []
+
         pattern_path = Path(pattern)
         default_mount = self._find_mount(self._default_path)
         default_host = default_mount.host_path.resolve()
@@ -827,18 +842,23 @@ class LocalShell(Shell):
 
     def __init__(
         self,
-        default_cwd: Path,
+        default_cwd: Path | None = None,
         allowed_paths: list[Path] | None = None,
         default_timeout: float = 30.0,
     ):
         """Initialize LocalShell.
 
         Args:
-            default_cwd: Default working directory for command execution. Required.
+            default_cwd: Default working directory for command execution.
+                If None, commands cannot be executed (shell is non-functional).
             allowed_paths: Directories allowed as working directories.
-                If None, defaults to [default_cwd].
+                If None, defaults to [default_cwd] when default_cwd is set.
             default_timeout: Default timeout in seconds.
         """
+        # Fallback: use first allowed_path as default when only allowed_paths is provided
+        if default_cwd is None and allowed_paths:
+            default_cwd = allowed_paths[0]
+
         super().__init__(
             default_cwd=default_cwd,
             allowed_paths=allowed_paths,
@@ -848,10 +868,14 @@ class LocalShell(Shell):
     def _resolve_cwd(self, cwd: str | None) -> Path:
         """Resolve and validate working directory."""
         if cwd is None:
+            if self._default_cwd is None:
+                raise ShellExecutionError("", stderr="No working directory configured")
             return self._default_cwd
 
         target = Path(cwd)
         if not target.is_absolute():
+            if self._default_cwd is None:
+                raise PathNotAllowedError(cwd, [])
             target = self._default_cwd / target
         resolved = target.resolve()
 
@@ -1017,28 +1041,37 @@ class LocalEnvironment(Environment):
             )
             tmp_dir_path = Path(self._tmp_dir_obj.name)
 
-        # Determine default_path: use provided value or fall back to cwd
-        default_path = self._default_path if self._default_path is not None else Path.cwd()
+        # Determine default_path: use provided value, or infer from allowed_paths.
+        # Never fall back to Path.cwd() to avoid exposing the process working directory.
+        default_path = self._default_path
+        if default_path is None and self._allowed_paths:
+            default_path = self._allowed_paths[0]
 
-        # Build allowed_paths list, ensuring default_path is included
+        # Build allowed_paths list
         allowed = list(self._allowed_paths) if self._allowed_paths else []
         if tmp_dir_path:
             allowed.append(tmp_dir_path)
-        # Ensure default_path is in allowed_paths
-        if default_path.resolve() not in [p.resolve() for p in allowed]:
+        if default_path is not None and default_path.resolve() not in [p.resolve() for p in allowed]:
             allowed.append(default_path)
 
-        self._file_operator = LocalFileOperator(
-            default_path=default_path,
-            allowed_paths=allowed or None,
-            tmp_dir=tmp_dir_path,
-        )
+        # Always create file_operator when tmp_dir is available, so the agent
+        # can still access temporary files (e.g., large output storage).
+        # When default_path is None, the operator runs in "empty folder" mode:
+        # only tmp operations are accessible, all other paths are rejected.
+        if default_path is not None or tmp_dir_path is not None:
+            self._file_operator = LocalFileOperator(
+                default_path=default_path,
+                allowed_paths=allowed or None,
+                tmp_dir=tmp_dir_path,
+            )
 
-        self._shell = LocalShell(
-            default_cwd=default_path,
-            allowed_paths=allowed or None,
-            default_timeout=self._shell_timeout,
-        )
+        # Shell requires a real working directory - not created with only tmp_dir.
+        if default_path is not None:
+            self._shell = LocalShell(
+                default_cwd=default_path,
+                allowed_paths=allowed or None,
+                default_timeout=self._shell_timeout,
+            )
 
     async def _teardown(self) -> None:
         """Clean up tmp directory and reset operators."""

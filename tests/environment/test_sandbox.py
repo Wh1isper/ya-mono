@@ -230,13 +230,15 @@ def test_sandbox_environment_default_work_dir(tmp_path: Path) -> None:
 
 async def test_sandbox_environment_properties_before_enter(tmp_path: Path) -> None:
     """Should raise error when accessing properties before entering context."""
+    from y_agent_environment import EnvironmentNotEnteredError
+
     env = SandboxEnvironment(
         mounts=[VirtualMount(tmp_path, Path("/workspace"))],
         container_id="test123",
     )
-    with pytest.raises(RuntimeError, match="Environment not entered"):
+    with pytest.raises(EnvironmentNotEnteredError):
         _ = env.file_operator
-    with pytest.raises(RuntimeError, match="Environment not entered"):
+    with pytest.raises(EnvironmentNotEnteredError):
         _ = env.shell
 
 
