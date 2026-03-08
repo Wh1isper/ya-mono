@@ -472,8 +472,8 @@ class SandboxEnvironment(Environment):
         if not self._file_operator or not self._shell:
             raise EnvironmentNotEnteredError("get_context_instructions")
 
-        file_instructions = await self.file_operator.get_context_instructions()
-        shell_instructions = await self.shell.get_context_instructions()
+        file_instructions = await self._file_operator.get_context_instructions()
+        shell_instructions = await self._shell.get_context_instructions()
 
         parts = []
         if file_instructions:

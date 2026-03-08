@@ -21,6 +21,27 @@ def test_file_operator_default_initialization(tmp_path: Path) -> None:
     assert op._default_path == tmp_path.resolve()
 
 
+def test_file_operator_none_default_path() -> None:
+    """Should allow None default_path (empty folder mode)."""
+    op = LocalFileOperator(default_path=None)
+    assert op._default_path is None
+
+
+async def test_file_operator_none_default_path_rejects_paths() -> None:
+    """Should reject all non-tmp paths when default_path is None."""
+    op = LocalFileOperator(default_path=None)
+    with pytest.raises(PathNotAllowedError):
+        await op.read_file("test.txt")
+    with pytest.raises(PathNotAllowedError):
+        await op.read_file("/etc/passwd")
+
+
+def test_file_operator_fallback_default_path_from_allowed_paths(tmp_path: Path) -> None:
+    """Should use allowed_paths[0] as default_path when default_path is None."""
+    op = LocalFileOperator(allowed_paths=[tmp_path])
+    assert op._default_path == tmp_path.resolve()
+
+
 def test_file_operator_custom_allowed_paths(tmp_path: Path) -> None:
     """Should accept custom allowed paths."""
     op = LocalFileOperator(default_path=tmp_path, allowed_paths=[tmp_path])
@@ -328,6 +349,12 @@ def test_shell_default_initialization(tmp_path: Path) -> None:
     assert shell._default_cwd == tmp_path.resolve()
 
 
+def test_shell_fallback_default_cwd_from_allowed_paths(tmp_path: Path) -> None:
+    """Should use allowed_paths[0] as default_cwd when default_cwd is None."""
+    shell = LocalShell(allowed_paths=[tmp_path])
+    assert shell._default_cwd == tmp_path.resolve()
+
+
 def test_shell_default_cwd_included_in_allowed(tmp_path: Path) -> None:
     """Should ensure default_cwd is in allowed_paths."""
     other_path = tmp_path / "other"
@@ -495,6 +522,62 @@ async def test_environment_can_reenter_after_exit(tmp_path: Path) -> None:
     # Second enter/exit cycle should work
     async with env:
         await env.file_operator.write_file("test2.txt", "world")
+
+
+async def test_environment_no_default_path_no_allowed_paths() -> None:
+    """Should create file_operator for tmp access but leave shell as None when no paths provided."""
+    async with LocalEnvironment() as env:
+        # file_operator is created for tmp_dir access (enable_tmp_dir=True by default)
+        assert env.file_operator is not None
+        assert env.shell is None
+
+
+async def test_environment_no_default_path_no_allowed_paths_no_tmp() -> None:
+    """Should leave both as None when no paths and tmp is disabled."""
+    async with LocalEnvironment(enable_tmp_dir=False) as env:
+        assert env.file_operator is None
+        assert env.shell is None
+
+
+async def test_environment_no_default_path_with_allowed_paths(tmp_path: Path) -> None:
+    """Should use first allowed_path as default when default_path is None."""
+    async with LocalEnvironment(allowed_paths=[tmp_path]) as env:
+        assert isinstance(env.file_operator, LocalFileOperator)
+        assert isinstance(env.shell, LocalShell)
+        assert env.file_operator._default_path == tmp_path.resolve()
+        assert env.shell._default_cwd == tmp_path.resolve()
+
+
+async def test_environment_no_default_path_tmp_dir_still_works() -> None:
+    """Should still create tmp_dir and file_operator even when no real paths."""
+    async with LocalEnvironment(enable_tmp_dir=True) as env:
+        assert env.shell is None
+        assert env.file_operator is not None
+        assert env.tmp_dir is not None
+        assert env.tmp_dir.exists()
+
+        # Can write and read files in tmp_dir via file_operator
+        tmp_file = str(env.tmp_dir / "test.txt")
+        await env.file_operator.write_file(tmp_file, "hello from tmp")
+        content = await env.file_operator.read_file(tmp_file)
+        assert content == "hello from tmp"
+
+
+async def test_environment_no_default_path_rejects_non_tmp_paths() -> None:
+    """File operator with no default_path routes all operations through tmp_file_operator."""
+    async with LocalEnvironment() as env:
+        assert env.file_operator is not None
+        # Relative paths get resolved against tmp_dir (tmp-only mode).
+        # Non-existent file in tmp_dir raises FileNotFoundError.
+        with pytest.raises(FileNotFoundError):
+            await env.file_operator.read_file("nonexistent_file.txt")
+
+
+async def test_environment_no_default_path_context_instructions() -> None:
+    """Should return empty instructions when shell is None and file_operator has no default."""
+    async with LocalEnvironment(enable_tmp_dir=False) as env:
+        instructions = await env.get_context_instructions()
+        assert instructions == ""
 
 
 async def test_environment_concurrent_enter_raises_error(tmp_path: Path) -> None:

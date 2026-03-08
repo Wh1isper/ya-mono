@@ -39,10 +39,20 @@ def test_virtual_file_operator_init(tmp_path: Path) -> None:
     assert op._default_path == Path("/workspace")
 
 
-def test_virtual_file_operator_requires_at_least_one_mount() -> None:
-    """Should reject empty mounts list."""
-    with pytest.raises(ValueError, match="At least one mount is required"):
-        VirtualLocalFileOperator(mounts=[])
+def test_virtual_file_operator_empty_mounts() -> None:
+    """Should allow empty mounts list (empty folder mode)."""
+    op = VirtualLocalFileOperator(mounts=[])
+    assert op._mounts == []
+    assert op._default_path is None
+
+
+async def test_virtual_file_operator_empty_mounts_rejects_paths() -> None:
+    """Should reject all non-tmp paths when mounts is empty."""
+    op = VirtualLocalFileOperator(mounts=[])
+    with pytest.raises(PathNotAllowedError):
+        await op.read_file("test.txt")
+    with pytest.raises(PathNotAllowedError):
+        await op.read_file("/workspace/test.txt")
 
 
 def test_virtual_file_operator_custom_default_path(tmp_path: Path) -> None:
