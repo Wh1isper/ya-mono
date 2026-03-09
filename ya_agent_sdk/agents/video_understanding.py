@@ -19,6 +19,7 @@ from pydantic_ai.models import Model
 from ya_agent_sdk._config import AgentSettings
 from ya_agent_sdk._logger import logger
 from ya_agent_sdk.agents.models import infer_model
+from ya_agent_sdk.presets import resolve_model_settings
 from ya_agent_sdk.usage import InternalUsage
 
 
@@ -196,12 +197,16 @@ def get_video_understanding_agent(
     Raises:
         ValueError: If no model is specified and config has no default.
     """
+    settings = AgentSettings()
+
     if model is None:
-        settings = AgentSettings()
         if settings.video_understanding_model:
             model = settings.video_understanding_model
         else:
             raise ValueError("No model specified. Provide model parameter or set YA_AGENT_VIDEO_UNDERSTANDING_MODEL.")
+
+    if model_settings is None and settings.video_understanding_model_settings:
+        model_settings = cast(ModelSettings, resolve_model_settings(settings.video_understanding_model_settings))
 
     model_instance = infer_model(model) if isinstance(model, str) else model
 
