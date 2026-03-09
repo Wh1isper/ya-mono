@@ -23,8 +23,14 @@ class AgentSettings(BaseSettings):
     image_understanding_model: str | None = None
     """Model to use for image understanding when native vision is unavailable."""
 
+    image_understanding_model_settings: str | None = None
+    """Model settings preset name for image understanding (e.g. 'anthropic_off'). Resolved via resolve_model_settings."""
+
     video_understanding_model: str | None = None
     """Model to use for video understanding when native capability is unavailable."""
+
+    video_understanding_model_settings: str | None = None
+    """Model settings preset name for video understanding (e.g. 'anthropic_off'). Resolved via resolve_model_settings."""
 
     compact_model: str | None = None
     """Model to use for compact when native capability is unavailable."""
