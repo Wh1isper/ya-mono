@@ -71,11 +71,10 @@ async def test_handoff_tool_call(agent_context: AgentContext) -> None:
     mock_run_ctx = MagicMock(spec=RunContext)
     mock_run_ctx.deps = agent_context
 
-    msg = HandoffMessage(
+    result = await tool.call(
+        mock_run_ctx,
         content="## User Intent\nBuild API\n\n## Key Decisions\n- Use REST",
     )
-
-    result = await tool.call(mock_run_ctx, message=msg)
 
     # Verify handoff message is stored in context
     assert agent_context.handoff_message is not None
@@ -94,12 +93,11 @@ async def test_handoff_tool_call_sets_auto_load_files(agent_context: AgentContex
     mock_run_ctx = MagicMock(spec=RunContext)
     mock_run_ctx.deps = agent_context
 
-    msg = HandoffMessage(
+    await tool.call(
+        mock_run_ctx,
         content="Working on implementation",
         auto_load_files=["main.py", "utils.py"],
     )
-
-    await tool.call(mock_run_ctx, message=msg)
 
     # Verify auto_load_files is set on context
     assert agent_context.auto_load_files == ["main.py", "utils.py"]
@@ -113,16 +111,10 @@ async def test_handoff_tool_call_overwrites_previous(agent_context: AgentContext
     mock_run_ctx.deps = agent_context
 
     # First handoff
-    msg1 = HandoffMessage(
-        content="First request content",
-    )
-    await tool.call(mock_run_ctx, message=msg1)
+    await tool.call(mock_run_ctx, content="First request content")
     assert "First request content" in agent_context.handoff_message
 
     # Second handoff overwrites
-    msg2 = HandoffMessage(
-        content="Second request content",
-    )
-    await tool.call(mock_run_ctx, message=msg2)
+    await tool.call(mock_run_ctx, content="Second request content")
     assert "Second request content" in agent_context.handoff_message
     assert "First request content" not in agent_context.handoff_message
