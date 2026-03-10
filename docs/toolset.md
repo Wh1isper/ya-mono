@@ -21,6 +21,9 @@ flowchart LR
 
     Args[Tool Args] --> GlobalPre --> ToolPre --> Execute
     Execute --> ToolPost --> GlobalPost --> Result[Result]
+    Execute -- "ApprovalRequired / CallDeferred" --> ToolPost
+    ToolPost -- observe only --> GlobalPost
+    GlobalPost -- re-raise --> ControlFlow[Control Flow Exception]
 ```
 
 ## Creating Tools
@@ -141,6 +144,16 @@ Post-hooks receive the result, which **may be an Exception instance** if tool ex
 - Check `isinstance(result, Exception)` to handle errors
 - Return a fallback value for recovery, or pass through to re-raise
 
+### Control Flow Exceptions
+
+Pydantic AI uses `ApprovalRequired` and `CallDeferred` as control flow exceptions (e.g., HITL approval, deferred tool execution). These are handled specially:
+
+- **Post-hooks are called for observation only** -- their return values are discarded
+- The original exception is **always re-raised** to preserve pydantic-ai control flow
+- This ensures tracing/cleanup hooks (e.g., closing spans) still run
+
+This means post-hooks that receive an `ApprovalRequired` or `CallDeferred` instance should treat it as a notification, not an opportunity to transform the result.
+
 > Examples: `ya_agent_sdk/toolsets/core/base.py` docstrings
 
 ## Extending Toolset
@@ -151,6 +164,19 @@ Override `_call_tool_func` for custom execution behavior (timeout, retry, error 
 class TimeoutToolset(Toolset):
     async def _call_tool_func(self, args, ctx, tool) -> Any:
         return await asyncio.wait_for(tool.call_func(args, ctx), timeout=30.0)
+```
+
+**Important**: `ApprovalRequired` and `CallDeferred` must NOT be caught in `_call_tool_func` overrides. The base implementation already re-raises them. If you override this method, ensure these exceptions propagate:
+
+```python
+class CustomToolset(Toolset):
+    async def _call_tool_func(self, args, ctx, tool) -> Any:
+        try:
+            return await tool.call_func(args, ctx)
+        except (ApprovalRequired, CallDeferred):
+            raise  # Must propagate
+        except Exception as e:
+            return e
 ```
 
 > Full examples: `ya_agent_sdk/toolsets/core/base.py`
