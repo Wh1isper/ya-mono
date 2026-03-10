@@ -28,22 +28,28 @@ Example::
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 from pydantic_ai import RetryPromptPart
 from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart, UserPromptPart
 from pydantic_ai.tools import RunContext
 from y_agent_environment import Environment
 
+from ya_agent_sdk.context import AgentContext
+
 
 def create_environment_instructions_filter(
     env: Environment,
-) -> Callable[[RunContext[Any], list[ModelMessage]], Awaitable[list[ModelMessage]]]:
+) -> Callable[[RunContext[AgentContext], list[ModelMessage]], Awaitable[list[ModelMessage]]]:
     """Create a history processor that injects environment instructions.
 
     This factory function creates a pydantic-ai history_processor that appends
     environment context instructions (file system paths, shell configuration)
     to the last ModelRequest in the message history.
+
+    Normally skips injection when the last request contains ToolReturnPart
+    (intermediate tool responses). However, when ``ctx.deps.force_inject_instructions``
+    is True (set by handoff/compact after context reset), injection is forced
+    regardless of message content.
 
     Args:
         env: Environment instance to get context instructions from.
@@ -60,7 +66,7 @@ def create_environment_instructions_filter(
     """
 
     async def inject_environment_instructions(
-        ctx: RunContext[Any],
+        ctx: RunContext[AgentContext],
         message_history: list[ModelMessage],
     ) -> list[ModelMessage]:
         """Inject environment instructions into the last ModelRequest.
@@ -73,8 +79,6 @@ def create_environment_instructions_filter(
             Processed message history with environment instructions injected into
             the last ModelRequest, or unchanged history if no ModelRequest found.
         """
-        _ = ctx  # Unused, but required by history_processor signature
-
         # Find the last ModelRequest in message history
         last_request: ModelRequest | None = None
         for msg in reversed(message_history):
@@ -87,7 +91,9 @@ def create_environment_instructions_filter(
 
         # Skip injection if last_request contains ToolReturnPart (tool response)
         # We only inject environment instructions on user input, not tool responses or retry prompts
-        if any(isinstance(part, (ToolReturnPart, RetryPromptPart)) for part in last_request.parts):
+        # Exception: force_inject_instructions overrides this check after context reset (handoff/compact)
+        has_tool_return = any(isinstance(part, (ToolReturnPart, RetryPromptPart)) for part in last_request.parts)
+        if has_tool_return and not ctx.deps.force_inject_instructions:
             return message_history
 
         # Get environment instructions

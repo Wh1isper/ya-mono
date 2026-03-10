@@ -109,6 +109,7 @@ async def test_inject_environment_instructions_skips_tool_response(tmp_path: Pat
     ) as env:
         filter_func = create_environment_instructions_filter(env)
         mock_ctx = MagicMock()
+        mock_ctx.deps.force_inject_instructions = False
 
         # Create a ModelRequest with ToolReturnPart (tool response)
         tool_return = ToolReturnPart(
@@ -125,3 +126,32 @@ async def test_inject_environment_instructions_skips_tool_response(tmp_path: Pat
         assert result == history
         assert len(request.parts) == 1
         assert isinstance(request.parts[0], ToolReturnPart)
+
+
+async def test_inject_environment_instructions_force_inject_with_tool_response(tmp_path: Path) -> None:
+    """Should inject when force_inject_instructions is True, even with ToolReturnPart."""
+    async with LocalEnvironment(
+        allowed_paths=[tmp_path],
+        default_path=tmp_path,
+        tmp_base_dir=tmp_path,
+    ) as env:
+        filter_func = create_environment_instructions_filter(env)
+        mock_ctx = MagicMock()
+        mock_ctx.deps.force_inject_instructions = True
+
+        # Create a ModelRequest with ToolReturnPart (tool response)
+        tool_return = ToolReturnPart(
+            tool_name="test_tool",
+            content="tool result",
+            tool_call_id="call_123",
+        )
+        request = ModelRequest(parts=[tool_return])
+        history = [request]
+
+        result = await filter_func(mock_ctx, history)
+
+        # Should inject environment instructions despite ToolReturnPart
+        assert result == history
+        assert len(request.parts) == 2
+        assert isinstance(request.parts[0], ToolReturnPart)
+        assert isinstance(request.parts[1], UserPromptPart)

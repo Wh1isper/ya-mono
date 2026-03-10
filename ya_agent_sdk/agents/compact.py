@@ -398,6 +398,9 @@ def create_compact_filter(
             # Clear steering_messages after successful compact (content is now in summary)
             agent_ctx.steering_messages.clear()
 
+            # Force downstream filters to inject instructions after context reset
+            agent_ctx.force_inject_instructions = True
+
             logger.info(f"Compacted history from {len(message_history)} messages to {len(compacted)} messages")
             return compacted
 
