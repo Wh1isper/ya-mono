@@ -29,7 +29,7 @@ class SubagentConfig(BaseModel):
     """Description shown to the model when selecting tools."""
 
     instruction: str | None = None
-    """Optional instruction injected into system prompt. Falls back to description when None."""
+    """Optional instruction injected into system prompt."""
 
     system_prompt: str
     """The markdown body content, used as the subagent's system prompt."""
