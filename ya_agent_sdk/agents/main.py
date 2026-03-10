@@ -52,6 +52,7 @@ from ya_agent_sdk.events import (
     ToolCallsCompleteEvent,
     ToolCallsStartEvent,
 )
+from ya_agent_sdk.filters.auto_load_files import process_auto_load_files
 from ya_agent_sdk.filters.environment_instructions import create_environment_instructions_filter
 from ya_agent_sdk.filters.system_prompt import create_system_prompt_filter
 from ya_agent_sdk.toolsets.core.base import BaseTool, GlobalHooks, Toolset
@@ -391,7 +392,7 @@ def create_agent(
 
     # --- History Processors ---
     # Combine pre-processors, context's processors, built-in, and user-provided ones
-    # Order: pre_history_processors -> ctx processors -> compact -> env instructions -> history_processors
+    # Order: pre_history_processors -> ctx processors -> compact -> env instructions -> auto_load -> history_processors
     all_processors: list[HistoryProcessor[AgentDepsT]] = []
     if pre_history_processors:
         all_processors.extend(pre_history_processors)
@@ -405,6 +406,7 @@ def create_agent(
             main_model_settings=model_settings,
         ),
         create_environment_instructions_filter(actual_env),
+        process_auto_load_files,
     ])
     if history_processors:
         all_processors.extend(history_processors)

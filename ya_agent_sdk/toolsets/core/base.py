@@ -482,6 +482,9 @@ class Toolset(BaseToolset[AgentDepsT]):
         Subclasses can override this method to customize tool execution,
         e.g., adding timeout handling, retry logic, or custom error handling.
 
+        Note: ApprovalRequired and CallDeferred are pydantic-ai control flow
+        exceptions that must propagate. They are NOT caught here.
+
         Args:
             args: The validated tool arguments.
             ctx: The run context.
@@ -492,10 +495,12 @@ class Toolset(BaseToolset[AgentDepsT]):
         """
         try:
             return await tool.call_func(args, ctx)
+        except (ApprovalRequired, CallDeferred):
+            raise
         except Exception as e:
             return e
 
-    async def call_tool(
+    async def call_tool(  # noqa: C901
         self,
         name: str,
         tool_args: dict[str, Any],
@@ -518,6 +523,10 @@ class Toolset(BaseToolset[AgentDepsT]):
         - Recover from certain errors by returning a fallback value
 
         If the final result is still an Exception after all hooks, it will be raised.
+
+        Control flow exceptions (ApprovalRequired, CallDeferred) are handled specially:
+        post-hooks are called for observation only (return values discarded), and the
+        original exception is always re-raised.
         """
         logger.debug(f"call_tool: {name!r} with args keys: {list(tool_args.keys())}")
 
@@ -545,10 +554,20 @@ class Toolset(BaseToolset[AgentDepsT]):
         logger.debug(f"call_tool: {name!r} executing tool function")
         try:
             result = await self._call_tool_func(args, ctx, tool)
-        except (ApprovalRequired, CallDeferred):
+        except (ApprovalRequired, CallDeferred) as exc:
             # Pydantic AI control flow exceptions must propagate directly.
             # ApprovalRequired: conditional approval from within tool (e.g. protected files)
             # CallDeferred: external tool execution (result provided outside agent run)
+            #
+            # Post-hooks are called for observation only (e.g., close tracing spans,
+            # record metrics). Their return values are ignored -- the original
+            # exception is always re-raised to preserve control flow.
+            if tool.post_hook:
+                logger.debug(f"call_tool: {name!r} executing tool post-hook (control flow exception)")
+                await tool.post_hook(ctx, exc, metadata)
+            if self.global_hooks.post:
+                logger.debug(f"call_tool: {name!r} executing global post-hook (control flow exception)")
+                await self.global_hooks.post(ctx, name, exc, metadata)
             raise
         except Exception as e:
             # Let the post-hook handle the exception
