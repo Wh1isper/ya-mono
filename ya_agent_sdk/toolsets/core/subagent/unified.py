@@ -122,10 +122,12 @@ def _generate_instruction(
 
     for name, entry in available_entries:
         instruction = entry.config.instruction
+        lines.append(f'<subagent name="{name}">')
         if instruction:
-            lines.append(f'<subagent name="{name}">')
             lines.append(instruction.strip())
-            lines.append("</subagent>\n")
+        else:
+            lines.append(entry.config.description)
+        lines.append("</subagent>\n")
 
     lines.append("<execution-model>")
     lines.append("Delegate calls are BLOCKING -- the agent waits for each subagent to finish before proceeding.")

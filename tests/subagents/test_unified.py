@@ -292,6 +292,59 @@ async def test_unified_tool_instruction_format(mock_run_ctx) -> None:
     assert "</subagent>" in instruction
 
 
+async def test_unified_tool_instruction_includes_name_when_instruction_is_none(mock_run_ctx) -> None:
+    """Instruction should include subagent name even when instruction field is None."""
+    configs = [
+        SubagentConfig(
+            name="my_agent",
+            description="A helpful agent for tasks",
+            system_prompt="...",
+            instruction=None,
+        ),
+    ]
+    parent_toolset = Toolset(tools=[])
+
+    tool_cls = create_unified_subagent_tool(configs, parent_toolset, model="test")
+    tool = tool_cls()
+
+    instruction = await tool.get_instruction(mock_run_ctx)
+
+    assert instruction is not None
+    assert '<subagent name="my_agent">' in instruction
+    assert "A helpful agent for tasks" in instruction
+    assert "</subagent>" in instruction
+
+
+async def test_unified_tool_instruction_mixed_with_and_without_instruction(mock_run_ctx) -> None:
+    """Subagents with and without instruction should all appear in output."""
+    configs = [
+        SubagentConfig(
+            name="with_inst",
+            description="Has instruction",
+            system_prompt="...",
+            instruction="Custom instruction text",
+        ),
+        SubagentConfig(
+            name="without_inst",
+            description="No instruction field",
+            system_prompt="...",
+            instruction=None,
+        ),
+    ]
+    parent_toolset = Toolset(tools=[])
+
+    tool_cls = create_unified_subagent_tool(configs, parent_toolset, model="test")
+    tool = tool_cls()
+
+    instruction = await tool.get_instruction(mock_run_ctx)
+
+    assert instruction is not None
+    assert '<subagent name="with_inst">' in instruction
+    assert "Custom instruction text" in instruction
+    assert '<subagent name="without_inst">' in instruction
+    assert "No instruction field" in instruction
+
+
 # =============================================================================
 # Parameter type tests
 # =============================================================================

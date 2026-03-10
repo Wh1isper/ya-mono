@@ -56,6 +56,7 @@ def create_subagent_tool(
                    Use create_subagent_call_func() to create this from an Agent.
         instruction: Optional instruction for system prompt. Can be a string or
                      a callable that takes RunContext and returns a string.
+                     Falls back to description when None.
         availability_check: Optional callable that returns True if the tool is available.
                             Called dynamically each time is_available() is invoked.
 
@@ -95,7 +96,7 @@ def create_subagent_tool(
 
         async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
             if instruction is None:
-                return None
+                return description
             if callable(instruction):
                 return instruction(ctx)
             return instruction
