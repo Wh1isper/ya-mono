@@ -96,11 +96,29 @@ The summary will be injected into the new context automatically.
     async def call(
         self,
         ctx: RunContext[AgentContext],
-        message: Annotated[
-            HandoffMessage,
-            Field(description="Structured summary of the conversation to preserve across context reset."),
+        content: Annotated[
+            str,
+            Field(
+                description="""Context summary to preserve across context reset. Should include:
+1. User's primary request and intent
+2. Current state and completed work
+3. Key technical decisions
+4. Pending tasks
+5. Next step (if any)
+"""
+            ),
         ],
+        auto_load_files: Annotated[
+            list[str] | None,
+            Field(
+                description="""File paths to auto-load after summary.
+Files will be read and injected into context on next request.
+Use for: key config files, source code being edited, important references.
+""",
+            ),
+        ] = None,
     ) -> str:
+        message = HandoffMessage(content=content, auto_load_files=auto_load_files or [])
         # Store rendered message for history processor to pick up
         rendered = message.render()
         ctx.deps.handoff_message = rendered

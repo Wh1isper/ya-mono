@@ -73,7 +73,7 @@ def _build_handoff_messages(
     # Message 2: virtual handoff tool call
     tool_call = ToolCallPart(
         tool_name="summarize",
-        args={"message": {"content": "[summary injected as tool return]"}},
+        args={"content": "[summary injected as tool return]"},
         tool_call_id=tool_call_id,
     )
 
