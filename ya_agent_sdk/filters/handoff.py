@@ -137,19 +137,23 @@ async def process_handoff_message(
             history_processors=[process_handoff_message],
         )
     """
-    if not ctx.deps.handoff_message:
+    agent_ctx = ctx.deps
+
+    # Reset force flag at the start of each filter pipeline pass
+    agent_ctx.force_inject_instructions = False
+
+    if not agent_ctx.handoff_message:
         return message_history
 
     # Generate event_id to correlate start/complete events
     event_id = uuid4().hex[:8]
-    agent_ctx = ctx.deps
     original_message_count = len(message_history)
 
     try:
         # Emit start event
         await agent_ctx.emit_event(HandoffStartEvent(event_id=event_id, message_count=original_message_count))
 
-        handoff_content = ctx.deps.handoff_message
+        handoff_content = agent_ctx.handoff_message
 
         # Virtual tool call ID for the handoff acknowledgment
         virtual_tool_call_id = f"handoff-ack-{event_id}"
@@ -166,9 +170,12 @@ async def process_handoff_message(
             logger.debug("Including %d steering messages in handoff", len(agent_ctx.steering_messages))
 
         # Clear handoff state
-        ctx.deps.handoff_message = None
+        agent_ctx.handoff_message = None
         # Clear steering_messages after successful handoff (content is now in summary)
         agent_ctx.steering_messages.clear()
+
+        # Force downstream filters to inject instructions despite ToolReturnPart
+        agent_ctx.force_inject_instructions = True
 
         # Emit complete event with the actual handoff content
         await agent_ctx.emit_event(

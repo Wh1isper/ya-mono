@@ -91,7 +91,10 @@ async def inject_runtime_instructions(
 
     # Determine if this is a user prompt (not a tool response or retry)
     # We include subagent info only on user prompts to reduce noise
+    # Exception: force_inject_instructions overrides this after context reset (handoff/compact)
     is_user_prompt = not any(isinstance(part, (ToolReturnPart, RetryPromptPart)) for part in last_request.parts)
+    if ctx.deps.force_inject_instructions:
+        is_user_prompt = True
 
     # Get runtime instructions from AgentContext
     instructions = await ctx.deps.get_context_instructions(ctx, is_user_prompt=is_user_prompt)

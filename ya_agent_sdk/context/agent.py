@@ -873,6 +873,14 @@ class AgentContext(BaseModel):
     handoff_message: str | None = None
     """Rendered handoff message to be injected into new context after handoff."""
 
+    force_inject_instructions: bool = False
+    """Force environment and runtime instruction injection on the next filter pass.
+
+    Set to True by handoff/compact filters after context reset to ensure
+    downstream filters inject instructions regardless of ToolReturnPart presence.
+    Reset to False at the start of each filter pipeline run by the handoff filter.
+    """
+
     env: Environment | None = None
     """Environment instance. file_operator/shell/resources are derived from it."""
 
