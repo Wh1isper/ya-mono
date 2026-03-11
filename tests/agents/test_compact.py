@@ -13,9 +13,11 @@ from pydantic_ai.messages import (
 )
 
 from ya_agent_sdk.agents.compact import (
+    _ANTHROPIC_CACHE_KEYS,
     _MAX_TOOL_RETURN_CHARS,
     _is_media_content,
     _media_to_placeholder,
+    _strip_anthropic_cache_settings,
     _trim_history_for_compact,
     _truncate_str,
 )
@@ -388,3 +390,53 @@ async def test_create_agent_runs_auto_load_files_after_compact(tmp_path: Path) -
 
         assert len(auto_load_indexes) == 2
         assert auto_load_indexes[-1] > auto_load_indexes[0]
+
+
+# =============================================================================
+# _strip_anthropic_cache_settings tests
+# =============================================================================
+
+
+def test_strip_anthropic_cache_settings_no_cache_keys() -> None:
+    """Settings without cache keys should be returned as-is (same object)."""
+    settings = {"max_tokens": 4096, "temperature": 0.5}
+    result = _strip_anthropic_cache_settings(settings)
+    assert result is settings
+    assert result == {"max_tokens": 4096, "temperature": 0.5}
+
+
+def test_strip_anthropic_cache_settings_removes_cache_keys() -> None:
+    """Anthropic cache keys should be stripped, other keys preserved."""
+    settings = {
+        "max_tokens": 4096,
+        "anthropic_cache_instructions": True,
+        "anthropic_cache_messages": True,
+        "anthropic_cache_tool_definitions": "5m",
+        "anthropic_thinking": {"type": "enabled", "budget_tokens": 10000},
+    }
+    result = _strip_anthropic_cache_settings(settings)
+    assert result == {
+        "max_tokens": 4096,
+        "anthropic_thinking": {"type": "enabled", "budget_tokens": 10000},
+    }
+    # Original should not be modified
+    assert "anthropic_cache_instructions" in settings
+
+
+def test_strip_anthropic_cache_settings_only_cache_keys() -> None:
+    """Settings with only cache keys should return empty dict."""
+    settings = {
+        "anthropic_cache_instructions": True,
+        "anthropic_cache_messages": True,
+    }
+    result = _strip_anthropic_cache_settings(settings)
+    assert result == {}
+
+
+def test_strip_anthropic_cache_settings_all_known_keys() -> None:
+    """All known cache keys should be covered by _ANTHROPIC_CACHE_KEYS."""
+    assert {
+        "anthropic_cache_tool_definitions",
+        "anthropic_cache_instructions",
+        "anthropic_cache_messages",
+    } == _ANTHROPIC_CACHE_KEYS
