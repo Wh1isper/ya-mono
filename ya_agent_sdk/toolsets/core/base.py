@@ -597,12 +597,33 @@ class Toolset(BaseToolset[AgentDepsT]):
         only the first one is included. Tools returning plain strings
         use their tool name as the implicit group.
 
+        Uses the same two-phase filtering as get_tools() to ensure only
+        available and non-superseded tools contribute instructions.
+
         Returns a combined instruction string or None if no tools have instructions.
         """
-        instructions: dict[str, str] = {}  # group -> content
+        # Phase 1: determine available tools and collect tags (same as get_tools)
+        # Use a list to preserve registration order for deterministic deduplication
+        available_names: list[str] = []
+        collected_tags: set[str] = set()
 
         for name in self._tool_classes:
             tool_instance = self._get_tool_instance(name)
+            if self._skip_unavailable and not tool_instance.is_available(ctx):
+                continue
+            available_names.append(name)
+            collected_tags.update(tool_instance.tags)
+
+        # Phase 2: collect instructions, filtering superseded tools
+        instructions: dict[str, str] = {}  # group -> content
+
+        for name in available_names:
+            tool_instance = self._get_tool_instance(name)
+
+            # Skip tools superseded by active tags
+            if tool_instance.superseded_by_tags and (tool_instance.superseded_by_tags & collected_tags):
+                continue
+
             result = await tool_instance.get_instruction(ctx)
 
             if result is None:
