@@ -153,6 +153,139 @@ class ViewTool(BaseTool):
 
         return BinaryContent(data=content, media_type=media_type)
 
+    async def _check_inline_size(
+        self,
+        file_operator: FileOperator,
+        file_path: str,
+        *,
+        max_bytes: int,
+        kind: str,
+    ) -> str | None:
+        """Validate that a media file is small enough to inline."""
+        stat = await file_operator.stat(file_path)
+        if stat["size"] <= max_bytes:
+            return None
+
+        size_mb = stat["size"] / (1024 * 1024)
+        limit_mb = max_bytes / (1024 * 1024)
+        return (
+            f"Error: {kind} file is too large to inline ({size_mb:.2f} MB). "
+            f"Maximum supported inline size is {limit_mb:.0f} MB."
+        )
+
+    async def _maybe_convert_media_to_url(
+        self,
+        hook: Any,
+        ctx: RunContext[AgentContext],
+        data: bytes,
+        media_type: str,
+        *,
+        log_name: str,
+    ) -> str | None:
+        """Run an optional media-to-URL hook and normalize empty results."""
+        try:
+            if inspect.iscoroutinefunction(hook):
+                result = await hook(ctx, data, media_type)
+            else:
+                result = await run_in_threadpool(hook, ctx, data, media_type)
+            result = cast("str | None", result)
+            return result if result and result.strip() else None
+        except Exception:
+            logger.warning("%s failed, falling back to data", log_name, exc_info=True)
+            return None
+
+    async def _describe_image(
+        self,
+        ctx: RunContext[AgentContext],
+        file_path: str,
+        image_data: bytes,
+        media_type: str,
+        image_url: str | None,
+    ) -> str:
+        """Describe an image via the fallback image-understanding agent."""
+        try:
+            from ya_agent_sdk.agents.image_understanding import get_image_description
+
+            model = None
+            model_settings = None
+            if ctx.deps.tool_config:
+                tool_config = ctx.deps.tool_config
+                model = tool_config.image_understanding_model
+                model_settings = tool_config.image_understanding_model_settings
+
+            description, internal_usage = await get_image_description(
+                image_url=image_url,
+                image_data=None if image_url else image_data,
+                media_type=media_type,
+                model=model,
+                model_settings=model_settings,
+                model_wrapper=ctx.deps.model_wrapper,
+                wrapper_metadata=ctx.deps.get_wrapper_metadata(),
+            )
+
+            if ctx.tool_call_id:
+                ctx.deps.add_extra_usage(
+                    agent="image_understanding", internal_usage=internal_usage, uuid=ctx.tool_call_id
+                )
+
+            return f"Image description (via image analysis):\n{description}"
+        except Exception as e:
+            logger.warning(f"Failed to analyze image with image understanding: {e}")
+            return f"Image file: {file_path}. Model does not support vision and fallback analysis failed."
+
+    async def _describe_video(
+        self,
+        ctx: RunContext[AgentContext],
+        file_path: str,
+        video_data: bytes,
+        media_type: str,
+        video_url: str | None,
+    ) -> str:
+        """Describe a video via the fallback video-understanding agent."""
+        try:
+            from ya_agent_sdk.agents.video_understanding import get_video_description
+
+            model = None
+            model_settings = None
+            if ctx.deps.tool_config:
+                tool_config = ctx.deps.tool_config
+                model = tool_config.video_understanding_model
+                model_settings = tool_config.video_understanding_model_settings
+
+            description, internal_usage = await get_video_description(
+                video_url=video_url,
+                video_data=None if video_url else video_data,
+                media_type=media_type,
+                model=model,
+                model_settings=model_settings,
+            )
+
+            if ctx.tool_call_id:
+                ctx.deps.add_extra_usage(
+                    agent="video_understanding", internal_usage=internal_usage, uuid=ctx.tool_call_id
+                )
+
+            return f"Video description (via video understanding agent):\n{description}"
+        except Exception as e:
+            logger.warning(f"Failed to analyze video with video understanding: {e}")
+            return f"Video file: {file_path}. Model does not support video understanding and fallback analysis failed."
+
+    def _build_inline_media_return(
+        self,
+        *,
+        kind: str,
+        media_url: str | None,
+        data: bytes,
+        media_type: str,
+    ) -> ToolReturn:
+        """Build the ToolReturn payload for inline media."""
+        if kind == "image":
+            content = [ImageUrl(url=media_url)] if media_url else [BinaryContent(data=data, media_type=media_type)]
+            return ToolReturn(return_value="The image is attached in the user message.", content=content)
+
+        content = [VideoUrl(url=media_url)] if media_url else [BinaryContent(data=data, media_type=media_type)]
+        return ToolReturn(return_value="The video is attached in the user message.", content=content)
+
     async def _read_image_with_fallback(
         self,
         file_operator: FileOperator,
@@ -160,79 +293,38 @@ class ViewTool(BaseTool):
         ctx: RunContext[AgentContext],
     ) -> str | ToolReturn:
         """Read image file, falling back to description if vision not supported."""
-        # Read image data and determine media type
+        if error := await self._check_inline_size(
+            file_operator,
+            file_path,
+            max_bytes=ctx.deps.tool_config.view_max_inline_image_bytes,
+            kind="Image",
+        ):
+            return error
+
         image_data = await file_operator.read_bytes(file_path)
         media_type = self._get_media_type(file_path)
-
-        # Normalize unsupported media types
         if media_type not in SUPPORTED_IMAGE_MEDIA_TYPES:
             media_type = "image/png"
 
-        # Try to convert to URL using hook
         image_url: str | None = None
         if ctx.deps.tool_config and ctx.deps.tool_config.image_to_url_hook:
-            try:
-                hook = ctx.deps.tool_config.image_to_url_hook
-                if inspect.iscoroutinefunction(hook):
-                    result = await hook(ctx, image_data, media_type)
-                else:
-                    # Run sync hook in threadpool to avoid blocking event loop
-                    result = await run_in_threadpool(hook, ctx, image_data, media_type)
-                # Treat empty strings as None
-                result = cast("str | None", result)
-                image_url = result if result and result.strip() else None
-            except Exception:
-                logger.warning("image_to_url_hook failed, falling back to data", exc_info=True)
+            image_url = await self._maybe_convert_media_to_url(
+                ctx.deps.tool_config.image_to_url_hook,
+                ctx,
+                image_data,
+                media_type,
+                log_name="image_to_url_hook",
+            )
 
-        # Check if current model supports vision
-        has_vision = ctx.deps.model_cfg.has_vision
+        if ctx.deps.model_cfg.has_vision:
+            return self._build_inline_media_return(
+                kind="image",
+                media_url=image_url,
+                data=image_data,
+                media_type=media_type,
+            )
 
-        if has_vision:
-            # Return image content directly
-            if image_url:
-                return ToolReturn(
-                    return_value="The image is attached in the user message.",
-                    content=[ImageUrl(url=image_url)],
-                )
-            else:
-                return ToolReturn(
-                    return_value="The image is attached in the user message.",
-                    content=[BinaryContent(data=image_data, media_type=media_type)],
-                )
-        else:
-            # Fall back to image understanding agent
-            try:
-                from ya_agent_sdk.agents.image_understanding import get_image_description
-
-                # Get model and settings from tool_config if available
-                model = None
-                model_settings = None
-                if ctx.deps.tool_config:
-                    tool_config = ctx.deps.tool_config
-                    model = tool_config.image_understanding_model
-                    model_settings = tool_config.image_understanding_model_settings
-
-                # Use image understanding to describe (prefer URL if available)
-                description, internal_usage = await get_image_description(
-                    image_url=image_url,
-                    image_data=None if image_url else image_data,
-                    media_type=media_type,
-                    model=model,
-                    model_settings=model_settings,
-                    model_wrapper=ctx.deps.model_wrapper,
-                    wrapper_metadata=ctx.deps.get_wrapper_metadata(),
-                )
-
-                # Store usage in extra_usages
-                if ctx.tool_call_id:
-                    ctx.deps.add_extra_usage(
-                        agent="image_understanding", internal_usage=internal_usage, uuid=ctx.tool_call_id
-                    )
-
-                return f"Image description (via image analysis):\n{description}"
-            except Exception as e:
-                logger.warning(f"Failed to analyze image with image understanding: {e}")
-                return f"Image file: {file_path}. Model does not support vision and fallback analysis failed."
+        return await self._describe_image(ctx, file_path, image_data, media_type, image_url)
 
     async def _read_video_with_fallback(
         self,
@@ -241,78 +333,89 @@ class ViewTool(BaseTool):
         ctx: RunContext[AgentContext],
     ) -> str | ToolReturn:
         """Read video file, falling back to video understanding agent if not supported."""
-        # Read video data and determine media type
+        if error := await self._check_inline_size(
+            file_operator,
+            file_path,
+            max_bytes=ctx.deps.tool_config.view_max_inline_video_bytes,
+            kind="Video",
+        ):
+            return error
+
         video_data = await file_operator.read_bytes(file_path)
         media_type = self._get_video_media_type(file_path)
 
-        # Try to convert to URL using hook
         video_url: str | None = None
         if ctx.deps.tool_config and ctx.deps.tool_config.video_to_url_hook:
-            try:
-                hook = ctx.deps.tool_config.video_to_url_hook
-                if inspect.iscoroutinefunction(hook):
-                    result = await hook(ctx, video_data, media_type)
-                else:
-                    # Run sync hook in threadpool to avoid blocking event loop
-                    result = await run_in_threadpool(hook, ctx, video_data, media_type)
-                # Treat empty strings as None
-                result = cast("str | None", result)
-                video_url = result if result and result.strip() else None
-            except Exception:
-                logger.warning("video_to_url_hook failed, falling back to data", exc_info=True)
+            video_url = await self._maybe_convert_media_to_url(
+                ctx.deps.tool_config.video_to_url_hook,
+                ctx,
+                video_data,
+                media_type,
+                log_name="video_to_url_hook",
+            )
 
-        # Check if current model supports video understanding
-        has_video = ctx.deps.model_cfg.has_video_understanding
+        if ctx.deps.model_cfg.has_video_understanding:
+            return self._build_inline_media_return(
+                kind="video",
+                media_url=video_url,
+                data=video_data,
+                media_type=media_type,
+            )
 
-        if has_video:
-            # Return video content directly
-            if video_url:
-                return ToolReturn(
-                    return_value="The video is attached in the user message.",
-                    content=[VideoUrl(url=video_url)],
-                )
-            else:
-                return ToolReturn(
-                    return_value="The video is attached in the user message.",
-                    content=[BinaryContent(data=video_data, media_type=media_type)],
-                )
-        else:
-            # Fall back to video understanding agent
-            try:
-                from ya_agent_sdk.agents.video_understanding import get_video_description
+        return await self._describe_video(ctx, file_path, video_data, media_type, video_url)
 
-                # Get model and settings from tool_config if available
-                model = None
-                model_settings = None
-                if ctx.deps.tool_config:
-                    tool_config = ctx.deps.tool_config
-                    model = tool_config.video_understanding_model
-                    model_settings = tool_config.video_understanding_model_settings
+    def _build_text_metadata_response(
+        self,
+        *,
+        file_path: str,
+        content: str,
+        total_lines: int,
+        total_chars: int,
+        file_size: int,
+        line_offset: int,
+        line_limit: int,
+        has_offset: bool,
+        lines_truncated: bool,
+        content_truncated: bool,
+        max_line_length: int,
+        actual_lines_read: int,
+    ) -> dict[str, Any]:
+        """Build metadata-rich text response for paged/truncated reads."""
+        start_line = line_offset + 1
+        end_line = start_line + actual_lines_read - 1 if actual_lines_read > 0 else start_line
 
-                # Use video understanding to describe video (prefer URL if available)
-                description, internal_usage = await get_video_description(
-                    video_url=video_url,
-                    video_data=None if video_url else video_data,
-                    media_type=media_type,
-                    model=model,
-                    model_settings=model_settings,
-                )
+        last_sep = max(file_path.rfind("/"), file_path.rfind("\\"))
+        filename = file_path[last_sep + 1 :] if last_sep != -1 else file_path
 
-                # Store usage in extra_usages with tool_call_id
-                if ctx.tool_call_id:
-                    ctx.deps.add_extra_usage(
-                        agent="video_understanding", internal_usage=internal_usage, uuid=ctx.tool_call_id
-                    )
-
-                return f"Video description (via video understanding agent):\n{description}"
-            except Exception as e:
-                logger.warning(f"Failed to analyze video with video understanding: {e}")
-                return (
-                    f"Video file: {file_path}. Model does not support video understanding and fallback analysis failed."
-                )
+        return {
+            "content": content,
+            "metadata": ViewMetadata(
+                file_path=filename,
+                total_lines=total_lines,
+                total_characters=total_chars,
+                file_size_bytes=file_size,
+                current_segment=ViewSegment(
+                    start_line=start_line,
+                    end_line=end_line,
+                    lines_to_show=actual_lines_read,
+                    has_more_content=end_line < total_lines,
+                ),
+                reading_parameters=ViewReadingParams(
+                    line_offset=line_offset if has_offset else None,
+                    line_limit=line_limit,
+                ),
+                truncation_info=ViewTruncationInfo(
+                    lines_truncated=lines_truncated,
+                    content_truncated=content_truncated,
+                    max_line_length=max_line_length,
+                ),
+            ),
+            "system": "Increase the `line_limit` and `max_line_length` if you need more context.",
+        }
 
     async def _read_text_file(
         self,
+        ctx: RunContext[AgentContext],
         file_operator: FileOperator,
         file_path: str,
         line_offset: int | None,
@@ -320,84 +423,64 @@ class ViewTool(BaseTool):
         max_line_length: int,
     ) -> str | dict[str, Any]:
         """Read text file with pagination and truncation support."""
-        lines_truncated = False
-        content_truncated = False
+        stat = await file_operator.stat(file_path)
+        file_size = stat["size"]
+        max_text_file_size = ctx.deps.tool_config.view_max_text_file_size
 
-        # Read file content
+        if file_size > max_text_file_size:
+            size_mb = file_size / (1024 * 1024)
+            limit_mb = max_text_file_size / (1024 * 1024)
+            return {
+                "error": (
+                    f"File is too large to inspect safely ({size_mb:.2f} MB). "
+                    f"Maximum supported text view size is {limit_mb:.0f} MB."
+                ),
+                "success": False,
+            }
+
+        # Safe to read in one shot: stat check above guarantees bounded size
         full_content = await file_operator.read_file(file_path)
         all_lines = full_content.splitlines(keepends=True)
-
-        # Get file stats
-        stat = await file_operator.stat(file_path)
-
         total_lines = len(all_lines)
         total_chars = len(full_content)
-        file_size = stat["size"]
+        start_index = line_offset if line_offset is not None and line_offset > 0 else 0
+        has_offset = start_index > 0
+        selected_lines = all_lines[start_index : start_index + line_limit]
+        has_line_limit = len(all_lines[start_index:]) > line_limit
+        lines_truncated = False
+        content_truncated = False
+        processed_lines: list[str] = []
 
-        if line_offset is not None and line_offset > 0:
-            all_lines = all_lines[line_offset:]
-            has_offset = True
-        else:
-            has_offset = False
-            line_offset = 0
-
-        if len(all_lines) > line_limit:
-            all_lines = all_lines[:line_limit]
-            has_line_limit = True
-        else:
-            has_line_limit = False
-
-        processed_lines = []
-        for line in all_lines:
+        for line in selected_lines:
             if len(line) > max_line_length:
                 line = line[:max_line_length] + "... (line truncated)\n"
                 lines_truncated = True
             processed_lines.append(line)
 
         content = "".join(processed_lines)
-
         if len(content) > 60000:
             content = content[:60000] + "\n... (content truncated)"
             content_truncated = True
 
+        line_offset = start_index
         needs_metadata = has_offset or has_line_limit or lines_truncated or content_truncated
-
         if not needs_metadata:
             return content
-        else:
-            start_line = line_offset + 1
-            actual_lines_read = len(processed_lines)
-            end_line = start_line + actual_lines_read - 1 if actual_lines_read > 0 else start_line
 
-            # Extract filename from path
-            last_sep = max(file_path.rfind("/"), file_path.rfind("\\"))
-            filename = file_path[last_sep + 1 :] if last_sep != -1 else file_path
-
-            return {
-                "content": content,
-                "metadata": ViewMetadata(
-                    file_path=filename,
-                    total_lines=total_lines,
-                    total_characters=total_chars,
-                    file_size_bytes=file_size,
-                    current_segment=ViewSegment(
-                        start_line=start_line,
-                        end_line=end_line,
-                        lines_to_show=actual_lines_read,
-                        has_more_content=end_line < total_lines,
-                    ),
-                    reading_parameters=ViewReadingParams(
-                        line_offset=line_offset if has_offset else None,
-                        line_limit=line_limit,
-                    ),
-                    truncation_info=ViewTruncationInfo(
-                        lines_truncated=lines_truncated,
-                        content_truncated=content_truncated,
-                        max_line_length=max_line_length,
-                    ),
-                ),
-                "system": "Increase the `line_limit` and `max_line_length` if you need more context.",
-            }
+        return self._build_text_metadata_response(
+            file_path=file_path,
+            content=content,
+            total_lines=total_lines,
+            total_chars=total_chars,
+            file_size=file_size,
+            line_offset=line_offset,
+            line_limit=line_limit,
+            has_offset=has_offset,
+            lines_truncated=lines_truncated,
+            content_truncated=content_truncated,
+            max_line_length=max_line_length,
+            actual_lines_read=len(processed_lines),
+        )
 
     # --- Main entry point ---
 
@@ -445,7 +528,7 @@ class ViewTool(BaseTool):
         if self._is_video_file(file_path):
             return await self._read_video_with_fallback(file_operator, file_path, ctx)
 
-        return await self._read_text_file(file_operator, file_path, line_offset, line_limit, max_line_length)
+        return await self._read_text_file(ctx, file_operator, file_path, line_offset, line_limit, max_line_length)
 
 
 __all__ = ["ViewTool"]

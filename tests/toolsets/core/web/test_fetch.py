@@ -97,6 +97,69 @@ async def test_fetch_tool_get_image(tmp_path: Path, httpx_mock) -> None:
         assert result.media_type == "image/png"
 
 
+async def test_fetch_tool_reject_large_image_by_content_length(tmp_path: Path, httpx_mock) -> None:
+    """Should reject large binary responses before buffering them."""
+    httpx_mock.add_response(
+        url="https://example.com/huge-image.png",
+        content=b"",
+        headers={
+            "Content-Type": "image/png",
+            "Content-Length": str(35 * 1024 * 1024),
+        },
+    )
+
+    async with AsyncExitStack() as stack:
+        env = await stack.enter_async_context(
+            LocalEnvironment(allowed_paths=[tmp_path], default_path=tmp_path, tmp_base_dir=tmp_path)
+        )
+        ctx = await stack.enter_async_context(AgentContext(env=env))
+        tool = FetchTool()
+
+        mock_run_ctx = MagicMock(spec=RunContext)
+        mock_run_ctx.deps = ctx
+
+        result = await tool.call(mock_run_ctx, url="https://example.com/huge-image.png")
+        assert result == snapshot({
+            "success": False,
+            "error": "Resource too large to inline (36700160 bytes). Maximum supported size is 31457280 bytes.",
+        })
+
+
+async def test_fetch_tool_uses_tool_config_binary_limit(tmp_path: Path, httpx_mock) -> None:
+    """Should honor custom binary size limit from ToolConfig."""
+    from ya_agent_sdk.context import ToolConfig
+
+    httpx_mock.add_response(
+        url="https://example.com/custom-limit.png",
+        content=b"",
+        headers={
+            "Content-Type": "image/png",
+            "Content-Length": "2048",
+        },
+    )
+
+    async with AsyncExitStack() as stack:
+        env = await stack.enter_async_context(
+            LocalEnvironment(allowed_paths=[tmp_path], default_path=tmp_path, tmp_base_dir=tmp_path)
+        )
+        ctx = await stack.enter_async_context(
+            AgentContext(
+                env=env,
+                tool_config=ToolConfig(fetch_max_inline_binary_bytes=1024),
+            )
+        )
+        tool = FetchTool()
+
+        mock_run_ctx = MagicMock(spec=RunContext)
+        mock_run_ctx.deps = ctx
+
+        result = await tool.call(mock_run_ctx, url="https://example.com/custom-limit.png")
+        assert result == snapshot({
+            "success": False,
+            "error": "Resource too large to inline (2048 bytes). Maximum supported size is 1024 bytes.",
+        })
+
+
 async def test_fetch_tool_forbidden_url(tmp_path: Path) -> None:
     """Should return error for forbidden URLs when verification enabled."""
     from ya_agent_sdk.context import ToolConfig

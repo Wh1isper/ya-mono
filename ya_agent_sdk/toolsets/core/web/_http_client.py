@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import ipaddress
+from contextlib import asynccontextmanager
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -150,6 +151,59 @@ async def safe_request(
             return response
 
     raise httpx.TooManyRedirects(f"Exceeded {max_redirects} redirects")
+
+
+@asynccontextmanager
+async def safe_stream_request(
+    url: str,
+    method: str = "GET",
+    max_redirects: int = 10,
+    skip_verification: bool = False,
+    **kwargs: Any,
+):
+    """Make streamed HTTP request with SSRF protection and safe redirects."""
+    if not skip_verification:
+        verify_url(url)
+    client = get_http_client()
+    current_url = url
+    request_method = method
+    response: httpx.Response | None = None
+
+    try:
+        for _ in range(max_redirects):
+            request = client.build_request(request_method, current_url, **kwargs)
+            response = await client.send(request, stream=True)
+
+            if response.status_code in (301, 302, 303, 307, 308):
+                location = response.headers.get("Location")
+                if not location:
+                    raise httpx.HTTPStatusError(
+                        "Redirect missing Location header",
+                        request=response.request,
+                        response=response,
+                    )
+
+                if not location.startswith(("http://", "https://")):
+                    location = urljoin(current_url, location)
+
+                if not skip_verification:
+                    verify_url(location)
+
+                current_url = location
+                if response.status_code == 303:
+                    request_method = "GET"
+
+                await response.aclose()
+                response = None
+                continue
+
+            yield response
+            return
+
+        raise httpx.TooManyRedirects(f"Exceeded {max_redirects} redirects")
+    finally:
+        if response is not None:
+            await response.aclose()
 
 
 async def check_url_accessible(url: str, timeout: float = 5.0, skip_verification: bool = False) -> bool:
