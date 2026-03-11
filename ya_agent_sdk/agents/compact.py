@@ -57,11 +57,39 @@ Keep this response CONCISE and wrap your analysis in `analysis` and `context` fi
 
 IMPORTANT: If the message history contains any access to Skills (files in /skills/ directory, such as reading SKILL.md or using skill resources), you MUST include a reminder in the context to re-read the relevant skill documentation when resuming work."""
 
+# Anthropic cache settings that should NOT be inherited by compact agent.
+# The compact agent has different system prompts, tools, and message history;
+# inheriting these would create separate cache entries that are rarely reused,
+# wasting cache write tokens.
+_ANTHROPIC_CACHE_KEYS = frozenset({
+    "anthropic_cache_tool_definitions",
+    "anthropic_cache_instructions",
+    "anthropic_cache_messages",
+})
+
 # Maximum characters to keep in a single tool return content for compact
 _MAX_TOOL_RETURN_CHARS = 500
 # Characters to keep from the beginning and end when truncating
 _TOOL_RETURN_KEEP_HEAD = 200
 _TOOL_RETURN_KEEP_TAIL = 200
+
+
+def _strip_anthropic_cache_settings(settings: ModelSettings) -> ModelSettings:
+    """Strip Anthropic cache settings from inherited model settings.
+
+    The compact agent has different system prompts, tools, and message history
+    from the main agent. Inheriting cache settings would create separate cache
+    entries that are rarely reused, wasting cache write tokens.
+
+    Args:
+        settings: Model settings potentially containing Anthropic cache keys.
+
+    Returns:
+        A copy with cache keys removed, or the original if no cache keys present.
+    """
+    if not any(k in settings for k in _ANTHROPIC_CACHE_KEYS):
+        return settings
+    return cast(ModelSettings, {k: v for k, v in settings.items() if k not in _ANTHROPIC_CACHE_KEYS})
 
 
 # =============================================================================
@@ -288,7 +316,7 @@ def get_compact_agent(
 
     # model_settings: model_settings > main_model_settings
     if effective_settings is None and main_model_settings is not None:
-        effective_settings = main_model_settings
+        effective_settings = _strip_anthropic_cache_settings(main_model_settings)
 
     system_prompt = _load_system_prompt()
     return Agent[AgentContext, CondenseResult](
