@@ -8,6 +8,7 @@ the conversation.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import replace
 from inspect import isawaitable
 from pathlib import Path
 from typing import cast
@@ -16,12 +17,16 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, ModelSettings, UserContent
 from pydantic_ai.messages import (
+    BinaryContent,
+    ImageUrl,
     ModelMessage,
     ModelRequest,
     ModelResponse,
     SystemPromptPart,
     TextPart,
+    ToolReturnPart,
     UserPromptPart,
+    VideoUrl,
 )
 from pydantic_ai.models import Model
 from pydantic_ai.tools import RunContext
@@ -33,9 +38,6 @@ from ya_agent_sdk.context import AgentContext, ModelConfig
 from ya_agent_sdk.events import CompactCompleteEvent, CompactFailedEvent, CompactStartEvent
 from ya_agent_sdk.filters import (
     create_system_prompt_filter,
-    drop_extra_images,
-    drop_extra_videos,
-    drop_gif_images,
     fix_truncated_tool_args,
 )
 from ya_agent_sdk.usage import InternalUsage
@@ -54,6 +56,138 @@ You should NOT take any initiative or make any assumptions about continuing with
 Keep this response CONCISE and wrap your analysis in `analysis` and `context` fields to organize your thoughts and ensure you've covered all necessary points.
 
 IMPORTANT: If the message history contains any access to Skills (files in /skills/ directory, such as reading SKILL.md or using skill resources), you MUST include a reminder in the context to re-read the relevant skill documentation when resuming work."""
+
+# Maximum characters to keep in a single tool return content for compact
+_MAX_TOOL_RETURN_CHARS = 500
+# Characters to keep from the beginning and end when truncating
+_TOOL_RETURN_KEEP_HEAD = 200
+_TOOL_RETURN_KEEP_TAIL = 200
+
+
+# =============================================================================
+# Pre-trimming for compact
+# =============================================================================
+
+
+def _truncate_str(content: str, max_chars: int = _MAX_TOOL_RETURN_CHARS) -> str:
+    """Truncate a string, keeping head and tail portions.
+
+    Args:
+        content: The string to potentially truncate.
+        max_chars: Maximum allowed length before truncation.
+
+    Returns:
+        Original string if within limit, otherwise head + marker + tail.
+    """
+    if len(content) <= max_chars:
+        return content
+
+    head = content[:_TOOL_RETURN_KEEP_HEAD]
+    tail = content[-_TOOL_RETURN_KEEP_TAIL:]
+    truncated_count = len(content) - _TOOL_RETURN_KEEP_HEAD - _TOOL_RETURN_KEEP_TAIL
+    return f"{head}\n[... {truncated_count} chars truncated ...]\n{tail}"
+
+
+def _is_media_content(item: object) -> bool:
+    """Check if a UserContent item is image or video media."""
+    if isinstance(item, (ImageUrl, VideoUrl)):
+        return True
+    return isinstance(item, BinaryContent) and (
+        item.media_type.startswith("image/") or item.media_type.startswith("video/")
+    )
+
+
+def _media_to_placeholder(item: object) -> str:
+    """Convert a media content item to a descriptive text placeholder."""
+    if isinstance(item, ImageUrl):
+        return f"[image: {item.url}]"
+    if isinstance(item, VideoUrl):
+        return f"[video: {item.url}]"
+    if isinstance(item, BinaryContent):
+        return f"[{item.media_type} binary content removed]"
+    return "[media content removed]"
+
+
+def _truncate_tool_return(part: ToolReturnPart) -> tuple[ToolReturnPart, bool]:
+    """Truncate a ToolReturnPart if its content exceeds the limit.
+
+    Returns:
+        A tuple of (possibly replaced part, whether it was modified).
+    """
+    content_str = part.model_response_str()
+    if len(content_str) > _MAX_TOOL_RETURN_CHARS:
+        return replace(part, content=_truncate_str(content_str)), True
+    return part, False
+
+
+def _strip_media_from_user_prompt(part: UserPromptPart) -> tuple[UserPromptPart, bool]:
+    """Replace image/video content in a UserPromptPart with text placeholders.
+
+    Returns:
+        A tuple of (possibly replaced part, whether it was modified).
+    """
+    content = part.content
+
+    # Handle direct media content (e.g., content=ImageUrl(...))
+    if _is_media_content(content):
+        return replace(part, content=_media_to_placeholder(content)), True
+
+    if not isinstance(content, Sequence) or isinstance(content, str):
+        return part, False
+
+    has_media = any(_is_media_content(item) for item in content)
+    if not has_media:
+        return part, False
+
+    replaced = [_media_to_placeholder(item) if _is_media_content(item) else item for item in content]
+    return replace(part, content=replaced), True
+
+
+def _trim_history_for_compact(
+    message_history: list[ModelMessage],
+) -> list[ModelMessage]:
+    """Pre-trim message history before sending to compact agent.
+
+    Performs two operations to reduce token count:
+    1. Truncates large ToolReturnPart content (keeps head + tail)
+    2. Drops all image/video content from UserPromptPart
+
+    This ensures the compact agent can process the history without
+    exceeding its own context window, even when triggered at high
+    token usage (e.g., 89-99% of context).
+
+    Args:
+        message_history: The full message history from the main agent.
+
+    Returns:
+        A trimmed copy of the message history suitable for the compact agent.
+    """
+    trimmed: list[ModelMessage] = []
+
+    for message in message_history:
+        if not isinstance(message, ModelRequest):
+            # ModelResponse - keep as-is (text and tool calls are small)
+            trimmed.append(message)
+            continue
+
+        new_parts = []
+        parts_modified = False
+
+        for part in message.parts:
+            if isinstance(part, ToolReturnPart):
+                part, modified = _truncate_tool_return(part)
+                parts_modified = parts_modified or modified
+            elif isinstance(part, UserPromptPart):
+                part, modified = _strip_media_from_user_prompt(part)
+                parts_modified = parts_modified or modified
+            # SystemPromptPart, RetryPromptPart - keep as-is
+            new_parts.append(part)
+
+        if parts_modified:
+            message = replace(message, parts=new_parts)
+        trimmed.append(message)
+
+    return trimmed
 
 
 # =============================================================================
@@ -165,9 +299,6 @@ def get_compact_agent(
         system_prompt=system_prompt,
         history_processors=[
             create_system_prompt_filter(system_prompt),  # Ensure system prompt is consistent
-            drop_gif_images,  # Gemini 2.5 pro can't handle gifs
-            drop_extra_images,
-            drop_extra_videos,
             fix_truncated_tool_args,
         ],
     )
@@ -348,10 +479,13 @@ def create_compact_filter(
             # Emit start event
             await agent_ctx.emit_event(CompactStartEvent(event_id=event_id, message_count=len(message_history)))
 
-            # Run compact agent on full message history with AgentContext as deps
+            # Pre-trim history to reduce token count for compact agent
+            trimmed_history = _trim_history_for_compact(message_history)
+
+            # Run compact agent on trimmed message history with AgentContext as deps
             result = await agent.run(
                 DEFAULT_COMPACT_INSTRUCTION,
-                message_history=message_history,
+                message_history=trimmed_history,
                 deps=AgentContext(
                     model_cfg=model_cfg or ModelConfig(),
                 ),
