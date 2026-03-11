@@ -57,6 +57,50 @@ class ToolWithNoInstruction(BaseTool):
         return "ok"
 
 
+class UnavailableTool(BaseTool):
+    """Tool that is not available."""
+
+    name = "unavailable_tool"
+    description = "This tool is unavailable"
+
+    def is_available(self, ctx: RunContext[AgentContext]) -> bool:
+        return False
+
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str:
+        return "This instruction should NOT be injected"
+
+    async def call(self, ctx: RunContext[AgentContext]) -> str:
+        return "ok"
+
+
+class SupersededTool(BaseTool):
+    """Tool that is superseded by a capability tag."""
+
+    name = "superseded_tool"
+    description = "This tool is superseded"
+    superseded_by_tags = frozenset({"advanced"})
+
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str:
+        return "This instruction should NOT be injected when superseded"
+
+    async def call(self, ctx: RunContext[AgentContext]) -> str:
+        return "ok"
+
+
+class AdvancedTool(BaseTool):
+    """Tool that provides the 'advanced' capability tag."""
+
+    name = "advanced_tool"
+    description = "Advanced tool"
+    tags = frozenset({"advanced"})
+
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str:
+        return "Advanced tool instruction"
+
+    async def call(self, ctx: RunContext[AgentContext]) -> str:
+        return "ok"
+
+
 # Tests for Instruction model
 
 
@@ -137,3 +181,70 @@ async def test_get_instructions_empty(mock_run_context: RunContext[AgentContext]
     instructions = await toolset.get_instructions(mock_run_context)
 
     assert instructions is None
+
+
+# Tests for unavailable/superseded tool instruction filtering
+
+
+@pytest.mark.asyncio
+async def test_get_instructions_skips_unavailable_tools(mock_run_context: RunContext[AgentContext]):
+    """Test that unavailable tools do not inject instructions when skip_unavailable=True."""
+    toolset = Toolset(tools=[ToolWithStringInstruction, UnavailableTool], skip_unavailable=True)
+    instructions = await toolset.get_instructions(mock_run_context)
+
+    assert instructions is not None
+    assert "String instruction content" in instructions
+    assert "should NOT be injected" not in instructions
+    assert 'name="unavailable_tool"' not in instructions
+
+
+@pytest.mark.asyncio
+async def test_get_instructions_includes_unavailable_when_skip_disabled(mock_run_context: RunContext[AgentContext]):
+    """Test that unavailable tools still inject instructions when skip_unavailable=False."""
+    toolset = Toolset(tools=[UnavailableTool], skip_unavailable=False)
+    instructions = await toolset.get_instructions(mock_run_context)
+
+    assert instructions is not None
+    assert 'name="unavailable_tool"' in instructions
+
+
+@pytest.mark.asyncio
+async def test_get_instructions_skips_superseded_tools(mock_run_context: RunContext[AgentContext]):
+    """Test that superseded tools do not inject instructions."""
+    toolset = Toolset(tools=[SupersededTool, AdvancedTool])
+    instructions = await toolset.get_instructions(mock_run_context)
+
+    assert instructions is not None
+    # Advanced tool instruction should be present
+    assert "Advanced tool instruction" in instructions
+    # Superseded tool instruction should NOT be present
+    assert "should NOT be injected when superseded" not in instructions
+    assert 'name="superseded_tool"' not in instructions
+
+
+@pytest.mark.asyncio
+async def test_get_instructions_includes_superseded_when_no_superseding_tag(mock_run_context: RunContext[AgentContext]):
+    """Test that superseded tools inject instructions when the superseding tag is absent."""
+    toolset = Toolset(tools=[SupersededTool])  # No AdvancedTool, so no "advanced" tag
+    instructions = await toolset.get_instructions(mock_run_context)
+
+    assert instructions is not None
+    assert 'name="superseded_tool"' in instructions
+
+
+@pytest.mark.asyncio
+async def test_get_instructions_skips_both_unavailable_and_superseded(mock_run_context: RunContext[AgentContext]):
+    """Test combined filtering: unavailable and superseded tools are both excluded."""
+    toolset = Toolset(
+        tools=[ToolWithStringInstruction, UnavailableTool, SupersededTool, AdvancedTool],
+        skip_unavailable=True,
+    )
+    instructions = await toolset.get_instructions(mock_run_context)
+
+    assert instructions is not None
+    # Available, non-superseded tools should be present
+    assert "String instruction content" in instructions
+    assert "Advanced tool instruction" in instructions
+    # Unavailable and superseded tools should be excluded
+    assert 'name="unavailable_tool"' not in instructions
+    assert 'name="superseded_tool"' not in instructions
