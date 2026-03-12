@@ -533,6 +533,9 @@ class ToolConfig(BaseModel):
     download_max_concurrency: int = 4
     """Maximum number of concurrent downloads for the download tool."""
 
+    document_max_file_size: int = 200 * 1024 * 1024
+    """Maximum file size in bytes for document conversion tools (PDF, Office). Default: 200 MB."""
+
     @field_validator("download_max_concurrency")
     @classmethod
     def _validate_download_max_concurrency(cls, v: int) -> int:
