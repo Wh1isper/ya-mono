@@ -16,7 +16,7 @@ from y_agent_environment import FileOperator
 from ya_agent_sdk._logger import get_logger
 from ya_agent_sdk.context import AgentContext
 from ya_agent_sdk.toolsets.core.base import BaseTool
-from ya_agent_sdk.toolsets.core.web._http_client import ForbiddenUrlError, safe_request, verify_url
+from ya_agent_sdk.toolsets.core.web._http_client import ForbiddenUrlError, safe_stream_request, verify_url
 
 logger = get_logger(__name__)
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
@@ -59,7 +59,8 @@ class DownloadTool(BaseTool):
         await file_operator.mkdir(save_dir, parents=True)
 
         # Download all URLs in parallel
-        tasks = [self._download_one(ctx, url, save_dir) for url in urls]
+        semaphore = asyncio.Semaphore(ctx.deps.tool_config.download_max_concurrency)
+        tasks = [self._download_one(ctx, url, save_dir, semaphore) for url in urls]
         return await asyncio.gather(*tasks)
 
     async def _download_one(
@@ -67,6 +68,7 @@ class DownloadTool(BaseTool):
         ctx: RunContext[AgentContext],
         url: str,
         save_dir: str,
+        semaphore: asyncio.Semaphore,
     ) -> dict[str, Any]:
         """Download a single file."""
         file_operator = cast(FileOperator, ctx.deps.file_operator)
@@ -81,29 +83,38 @@ class DownloadTool(BaseTool):
                 return {"success": False, "url": url, "error": f"URL access forbidden: {e}"}
 
         try:
-            response = await safe_request(url, method="GET", timeout=60.0, skip_verification=skip_verification)
-            response.raise_for_status()
+            chunk_size = ctx.deps.tool_config.fetch_stream_chunk_size
+            async with (
+                semaphore,
+                safe_stream_request(url, method="GET", timeout=60.0, skip_verification=skip_verification) as response,
+            ):
+                response.raise_for_status()
 
-            # Determine filename
-            content_type = response.headers.get("Content-Type", "").split(";")[0].strip()
-            original_name = Path(url.split("?")[0]).name or "downloaded"
+                content_type = response.headers.get("Content-Type", "").split(";")[0].strip()
+                original_name = Path(url.split("?")[0]).name or "downloaded"
 
-            # Get extension from content type if missing
-            extension = self._get_extension(content_type, original_name)
-            filename = f"{uuid4().hex}{extension}"
-            save_path = f"{save_dir}/{filename}"
+                extension = self._get_extension(content_type, original_name)
+                filename = f"{uuid4().hex}{extension}"
+                save_path = f"{save_dir}/{filename}"
 
-            # Write file using file_operator
-            await file_operator.write_file(save_path, response.content)
+                total_size = 0
 
-            return {
-                "success": True,
-                "url": url,
-                "save_path": save_path,
-                "size": len(response.content),
-                "content_type": content_type,
-                "message": f"Downloaded to {save_path}. Use `move` tool to rename if needed.",
-            }
+                async def byte_stream():
+                    nonlocal total_size
+                    async for chunk in response.aiter_bytes(chunk_size=chunk_size):
+                        total_size += len(chunk)
+                        yield chunk
+
+                await file_operator.write_bytes_stream(save_path, byte_stream())
+
+                return {
+                    "success": True,
+                    "url": url,
+                    "save_path": save_path,
+                    "size": total_size,
+                    "content_type": content_type,
+                    "message": f"Downloaded to {save_path}. Use `move` tool to rename if needed.",
+                }
 
         except ForbiddenUrlError as e:
             return {"success": False, "url": url, "error": f"Redirect forbidden: {e}"}

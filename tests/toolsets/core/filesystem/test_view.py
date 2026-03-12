@@ -297,6 +297,85 @@ async def test_view_image_file(tmp_path: Path) -> None:
         assert result.content[0].media_type == "image/png"
 
 
+async def test_view_reject_large_image_inline(tmp_path: Path) -> None:
+    """Should reject oversized images before loading them into memory."""
+    from ya_agent_sdk.context import ModelCapability, ModelConfig
+
+    async with AsyncExitStack() as stack:
+        env = await stack.enter_async_context(
+            LocalEnvironment(allowed_paths=[tmp_path], default_path=tmp_path, tmp_base_dir=tmp_path)
+        )
+        ctx = await stack.enter_async_context(
+            AgentContext(
+                env=env,
+                model_cfg=ModelConfig(capabilities={ModelCapability.vision}),
+            )
+        )
+        tool = ViewTool()
+
+        test_file = tmp_path / "huge.png"
+        test_file.write_bytes(b"x" * (21 * 1024 * 1024))
+
+        mock_run_ctx = MagicMock(spec=RunContext)
+        mock_run_ctx.deps = ctx
+
+        result = await tool.call(mock_run_ctx, file_path="huge.png")
+        assert result == snapshot(
+            "Error: Image file is too large to inline (21.00 MB). Maximum supported inline size is 20.00 MB."
+        )
+
+
+async def test_view_reject_large_text_file(tmp_path: Path) -> None:
+    """Should reject text files that exceed safe inspection size."""
+    async with AsyncExitStack() as stack:
+        env = await stack.enter_async_context(
+            LocalEnvironment(allowed_paths=[tmp_path], default_path=tmp_path, tmp_base_dir=tmp_path)
+        )
+        ctx = await stack.enter_async_context(AgentContext(env=env))
+        tool = ViewTool()
+
+        test_file = tmp_path / "huge.txt"
+        test_file.write_text("a" * (11 * 1024 * 1024), encoding="utf-8")
+
+        mock_run_ctx = MagicMock(spec=RunContext)
+        mock_run_ctx.deps = ctx
+
+        result = await tool.call(mock_run_ctx, file_path="huge.txt")
+        assert result == snapshot({
+            "error": "File is too large to inspect safely (11.00 MB). Maximum supported text view size is 10.00 MB.",
+            "success": False,
+        })
+
+
+async def test_view_uses_tool_config_text_limit(tmp_path: Path) -> None:
+    """Should honor custom text size limit from ToolConfig."""
+    from ya_agent_sdk.context import ToolConfig
+
+    async with AsyncExitStack() as stack:
+        env = await stack.enter_async_context(
+            LocalEnvironment(allowed_paths=[tmp_path], default_path=tmp_path, tmp_base_dir=tmp_path)
+        )
+        ctx = await stack.enter_async_context(
+            AgentContext(
+                env=env,
+                tool_config=ToolConfig(view_max_text_file_size=1024),
+            )
+        )
+        tool = ViewTool()
+
+        test_file = tmp_path / "custom-limit.txt"
+        test_file.write_text("a" * 2048, encoding="utf-8")
+
+        mock_run_ctx = MagicMock(spec=RunContext)
+        mock_run_ctx.deps = ctx
+
+        result = await tool.call(mock_run_ctx, file_path="custom-limit.txt")
+        assert result == snapshot({
+            "error": "File is too large to inspect safely (2.0 KB). Maximum supported text view size is 1.0 KB.",
+            "success": False,
+        })
+
+
 async def test_view_video_file_with_video_model(tmp_path: Path) -> None:
     """Should return video content when model supports video."""
     from ya_agent_sdk.context import ModelCapability, ModelConfig

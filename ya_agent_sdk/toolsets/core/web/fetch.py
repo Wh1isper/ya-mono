@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+import contextlib
 from functools import cache
 from pathlib import Path
 from typing import Annotated, Any
 
+import httpx
 from pydantic import Field
 from pydantic_ai import BinaryContent, RunContext
 
 from ya_agent_sdk._logger import get_logger
 from ya_agent_sdk.context import AgentContext
 from ya_agent_sdk.toolsets.core.base import BaseTool
-from ya_agent_sdk.toolsets.core.web._http_client import ForbiddenUrlError, safe_request, verify_url
+from ya_agent_sdk.toolsets.core.web._http_client import (
+    ForbiddenUrlError,
+    safe_request,
+    safe_stream_request,
+    verify_url,
+)
 
 logger = get_logger(__name__)
 
@@ -57,7 +64,7 @@ class FetchTool(BaseTool):
         if head_only:
             return await self._head_request(url, skip_verification)
         else:
-            return await self._get_request(url, skip_verification)
+            return await self._get_request(ctx, url, skip_verification)
 
     async def _head_request(self, url: str, skip_verification: bool = False) -> dict[str, Any]:
         """Make HEAD request to check resource info."""
@@ -92,29 +99,109 @@ class FetchTool(BaseTool):
                 "url": url,
             }
 
-    async def _get_request(self, url: str, skip_verification: bool = False) -> str | dict[str, Any] | BinaryContent:
+    def _build_binary_size_error(self, max_bytes: int, size: int, *, downloaded: bool = False) -> dict[str, Any]:
+        """Build a standardized error for oversized binary fetches."""
+        if downloaded:
+            return {
+                "success": False,
+                "error": (
+                    f"Resource exceeded inline limit while downloading ({size} bytes). "
+                    f"Maximum supported size is {max_bytes} bytes."
+                ),
+            }
+        return {
+            "success": False,
+            "error": (f"Resource too large to inline ({size} bytes). Maximum supported size is {max_bytes} bytes."),
+        }
+
+    async def _read_binary_response(
+        self,
+        ctx: RunContext[AgentContext],
+        response: httpx.Response,
+        content_type: str,
+    ) -> BinaryContent | dict[str, Any]:
+        """Read a binary response with a hard in-memory size limit."""
+        max_bytes = ctx.deps.tool_config.fetch_max_inline_binary_bytes
+        chunk_size = ctx.deps.tool_config.fetch_stream_chunk_size
+        content_length = response.headers.get("Content-Length")
+        if content_length:
+            try:
+                declared_size = int(content_length)
+            except (ValueError, OverflowError):
+                declared_size = None
+            if declared_size is not None and declared_size > max_bytes:
+                return self._build_binary_size_error(max_bytes, declared_size)
+
+        image_data = bytearray()
+        async for chunk in response.aiter_bytes(chunk_size=chunk_size):
+            image_data.extend(chunk)
+            if len(image_data) > max_bytes:
+                return self._build_binary_size_error(max_bytes, len(image_data), downloaded=True)
+
+        return BinaryContent(data=bytes(image_data), media_type=content_type)
+
+    async def _read_text_response(
+        self, ctx: RunContext[AgentContext], response: httpx.Response
+    ) -> str | dict[str, Any]:
+        """Read a text response incrementally and truncate by character budget."""
+        chunk_size = ctx.deps.tool_config.fetch_stream_chunk_size
+        content_parts: list[str] = []
+        current_length = 0
+        truncated = False
+
+        async for chunk in response.aiter_text(chunk_size=chunk_size):
+            remaining = CONTENT_TRUNCATE_THRESHOLD - current_length
+            if remaining <= 0:
+                truncated = True
+                break
+
+            if len(chunk) <= remaining:
+                content_parts.append(chunk)
+                current_length += len(chunk)
+            else:
+                content_parts.append(chunk[:remaining])
+                current_length += remaining
+                truncated = True
+                break
+
+        text = "".join(content_parts)
+        if not truncated:
+            return text
+
+        # Use Content-Length header for total size estimate when available
+        total_length: int | None = None
+        content_length = response.headers.get("Content-Length")
+        if content_length:
+            with contextlib.suppress(ValueError, OverflowError):
+                total_length = int(content_length)
+
+        result: dict[str, Any] = {
+            "content": text + "\n\n... (truncated)",
+            "truncated": True,
+            "tips": "Content truncated. Use `download` to save the full file.",
+        }
+        if total_length is not None:
+            result["total_length"] = total_length
+        return result
+
+    async def _get_request(
+        self,
+        ctx: RunContext[AgentContext],
+        url: str,
+        skip_verification: bool = False,
+    ) -> str | dict[str, Any] | BinaryContent:
         """Make GET request and return content."""
         try:
-            response = await safe_request(url, method="GET", timeout=60.0, skip_verification=skip_verification)
-            response.raise_for_status()
+            async with safe_stream_request(
+                url, method="GET", timeout=60.0, skip_verification=skip_verification
+            ) as response:
+                response.raise_for_status()
 
-            content_type = response.headers.get("Content-Type", "")
+                content_type = response.headers.get("Content-Type", "")
+                if "image" in content_type:
+                    return await self._read_binary_response(ctx, response, content_type)
 
-            # Return images as BinaryContent
-            if "image" in content_type:
-                return BinaryContent(data=response.content, media_type=content_type)
-
-            # Return text content
-            text = response.text
-            if len(text) > CONTENT_TRUNCATE_THRESHOLD:
-                return {
-                    "content": text[:CONTENT_TRUNCATE_THRESHOLD] + "\n\n... (truncated)",
-                    "truncated": True,
-                    "total_length": len(text),
-                    "tips": "Content truncated. Use `download` to save the full file.",
-                }
-
-            return text
+                return await self._read_text_response(ctx, response)
 
         except ForbiddenUrlError as e:
             return {"success": False, "error": f"URL forbidden: {e}"}

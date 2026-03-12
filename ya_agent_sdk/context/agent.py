@@ -76,7 +76,7 @@ from uuid import uuid4
 from xml.dom.minidom import parseString
 from xml.etree.ElementTree import Element, SubElement, tostring
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_ai import (
     DeferredToolRequests,
     FunctionToolCallEvent,
@@ -514,6 +514,31 @@ class ToolConfig(BaseModel):
     # Web scraping API key
     firecrawl_api_key: str | None = Field(default_factory=lambda: _get_tool_settings().firecrawl_api_key)
     """Firecrawl API key for web scraping."""
+
+    view_max_text_file_size: int = 10 * 1024 * 1024
+    """Maximum text file size in bytes that the view tool will inspect."""
+
+    view_max_inline_image_bytes: int = 20 * 1024 * 1024
+    """Maximum image size in bytes that the view tool will inline into context."""
+
+    view_max_inline_video_bytes: int = 50 * 1024 * 1024
+    """Maximum video size in bytes that the view tool will inline into context."""
+
+    fetch_stream_chunk_size: int = 64 * 1024
+    """Chunk size in bytes for streamed HTTP reads in fetch/download tools."""
+
+    fetch_max_inline_binary_bytes: int = 30 * 1024 * 1024
+    """Maximum binary response size in bytes that fetch will buffer in memory."""
+
+    download_max_concurrency: int = 4
+    """Maximum number of concurrent downloads for the download tool."""
+
+    @field_validator("download_max_concurrency")
+    @classmethod
+    def _validate_download_max_concurrency(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("download_max_concurrency must be >= 1")
+        return v
 
     # Media to URL conversion hooks
     image_to_url_hook: MediaToUrlHook | None = None
