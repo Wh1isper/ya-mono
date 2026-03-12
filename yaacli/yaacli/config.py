@@ -183,6 +183,26 @@ class MCPServerConfig(MCPServerSpec):
         }
     """
 
+    required: bool = True
+    """Whether this server is required for startup.
+
+    If True (default), connection failure will prevent the application from
+    starting. If False, the server will be skipped with a warning when it
+    fails to connect.
+
+    Example in mcp.json::
+
+        {
+            "servers": {
+                "context7": {
+                    "transport": "streamable_http",
+                    "url": "https://mcp.context7.com/mcp",
+                    "required": false
+                }
+            }
+        }
+    """
+
 
 class MCPConfig(BaseModel):
     """MCP configuration from mcp.json."""

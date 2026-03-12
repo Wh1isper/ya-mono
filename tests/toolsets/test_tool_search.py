@@ -980,3 +980,119 @@ async def test_toolset_with_embedding_strategy(weather_toolset, finance_toolset,
     tools = await ts.get_tools(mock_run_context)
     assert "get_stock_price" in tools
     assert "convert_currency" in tools
+
+
+# ---------------------------------------------------------------------------
+# optional_namespaces tests
+# ---------------------------------------------------------------------------
+
+
+class FailingToolset(Toolset):
+    """A toolset that raises on __aenter__ to simulate connection failure."""
+
+    async def __aenter__(self):
+        raise ConnectionError("Failed to connect to MCP server")
+
+
+@pytest.mark.anyio
+async def test_optional_namespace_skipped_on_failure(mock_run_context):
+    """Optional toolset that fails to init should be skipped."""
+    good_toolset = Toolset(tools=[GetWeatherTool, GetForecastTool], toolset_id="weather")
+    bad_toolset = FailingToolset(tools=[GetStockPriceTool], toolset_id="failing_mcp")
+
+    ts = ToolSearchToolSet(
+        toolsets=[good_toolset, bad_toolset],
+        optional_namespaces={"failing_mcp"},
+    )
+
+    # Should not raise, the failing toolset is optional
+    async with ts:
+        tools = await ts.get_tools(mock_run_context)
+        assert "tool_search" in tools
+
+        # Load weather namespace - should work
+        await ts.call_tool("tool_search", {"query": "weather"}, mock_run_context, tools["tool_search"])
+        tools = await ts.get_tools(mock_run_context)
+        assert "get_weather" in tools
+        assert "get_forecast" in tools
+
+
+@pytest.mark.anyio
+async def test_required_namespace_raises_on_failure(mock_run_context):
+    """Required toolset (not in optional_namespaces) should raise on init failure."""
+    good_toolset = Toolset(tools=[GetWeatherTool], toolset_id="weather")
+    bad_toolset = FailingToolset(tools=[GetStockPriceTool], toolset_id="critical_mcp")
+
+    ts = ToolSearchToolSet(
+        toolsets=[good_toolset, bad_toolset],
+        optional_namespaces=set(),  # No optional namespaces
+    )
+
+    with pytest.raises(ConnectionError, match="Failed to connect"):
+        async with ts:
+            pass
+
+
+@pytest.mark.anyio
+async def test_required_namespace_default_raises_on_failure(mock_run_context):
+    """Without optional_namespaces parameter, all toolsets are required (backward compat)."""
+    bad_toolset = FailingToolset(tools=[GetStockPriceTool], toolset_id="some_mcp")
+
+    ts = ToolSearchToolSet(toolsets=[bad_toolset])
+
+    with pytest.raises(ConnectionError, match="Failed to connect"):
+        async with ts:
+            pass
+
+
+@pytest.mark.anyio
+async def test_optional_namespace_no_id_still_raises():
+    """Toolset without id that fails should always raise (can't match optional_namespaces)."""
+    bad_toolset = FailingToolset(tools=[GetStockPriceTool])  # No toolset_id
+
+    ts = ToolSearchToolSet(
+        toolsets=[bad_toolset],
+        optional_namespaces=set(),
+    )
+
+    with pytest.raises(ConnectionError, match="Failed to connect"):
+        async with ts:
+            pass
+
+
+@pytest.mark.anyio
+async def test_optional_namespace_rollback_on_required_failure(mock_run_context):
+    """When a required toolset fails, already-entered optional toolsets are rolled back."""
+    good_toolset = Toolset(tools=[GetWeatherTool], toolset_id="weather")
+    bad_toolset = FailingToolset(tools=[GetStockPriceTool], toolset_id="critical_mcp")
+
+    ts = ToolSearchToolSet(
+        toolsets=[good_toolset, bad_toolset],
+        optional_namespaces=set(),  # Both required
+    )
+
+    with pytest.raises(ConnectionError):
+        async with ts:
+            pass
+
+
+@pytest.mark.anyio
+async def test_multiple_optional_namespaces_some_fail(mock_run_context):
+    """Multiple optional toolsets: some fail, some succeed."""
+    good_weather = Toolset(tools=[GetWeatherTool, GetForecastTool], toolset_id="weather")
+    bad_mcp1 = FailingToolset(tools=[GetStockPriceTool], toolset_id="mcp1")
+    bad_mcp2 = FailingToolset(tools=[ConvertCurrencyTool], toolset_id="mcp2")
+
+    ts = ToolSearchToolSet(
+        toolsets=[good_weather, bad_mcp1, bad_mcp2],
+        optional_namespaces={"mcp1", "mcp2"},
+    )
+
+    async with ts:
+        tools = await ts.get_tools(mock_run_context)
+        assert "tool_search" in tools
+
+        # Weather should still work
+        await ts.call_tool("tool_search", {"query": "weather"}, mock_run_context, tools["tool_search"])
+        tools = await ts.get_tools(mock_run_context)
+        assert "get_weather" in tools

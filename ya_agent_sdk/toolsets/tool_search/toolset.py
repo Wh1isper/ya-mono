@@ -78,6 +78,7 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
         namespace_descriptions: dict[str, str] | None = None,
         search_strategy: SearchStrategy | None = None,
         max_results: int = 5,
+        optional_namespaces: set[str] | None = None,
     ) -> None:
         """Initialize ToolSearchToolSet.
 
@@ -90,11 +91,17 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
             search_strategy: Pluggable search implementation.
                 Defaults to KeywordSearchStrategy.
             max_results: Maximum results returned per search.
+            optional_namespaces: Set of toolset IDs that are optional. If a
+                toolset with an ID in this set fails to initialize during
+                ``__aenter__``, it will be skipped with a warning instead of
+                raising. Toolsets not in this set (or without an ID) are
+                required and will raise on failure.
         """
         self._toolsets = list(toolsets)
         self._namespace_descriptions = namespace_descriptions or {}
         self._strategy: SearchStrategy = search_strategy or KeywordSearchStrategy()
         self._max_results = max_results
+        self._optional_namespaces = optional_namespaces or set()
 
         # Built on each get_tools() call
         self._search_entries: dict[str, ToolMetadata] = {}
@@ -277,10 +284,23 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
 
     async def __aenter__(self):
         entered: list[AbstractToolset[AgentContext]] = []
+        failed: list[AbstractToolset[AgentContext]] = []
         try:
             for ts in self._toolsets:
-                await ts.__aenter__()
-                entered.append(ts)
+                try:
+                    await ts.__aenter__()
+                    entered.append(ts)
+                except Exception:
+                    ts_id = ts.id
+                    if ts_id and ts_id in self._optional_namespaces:
+                        logger.warning(
+                            "Optional toolset %r failed to initialize, skipping",
+                            ts_id,
+                            exc_info=True,
+                        )
+                        failed.append(ts)
+                    else:
+                        raise
         except BaseException:
             # Rollback already-entered toolsets on failure
             for ts in reversed(entered):
@@ -289,6 +309,16 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
                 except Exception:
                     logger.warning(f"Error during rollback of {ts!r}", exc_info=True)
             raise
+
+        # Remove failed optional toolsets from active list
+        if failed:
+            self._toolsets = [ts for ts in self._toolsets if ts not in failed]
+            logger.warning(
+                "Skipped %d optional toolset(s), continuing with %d",
+                len(failed),
+                len(self._toolsets),
+            )
+
         return self
 
     async def __aexit__(self, *args):

@@ -54,7 +54,7 @@ from yaacli.browser import BrowserManager
 from yaacli.config import ConfigManager, MCPConfig, SubagentsConfig, YaacliConfig
 from yaacli.environment import TUIEnvironment
 from yaacli.logging import get_logger
-from yaacli.mcp import build_mcp_servers, extract_mcp_descriptions
+from yaacli.mcp import build_mcp_servers, extract_mcp_descriptions, extract_optional_mcps
 from yaacli.session import TUIContext
 from yaacli.toolsets.background import background_tools
 
@@ -223,10 +223,12 @@ def create_tui_runtime(
         mcp_servers = build_mcp_servers(mcp_config, need_approval_mcps=config.tools.need_approval_mcps)
         if mcp_servers:
             mcp_descriptions = extract_mcp_descriptions(mcp_config)
+            optional_mcps = extract_optional_mcps(mcp_config)
             mcp_toolsearch = ToolSearchToolSet(
                 toolsets=mcp_servers,
                 namespace_descriptions=mcp_descriptions if mcp_descriptions else None,
                 search_strategy=create_best_strategy(),
+                optional_namespaces=optional_mcps if optional_mcps else None,
             )
             toolsets.append(mcp_toolsearch)
             logger.info(
