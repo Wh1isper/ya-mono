@@ -21,6 +21,7 @@ from pydantic_ai.toolsets.abstract import AbstractToolset, ToolsetTool
 
 from ya_agent_sdk._logger import get_logger
 from ya_agent_sdk.context import AgentContext
+from ya_agent_sdk.events import NamespaceStatus, ToolSearchInitEvent
 from ya_agent_sdk.toolsets.base import BaseToolset, InstructableToolset
 from ya_agent_sdk.toolsets.tool_search.metadata import ToolMetadata, extract_metadata_from_schema
 from ya_agent_sdk.toolsets.tool_search.strategies.keyword import KeywordSearchStrategy
@@ -78,6 +79,7 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
         namespace_descriptions: dict[str, str] | None = None,
         search_strategy: SearchStrategy | None = None,
         max_results: int = 5,
+        optional_namespaces: set[str] | None = None,
     ) -> None:
         """Initialize ToolSearchToolSet.
 
@@ -90,11 +92,20 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
             search_strategy: Pluggable search implementation.
                 Defaults to KeywordSearchStrategy.
             max_results: Maximum results returned per search.
+            optional_namespaces: Set of toolset IDs that are optional. If a
+                toolset with an ID in this set fails to initialize during
+                ``__aenter__``, it will be skipped with a warning instead of
+                raising. Toolsets not in this set (or without an ID) are
+                required and will raise on failure.
         """
         self._toolsets = list(toolsets)
         self._namespace_descriptions = namespace_descriptions or {}
         self._strategy: SearchStrategy = search_strategy or KeywordSearchStrategy()
         self._max_results = max_results
+        self._optional_namespaces = optional_namespaces or set()
+
+        # Init report: namespace_id -> status (populated during __aenter__)
+        self._init_report: dict[str, NamespaceStatus] = {}
 
         # Built on each get_tools() call
         self._search_entries: dict[str, ToolMetadata] = {}
@@ -109,6 +120,16 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
     @property
     def id(self) -> str | None:
         return None
+
+    @property
+    def init_report(self) -> dict[str, NamespaceStatus]:
+        """Namespace initialization status after __aenter__.
+
+        Returns:
+            Mapping of namespace ID to NamespaceStatus.
+            Only populated after __aenter__ completes.
+        """
+        return dict(self._init_report)
 
     # -------------------------------------------------------------------------
     # AbstractToolset interface
@@ -125,8 +146,21 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
         that it occupies a stable position in the model's tool list regardless
         of how many tools have been dynamically loaded.  Newly loaded tools
         are appended after it.
+
+        On each call, emits a ``ToolSearchInitEvent`` via the context's
+        sideband stream to report current namespace status, since namespace
+        availability can change at runtime (e.g., MCP server disconnection).
         """
         all_tools = await self._collect_and_index_tools(ctx)
+
+        # Emit namespace status event on every call (status can change dynamically)
+        if self._init_report:
+            await ctx.deps.emit_event(
+                ToolSearchInitEvent(
+                    event_id=f"tool-search-init-{ctx.deps.run_id[:8]}",
+                    namespace_status=dict(self._init_report),
+                )
+            )
 
         # Rebuild search index
         all_metadata = list(self._search_entries.values())
@@ -169,15 +203,31 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
         return visible
 
     async def _collect_and_index_tools(self, ctx: RunContext[AgentContext]) -> dict[str, ToolsetTool[AgentContext]]:
-        """Collect tools from all wrapped toolsets and build the search index."""
+        """Collect tools from all wrapped toolsets and build the search index.
+
+        For optional namespaces, if ``get_tools()`` fails at runtime (e.g., MCP
+        server disconnected), the namespace is skipped with a warning and its
+        status in ``_init_report`` is updated to ``NamespaceStatus.error``.
+        """
         all_tools: dict[str, ToolsetTool[AgentContext]] = {}
         self._search_entries.clear()
         self._toolset_tools_cache.clear()
         self._namespace_tools.clear()
 
         for ts in self._toolsets:
-            ts_tools = await ts.get_tools(ctx)
             namespace_id = ts.id
+            try:
+                ts_tools = await ts.get_tools(ctx)
+            except Exception:
+                if namespace_id and namespace_id in self._optional_namespaces:
+                    logger.warning(
+                        "Optional toolset %r failed during get_tools, skipping",
+                        namespace_id,
+                        exc_info=True,
+                    )
+                    self._init_report[namespace_id] = NamespaceStatus.error
+                    continue
+                raise
 
             for name, tool in ts_tools.items():
                 if name == _TOOL_SEARCH_NAME:
@@ -277,10 +327,27 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
 
     async def __aenter__(self):
         entered: list[AbstractToolset[AgentContext]] = []
+        failed: list[AbstractToolset[AgentContext]] = []
+        self._init_report.clear()
         try:
             for ts in self._toolsets:
-                await ts.__aenter__()
-                entered.append(ts)
+                try:
+                    await ts.__aenter__()
+                    entered.append(ts)
+                    if ts.id:
+                        self._init_report[ts.id] = NamespaceStatus.connected
+                except Exception:
+                    ts_id = ts.id
+                    if ts_id and ts_id in self._optional_namespaces:
+                        logger.warning(
+                            "Optional toolset %r failed to initialize, skipping",
+                            ts_id,
+                            exc_info=True,
+                        )
+                        self._init_report[ts_id] = NamespaceStatus.skipped
+                        failed.append(ts)
+                    else:
+                        raise
         except BaseException:
             # Rollback already-entered toolsets on failure
             for ts in reversed(entered):
@@ -289,6 +356,16 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
                 except Exception:
                     logger.warning(f"Error during rollback of {ts!r}", exc_info=True)
             raise
+
+        # Remove failed optional toolsets from active list
+        if failed:
+            self._toolsets = [ts for ts in self._toolsets if ts not in failed]
+            logger.warning(
+                "Skipped %d optional toolset(s), continuing with %d",
+                len(failed),
+                len(self._toolsets),
+            )
+
         return self
 
     async def __aexit__(self, *args):

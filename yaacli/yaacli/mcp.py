@@ -153,6 +153,21 @@ def extract_mcp_descriptions(mcp_config: MCPConfig) -> dict[str, str]:
     return descriptions
 
 
+def extract_optional_mcps(mcp_config: MCPConfig) -> set[str]:
+    """Extract server names that are not required (optional).
+
+    Returns set of server names where ``required=False``.
+    These servers will be skipped gracefully on connection failure.
+
+    Args:
+        mcp_config: MCP configuration containing server definitions.
+
+    Returns:
+        Set of optional server names.
+    """
+    return {name for name, config in mcp_config.servers.items() if not config.required}
+
+
 def build_mcp_servers(
     mcp_config: MCPConfig,
     need_approval_mcps: list[str] | None = None,

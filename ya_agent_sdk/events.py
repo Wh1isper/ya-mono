@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -353,6 +354,44 @@ class ToolCallsCompleteEvent(AgentEvent):
 
     loop_index: int = 0
     duration_seconds: float = 0.0
+
+
+# =============================================================================
+# Tool Search Events
+# =============================================================================
+
+
+class NamespaceStatus(StrEnum):
+    """Initialization status of a namespace (toolset) in ToolSearchToolSet."""
+
+    connected = "connected"
+    """Namespace initialized successfully and is available for use."""
+
+    skipped = "skipped"
+    """Namespace failed to initialize but was optional, so it was skipped."""
+
+    error = "error"
+    """Namespace was connected but encountered a runtime error (e.g., disconnected)."""
+
+
+@dataclass
+class ToolSearchInitEvent(AgentEvent):
+    """Emitted on first get_tools() call to report namespace initialization status.
+
+    This event is emitted by ToolSearchToolSet after all wrapped toolsets have
+    been initialized (via __aenter__). It reports which namespaces connected
+    successfully and which were skipped due to initialization failure (when
+    configured as optional via optional_namespaces).
+
+    Consumers can use this to display MCP server connection status in the UI.
+
+    Attributes:
+        namespace_status: Mapping of namespace ID to initialization status.
+            Namespaces that failed and were required do not appear here
+            because they raise during __aenter__.
+    """
+
+    namespace_status: dict[str, NamespaceStatus] = field(default_factory=dict)
 
 
 # =============================================================================
