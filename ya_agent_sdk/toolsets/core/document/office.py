@@ -9,6 +9,7 @@ Install with: pip install ya-agent-sdk[document]
 import base64
 import functools
 import re
+import tempfile
 import uuid
 from functools import cache
 from pathlib import Path
@@ -89,68 +90,73 @@ class OfficeConvertTool(BaseTool):
         # Get file stem from path
         stem = self._get_stem(file_path)
 
-        # Step 1: Copy source file to tmp directory
+        # Check file size before reading into memory
+        max_file_size = ctx.deps.tool_config.document_max_file_size
+        try:
+            file_stat = await file_op.stat(file_path)
+            if file_stat["size"] > max_file_size:
+                size_mb = file_stat["size"] / (1024 * 1024)
+                limit_mb = max_file_size / (1024 * 1024)
+                return {
+                    "error": f"File too large: {size_mb:.1f} MB. Maximum supported size is {limit_mb:.0f} MB.",
+                    "success": False,
+                }
+        except Exception as e:
+            return {"error": f"Failed to stat file: {e}", "success": False}
+
+        # Step 1: Read source file via file_op into memory
         try:
             file_content = await file_op.read_bytes(file_path)
-            tmp_source_path = await file_op.write_tmp_file(f"source_{stem}{ext}", file_content)
         except Exception as e:
             return {"error": f"Failed to read file: {e}", "success": False}
 
-        # Step 2: Convert document in tmp directory
-        # markitdown needs a local file path
-        tmp_source = Path(tmp_source_path)
-        tmp_export_dir = tmp_source.parent / f"export_{stem}"
-        tmp_images_dir = tmp_export_dir / "images"
+        # Step 2: Process in a private local tempdir (markitdown needs local filesystem access)
+        # Write-back happens inside the with block so images are read from local disk
+        # one-by-one rather than collected into memory all at once.
+        with tempfile.TemporaryDirectory() as local_tmp:
+            local_tmp_path = Path(local_tmp)
+            local_source = local_tmp_path / f"source_{stem}{ext}"
+            local_images_dir = local_tmp_path / "images"
 
-        try:
-            await _run_in_threadpool(tmp_export_dir.mkdir, exist_ok=True)
-            await _run_in_threadpool(tmp_images_dir.mkdir, exist_ok=True)
-        except Exception as e:
-            return {"error": f"Failed to create export directory: {e}", "success": False}
+            await _run_in_threadpool(local_source.write_bytes, file_content)
+            del file_content  # Free source bytes after writing to local disk
+            await _run_in_threadpool(local_images_dir.mkdir, exist_ok=True)
 
-        try:
-            md = MarkItDown(enable_plugins=True)
-            result = await _run_in_threadpool(md.convert, f"file://{tmp_source.as_posix()}", keep_data_uris=True)
-            content = result.text_content
-        except Exception as e:
-            return {"error": f"Failed to convert document: {e}", "success": False}
+            try:
+                md = MarkItDown(enable_plugins=True)
+                result = await _run_in_threadpool(md.convert, f"file://{local_source.as_posix()}", keep_data_uris=True)
+                content = result.text_content
+            except Exception as e:
+                return {"error": f"Failed to convert document: {e}", "success": False}
 
-        # Extract base64 images and save to tmp directory
-        content = self._extract_images(content, tmp_images_dir)
+            # Extract base64 images and save to local tempdir
+            content = self._extract_images(content, local_images_dir)
 
-        # Write markdown file to tmp
-        md_filename = f"{stem}.md"
-        tmp_md_path = tmp_export_dir / md_filename
-        try:
-            await _run_in_threadpool(tmp_md_path.write_text, content, encoding="utf-8")
-        except Exception as e:
-            return {"error": f"Failed to write markdown: {e}", "success": False}
+            # Step 3: Write results back via file_op (inside with block so we can
+            # read images from local disk one-by-one without buffering all in memory)
+            source_dir = self._get_dir(file_path)
+            target_export_dir = f"{source_dir}/export_{stem}" if source_dir else f"export_{stem}"
+            md_filename = f"{stem}.md"
+            target_md_path = f"{target_export_dir}/{md_filename}"
+            target_images_dir = f"{target_export_dir}/images"
 
-        # Step 3: Copy results back to target directory
-        # Determine target directory (same as source file's directory)
-        source_dir = self._get_dir(file_path)
-        target_export_dir = f"{source_dir}/export_{stem}" if source_dir else f"export_{stem}"
-        target_md_path = f"{target_export_dir}/{md_filename}"
-        target_images_dir = f"{target_export_dir}/images"
+            try:
+                await file_op.mkdir(target_export_dir, parents=True)
+                await file_op.mkdir(target_images_dir, parents=True)
 
-        try:
-            # Create target directories first
-            await file_op.mkdir(target_export_dir, parents=True)
-            await file_op.mkdir(target_images_dir, parents=True)
+                # Write markdown
+                await file_op.write_file(target_md_path, content)
 
-            # Copy markdown file
-            await file_op.copy(str(tmp_md_path), target_md_path)
+                # Write images one-by-one from local disk
+                def list_image_names():
+                    return [f.name for f in local_images_dir.iterdir() if f.is_file()]
 
-            # Copy images (use thread pool for directory iteration)
-            def list_image_files():
-                return [f for f in tmp_images_dir.iterdir() if f.is_file()]
-
-            image_files = await _run_in_threadpool(list_image_files)
-            for img_file in image_files:
-                target_img_path = f"{target_images_dir}/{img_file.name}"
-                await file_op.copy(str(img_file), target_img_path)
-        except Exception as e:
-            return {"error": f"Failed to copy results to target: {e}", "success": False}
+                image_names = await _run_in_threadpool(list_image_names)
+                for img_name in image_names:
+                    img_bytes = await _run_in_threadpool((local_images_dir / img_name).read_bytes)
+                    await file_op.write_file(f"{target_images_dir}/{img_name}", img_bytes)
+            except Exception as e:
+                return {"error": f"Failed to write results: {e}", "success": False}
 
         return {
             "success": True,
