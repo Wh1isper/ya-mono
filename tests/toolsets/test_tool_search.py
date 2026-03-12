@@ -1168,17 +1168,14 @@ async def test_init_report_is_copy():
 
 @pytest.mark.anyio
 async def test_init_event_emitted_on_first_get_tools(mock_run_context):
-    """ToolSearchInitEvent is emitted on first get_tools call."""
+    """ToolSearchInitEvent is emitted on get_tools call."""
     weather = Toolset(tools=[GetWeatherTool], toolset_id="weather")
     ts = ToolSearchToolSet(toolsets=[weather])
 
     async with ts:
-        assert not ts._init_event_emitted
-
         # Enable streaming to capture the event
         mock_run_context.deps._stream_queue_enabled = True
         await ts.get_tools(mock_run_context)
-        assert ts._init_event_emitted
 
         # Check event was placed on the queue
         queue = mock_run_context.deps.agent_stream_queues[mock_run_context.deps._agent_id]
@@ -1192,8 +1189,8 @@ async def test_init_event_emitted_on_first_get_tools(mock_run_context):
 
 
 @pytest.mark.anyio
-async def test_init_event_emitted_only_once(mock_run_context):
-    """ToolSearchInitEvent is only emitted on the first get_tools call."""
+async def test_init_event_emitted_every_call(mock_run_context):
+    """ToolSearchInitEvent is emitted on every get_tools call (status can change)."""
     weather = Toolset(tools=[GetWeatherTool], toolset_id="weather")
     ts = ToolSearchToolSet(toolsets=[weather])
 
@@ -1202,9 +1199,9 @@ async def test_init_event_emitted_only_once(mock_run_context):
         await ts.get_tools(mock_run_context)
         await ts.get_tools(mock_run_context)
 
-        # Only one event should be on the queue
+        # Two events should be on the queue
         queue = mock_run_context.deps.agent_stream_queues[mock_run_context.deps._agent_id]
-        assert queue.qsize() == 1
+        assert queue.qsize() == 2
 
 
 @pytest.mark.anyio
@@ -1218,6 +1215,60 @@ async def test_init_event_not_emitted_without_namespaces(mock_run_context):
         await ts.get_tools(mock_run_context)
 
         # No event because init_report is empty
-        assert not ts._init_event_emitted
         queue = mock_run_context.deps.agent_stream_queues[mock_run_context.deps._agent_id]
         assert queue.empty()
+
+
+class RuntimeFailingToolset(Toolset):
+    """A toolset that initializes OK but fails on get_tools (simulates runtime disconnect)."""
+
+    _fail_get_tools: bool = False
+
+    async def get_tools(self, ctx):
+        if self._fail_get_tools:
+            raise ConnectionError("MCP server disconnected")
+        return await super().get_tools(ctx)
+
+
+@pytest.mark.anyio
+async def test_optional_namespace_runtime_error(mock_run_context):
+    """Optional namespace that fails during get_tools should be skipped with error status."""
+    from ya_agent_sdk.events import NamespaceStatus
+
+    good = Toolset(tools=[GetWeatherTool], toolset_id="weather")
+    flaky = RuntimeFailingToolset(tools=[GetStockPriceTool], toolset_id="flaky_mcp")
+
+    ts = ToolSearchToolSet(
+        toolsets=[good, flaky],
+        optional_namespaces={"flaky_mcp"},
+    )
+
+    async with ts:
+        # First call: both work
+        tools = await ts.get_tools(mock_run_context)
+        assert ts.init_report["flaky_mcp"] == NamespaceStatus.connected
+
+        # Simulate runtime disconnect
+        flaky._fail_get_tools = True
+        tools = await ts.get_tools(mock_run_context)
+
+        # flaky_mcp should now be error, weather still connected
+        assert ts.init_report == {
+            "weather": NamespaceStatus.connected,
+            "flaky_mcp": NamespaceStatus.error,
+        }
+        # tool_search and weather tools should still work
+        assert "tool_search" in tools
+
+
+@pytest.mark.anyio
+async def test_required_namespace_runtime_error_raises(mock_run_context):
+    """Required namespace that fails during get_tools should raise."""
+    flaky = RuntimeFailingToolset(tools=[GetStockPriceTool], toolset_id="critical_mcp")
+    flaky._fail_get_tools = True
+
+    ts = ToolSearchToolSet(toolsets=[flaky])
+
+    async with ts:
+        with pytest.raises(ConnectionError, match="MCP server disconnected"):
+            await ts.get_tools(mock_run_context)

@@ -370,6 +370,9 @@ class NamespaceStatus(StrEnum):
     skipped = "skipped"
     """Namespace failed to initialize but was optional, so it was skipped."""
 
+    error = "error"
+    """Namespace was connected but encountered a runtime error (e.g., disconnected)."""
+
 
 @dataclass
 class ToolSearchInitEvent(AgentEvent):

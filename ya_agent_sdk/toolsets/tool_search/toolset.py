@@ -106,7 +106,6 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
 
         # Init report: namespace_id -> status (populated during __aenter__)
         self._init_report: dict[str, NamespaceStatus] = {}
-        self._init_event_emitted: bool = False
 
         # Built on each get_tools() call
         self._search_entries: dict[str, ToolMetadata] = {}
@@ -148,20 +147,20 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
         of how many tools have been dynamically loaded.  Newly loaded tools
         are appended after it.
 
-        On the first call, emits a ``ToolSearchInitEvent`` via the context's
-        sideband stream to report namespace initialization status.
+        On each call, emits a ``ToolSearchInitEvent`` via the context's
+        sideband stream to report current namespace status, since namespace
+        availability can change at runtime (e.g., MCP server disconnection).
         """
-        # Emit init report event once on first get_tools call
-        if not self._init_event_emitted and self._init_report:
+        all_tools = await self._collect_and_index_tools(ctx)
+
+        # Emit namespace status event on every call (status can change dynamically)
+        if self._init_report:
             await ctx.deps.emit_event(
                 ToolSearchInitEvent(
                     event_id=f"tool-search-init-{ctx.deps.run_id[:8]}",
                     namespace_status=dict(self._init_report),
                 )
             )
-            self._init_event_emitted = True
-
-        all_tools = await self._collect_and_index_tools(ctx)
 
         # Rebuild search index
         all_metadata = list(self._search_entries.values())
@@ -204,15 +203,31 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
         return visible
 
     async def _collect_and_index_tools(self, ctx: RunContext[AgentContext]) -> dict[str, ToolsetTool[AgentContext]]:
-        """Collect tools from all wrapped toolsets and build the search index."""
+        """Collect tools from all wrapped toolsets and build the search index.
+
+        For optional namespaces, if ``get_tools()`` fails at runtime (e.g., MCP
+        server disconnected), the namespace is skipped with a warning and its
+        status in ``_init_report`` is updated to ``NamespaceStatus.error``.
+        """
         all_tools: dict[str, ToolsetTool[AgentContext]] = {}
         self._search_entries.clear()
         self._toolset_tools_cache.clear()
         self._namespace_tools.clear()
 
         for ts in self._toolsets:
-            ts_tools = await ts.get_tools(ctx)
             namespace_id = ts.id
+            try:
+                ts_tools = await ts.get_tools(ctx)
+            except Exception:
+                if namespace_id and namespace_id in self._optional_namespaces:
+                    logger.warning(
+                        "Optional toolset %r failed during get_tools, skipping",
+                        namespace_id,
+                        exc_info=True,
+                    )
+                    self._init_report[namespace_id] = NamespaceStatus.error
+                    continue
+                raise
 
             for name, tool in ts_tools.items():
                 if name == _TOOL_SEARCH_NAME:
