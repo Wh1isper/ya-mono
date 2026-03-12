@@ -1096,3 +1096,128 @@ async def test_multiple_optional_namespaces_some_fail(mock_run_context):
         await ts.call_tool("tool_search", {"query": "weather"}, mock_run_context, tools["tool_search"])
         tools = await ts.get_tools(mock_run_context)
         assert "get_weather" in tools
+
+
+# ---------------------------------------------------------------------------
+# init_report and ToolSearchInitEvent tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_init_report_all_connected(mock_run_context):
+    """init_report shows connected status for all successfully initialized namespaces."""
+    from ya_agent_sdk.events import NamespaceStatus
+
+    weather = Toolset(tools=[GetWeatherTool], toolset_id="weather")
+    finance = Toolset(tools=[GetStockPriceTool], toolset_id="finance")
+
+    ts = ToolSearchToolSet(toolsets=[weather, finance])
+
+    async with ts:
+        report = ts.init_report
+        assert report == {
+            "weather": NamespaceStatus.connected,
+            "finance": NamespaceStatus.connected,
+        }
+
+
+@pytest.mark.anyio
+async def test_init_report_mixed_status(mock_run_context):
+    """init_report shows skipped status for failed optional namespaces."""
+    from ya_agent_sdk.events import NamespaceStatus
+
+    good = Toolset(tools=[GetWeatherTool], toolset_id="weather")
+    bad = FailingToolset(tools=[GetStockPriceTool], toolset_id="bad_mcp")
+
+    ts = ToolSearchToolSet(
+        toolsets=[good, bad],
+        optional_namespaces={"bad_mcp"},
+    )
+
+    async with ts:
+        report = ts.init_report
+        assert report == {
+            "weather": NamespaceStatus.connected,
+            "bad_mcp": NamespaceStatus.skipped,
+        }
+
+
+@pytest.mark.anyio
+async def test_init_report_empty_without_namespaces():
+    """Toolsets without id are not tracked in init_report."""
+    loose = Toolset(tools=[GetWeatherTool])  # No toolset_id
+
+    ts = ToolSearchToolSet(toolsets=[loose])
+    async with ts:
+        assert ts.init_report == {}
+
+
+@pytest.mark.anyio
+async def test_init_report_is_copy():
+    """init_report returns a copy, not a reference to internal state."""
+    from ya_agent_sdk.events import NamespaceStatus
+
+    weather = Toolset(tools=[GetWeatherTool], toolset_id="weather")
+    ts = ToolSearchToolSet(toolsets=[weather])
+
+    async with ts:
+        report1 = ts.init_report
+        report1["weather"] = NamespaceStatus.skipped  # Mutate the copy
+        assert ts.init_report["weather"] == NamespaceStatus.connected  # Original unchanged
+
+
+@pytest.mark.anyio
+async def test_init_event_emitted_on_first_get_tools(mock_run_context):
+    """ToolSearchInitEvent is emitted on first get_tools call."""
+    weather = Toolset(tools=[GetWeatherTool], toolset_id="weather")
+    ts = ToolSearchToolSet(toolsets=[weather])
+
+    async with ts:
+        assert not ts._init_event_emitted
+
+        # Enable streaming to capture the event
+        mock_run_context.deps._stream_queue_enabled = True
+        await ts.get_tools(mock_run_context)
+        assert ts._init_event_emitted
+
+        # Check event was placed on the queue
+        queue = mock_run_context.deps.agent_stream_queues[mock_run_context.deps._agent_id]
+        assert not queue.empty()
+        event = queue.get_nowait()
+
+        from ya_agent_sdk.events import NamespaceStatus, ToolSearchInitEvent
+
+        assert isinstance(event, ToolSearchInitEvent)
+        assert event.namespace_status == {"weather": NamespaceStatus.connected}
+
+
+@pytest.mark.anyio
+async def test_init_event_emitted_only_once(mock_run_context):
+    """ToolSearchInitEvent is only emitted on the first get_tools call."""
+    weather = Toolset(tools=[GetWeatherTool], toolset_id="weather")
+    ts = ToolSearchToolSet(toolsets=[weather])
+
+    async with ts:
+        mock_run_context.deps._stream_queue_enabled = True
+        await ts.get_tools(mock_run_context)
+        await ts.get_tools(mock_run_context)
+
+        # Only one event should be on the queue
+        queue = mock_run_context.deps.agent_stream_queues[mock_run_context.deps._agent_id]
+        assert queue.qsize() == 1
+
+
+@pytest.mark.anyio
+async def test_init_event_not_emitted_without_namespaces(mock_run_context):
+    """No event emitted if there are no namespace toolsets."""
+    loose = Toolset(tools=[GetWeatherTool])  # No toolset_id
+    ts = ToolSearchToolSet(toolsets=[loose])
+
+    async with ts:
+        mock_run_context.deps._stream_queue_enabled = True
+        await ts.get_tools(mock_run_context)
+
+        # No event because init_report is empty
+        assert not ts._init_event_emitted
+        queue = mock_run_context.deps.agent_stream_queues[mock_run_context.deps._agent_id]
+        assert queue.empty()

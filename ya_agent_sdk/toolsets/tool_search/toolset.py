@@ -21,6 +21,7 @@ from pydantic_ai.toolsets.abstract import AbstractToolset, ToolsetTool
 
 from ya_agent_sdk._logger import get_logger
 from ya_agent_sdk.context import AgentContext
+from ya_agent_sdk.events import NamespaceStatus, ToolSearchInitEvent
 from ya_agent_sdk.toolsets.base import BaseToolset, InstructableToolset
 from ya_agent_sdk.toolsets.tool_search.metadata import ToolMetadata, extract_metadata_from_schema
 from ya_agent_sdk.toolsets.tool_search.strategies.keyword import KeywordSearchStrategy
@@ -103,6 +104,10 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
         self._max_results = max_results
         self._optional_namespaces = optional_namespaces or set()
 
+        # Init report: namespace_id -> status (populated during __aenter__)
+        self._init_report: dict[str, NamespaceStatus] = {}
+        self._init_event_emitted: bool = False
+
         # Built on each get_tools() call
         self._search_entries: dict[str, ToolMetadata] = {}
         self._toolset_tools_cache: dict[str, tuple[AbstractToolset[AgentContext], ToolsetTool[AgentContext]]] = {}
@@ -116,6 +121,16 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
     @property
     def id(self) -> str | None:
         return None
+
+    @property
+    def init_report(self) -> dict[str, NamespaceStatus]:
+        """Namespace initialization status after __aenter__.
+
+        Returns:
+            Mapping of namespace ID to NamespaceStatus.
+            Only populated after __aenter__ completes.
+        """
+        return dict(self._init_report)
 
     # -------------------------------------------------------------------------
     # AbstractToolset interface
@@ -132,7 +147,20 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
         that it occupies a stable position in the model's tool list regardless
         of how many tools have been dynamically loaded.  Newly loaded tools
         are appended after it.
+
+        On the first call, emits a ``ToolSearchInitEvent`` via the context's
+        sideband stream to report namespace initialization status.
         """
+        # Emit init report event once on first get_tools call
+        if not self._init_event_emitted and self._init_report:
+            await ctx.deps.emit_event(
+                ToolSearchInitEvent(
+                    event_id=f"tool-search-init-{ctx.deps.run_id[:8]}",
+                    namespace_status=dict(self._init_report),
+                )
+            )
+            self._init_event_emitted = True
+
         all_tools = await self._collect_and_index_tools(ctx)
 
         # Rebuild search index
@@ -285,11 +313,14 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
     async def __aenter__(self):
         entered: list[AbstractToolset[AgentContext]] = []
         failed: list[AbstractToolset[AgentContext]] = []
+        self._init_report.clear()
         try:
             for ts in self._toolsets:
                 try:
                     await ts.__aenter__()
                     entered.append(ts)
+                    if ts.id:
+                        self._init_report[ts.id] = NamespaceStatus.connected
                 except Exception:
                     ts_id = ts.id
                     if ts_id and ts_id in self._optional_namespaces:
@@ -298,6 +329,7 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
                             ts_id,
                             exc_info=True,
                         )
+                        self._init_report[ts_id] = NamespaceStatus.skipped
                         failed.append(ts)
                     else:
                         raise
