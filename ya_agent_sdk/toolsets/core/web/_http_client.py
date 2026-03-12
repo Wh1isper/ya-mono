@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
@@ -160,7 +161,7 @@ async def safe_stream_request(
     max_redirects: int = 10,
     skip_verification: bool = False,
     **kwargs: Any,
-):
+) -> AsyncIterator[httpx.Response]:
     """Make streamed HTTP request with SSRF protection and safe redirects."""
     if not skip_verification:
         verify_url(url)

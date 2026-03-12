@@ -321,7 +321,7 @@ async def test_view_reject_large_image_inline(tmp_path: Path) -> None:
 
         result = await tool.call(mock_run_ctx, file_path="huge.png")
         assert result == snapshot(
-            "Error: Image file is too large to inline (21.00 MB). Maximum supported inline size is 20 MB."
+            "Error: Image file is too large to inline (21.00 MB). Maximum supported inline size is 20.00 MB."
         )
 
 
@@ -342,7 +342,7 @@ async def test_view_reject_large_text_file(tmp_path: Path) -> None:
 
         result = await tool.call(mock_run_ctx, file_path="huge.txt")
         assert result == snapshot({
-            "error": "File is too large to inspect safely (11.00 MB). Maximum supported text view size is 10 MB.",
+            "error": "File is too large to inspect safely (11.00 MB). Maximum supported text view size is 10.00 MB.",
             "success": False,
         })
 
@@ -371,7 +371,7 @@ async def test_view_uses_tool_config_text_limit(tmp_path: Path) -> None:
 
         result = await tool.call(mock_run_ctx, file_path="custom-limit.txt")
         assert result == snapshot({
-            "error": "File is too large to inspect safely (0.00 MB). Maximum supported text view size is 0 MB.",
+            "error": "File is too large to inspect safely (2.0 KB). Maximum supported text view size is 1.0 KB.",
             "success": False,
         })
 

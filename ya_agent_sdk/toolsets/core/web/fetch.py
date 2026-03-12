@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 from functools import cache
 from pathlib import Path
 from typing import Annotated, Any
 
+import httpx
 from pydantic import Field
 from pydantic_ai import BinaryContent, RunContext
 
@@ -115,7 +117,7 @@ class FetchTool(BaseTool):
     async def _read_binary_response(
         self,
         ctx: RunContext[AgentContext],
-        response,
+        response: httpx.Response,
         content_type: str,
     ) -> BinaryContent | dict[str, Any]:
         """Read a binary response with a hard in-memory size limit."""
@@ -138,43 +140,49 @@ class FetchTool(BaseTool):
 
         return BinaryContent(data=bytes(image_data), media_type=content_type)
 
-    async def _read_text_response(self, ctx: RunContext[AgentContext], response) -> str | dict[str, Any]:
+    async def _read_text_response(
+        self, ctx: RunContext[AgentContext], response: httpx.Response
+    ) -> str | dict[str, Any]:
         """Read a text response incrementally and truncate by character budget."""
         chunk_size = ctx.deps.tool_config.fetch_stream_chunk_size
         content_parts: list[str] = []
         current_length = 0
-        total_length = 0
         truncated = False
 
         async for chunk in response.aiter_text(chunk_size=chunk_size):
-            total_length += len(chunk)
-            if truncated:
-                continue
-
             remaining = CONTENT_TRUNCATE_THRESHOLD - current_length
             if remaining <= 0:
                 truncated = True
-                continue
+                break
 
             if len(chunk) <= remaining:
                 content_parts.append(chunk)
                 current_length += len(chunk)
-                continue
-
-            content_parts.append(chunk[:remaining])
-            current_length += remaining
-            truncated = True
+            else:
+                content_parts.append(chunk[:remaining])
+                current_length += remaining
+                truncated = True
+                break
 
         text = "".join(content_parts)
         if not truncated:
             return text
 
-        return {
+        # Use Content-Length header for total size estimate when available
+        total_length: int | None = None
+        content_length = response.headers.get("Content-Length")
+        if content_length:
+            with contextlib.suppress(ValueError, OverflowError):
+                total_length = int(content_length)
+
+        result: dict[str, Any] = {
             "content": text + "\n\n... (truncated)",
             "truncated": True,
-            "total_length": total_length,
             "tips": "Content truncated. Use `download` to save the full file.",
         }
+        if total_length is not None:
+            result["total_length"] = total_length
+        return result
 
     async def _get_request(
         self,

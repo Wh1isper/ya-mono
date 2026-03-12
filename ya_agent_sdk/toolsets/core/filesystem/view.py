@@ -7,7 +7,7 @@ All file operations use the FileOperator abstraction for remote filesystem suppo
 import inspect
 from functools import cache
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import Field
 from pydantic_ai import BinaryContent, ImageUrl, RunContext, ToolReturn, VideoUrl
@@ -153,6 +153,15 @@ class ViewTool(BaseTool):
 
         return BinaryContent(data=content, media_type=media_type)
 
+    @staticmethod
+    def _format_size(size_bytes: int) -> str:
+        """Format byte size into a human-readable string."""
+        if size_bytes < 1024:
+            return f"{size_bytes} bytes"
+        if size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.1f} KB"
+        return f"{size_bytes / (1024 * 1024):.2f} MB"
+
     async def _check_inline_size(
         self,
         file_operator: FileOperator,
@@ -166,11 +175,9 @@ class ViewTool(BaseTool):
         if stat["size"] <= max_bytes:
             return None
 
-        size_mb = stat["size"] / (1024 * 1024)
-        limit_mb = max_bytes / (1024 * 1024)
         return (
-            f"Error: {kind} file is too large to inline ({size_mb:.2f} MB). "
-            f"Maximum supported inline size is {limit_mb:.0f} MB."
+            f"Error: {kind} file is too large to inline ({self._format_size(stat['size'])}). "
+            f"Maximum supported inline size is {self._format_size(max_bytes)}."
         )
 
     async def _maybe_convert_media_to_url(
@@ -273,7 +280,7 @@ class ViewTool(BaseTool):
     def _build_inline_media_return(
         self,
         *,
-        kind: str,
+        kind: Literal["image", "video"],
         media_url: str | None,
         data: bytes,
         media_type: str,
@@ -428,12 +435,10 @@ class ViewTool(BaseTool):
         max_text_file_size = ctx.deps.tool_config.view_max_text_file_size
 
         if file_size > max_text_file_size:
-            size_mb = file_size / (1024 * 1024)
-            limit_mb = max_text_file_size / (1024 * 1024)
             return {
                 "error": (
-                    f"File is too large to inspect safely ({size_mb:.2f} MB). "
-                    f"Maximum supported text view size is {limit_mb:.0f} MB."
+                    f"File is too large to inspect safely ({self._format_size(file_size)}). "
+                    f"Maximum supported text view size is {self._format_size(max_text_file_size)}."
                 ),
                 "success": False,
             }
