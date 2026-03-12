@@ -48,8 +48,8 @@ from ya_agent_sdk.toolsets.core.shell import tools as shell_tools
 from ya_agent_sdk.toolsets.core.subagent import tools as subagent_tools
 from ya_agent_sdk.toolsets.core.web import tools as web_tools
 from ya_agent_sdk.toolsets.skills.toolset import SHARED_SKILLS_DIR_NAME, SkillToolset
+from ya_agent_sdk.toolsets.tool_proxy.toolset import ToolProxyToolset
 from ya_agent_sdk.toolsets.tool_search import create_best_strategy
-from ya_agent_sdk.toolsets.tool_search.toolset import ToolSearchToolSet
 from yaacli.browser import BrowserManager
 from yaacli.config import ConfigManager, MCPConfig, SubagentsConfig, YaacliConfig
 from yaacli.environment import TUIEnvironment
@@ -202,37 +202,37 @@ def create_tui_runtime(
                     print(event)
     """
     # Collect toolsets
-    # Order matters: ToolSearchToolSet must be LAST so dynamically loaded
-    # tools are appended to the end of the model's tool list. Within
-    # ToolSearchToolSet, tool_search is the first tool for stable positioning.
+    # Order matters: ToolProxyToolset must be LAST so its two fixed proxy
+    # tools (search_tools, call_tool) occupy stable positions at the end
+    # of the model's tool list, maximizing prompt cache hit rates.
     toolsets: list[AbstractToolset[Any]] = [
         SkillToolset(toolset_id="skills", extra_dir_names=[SHARED_SKILLS_DIR_NAME]),
     ]
 
-    # Add browser toolset if available (before ToolSearchToolSet)
+    # Add browser toolset if available (before ToolProxyToolset)
     if browser_manager and browser_manager.is_available:
         browser_toolset = browser_manager.get_browser_toolset()
         if browser_toolset:
             toolsets.append(browser_toolset)
             logger.info("Added browser toolset (cdp_url=%s)", browser_manager.cdp_url)
 
-    # Add MCP servers wrapped in ToolSearchToolSet for on-demand loading.
-    # This is intentionally last: dynamically loaded tools append to the end
-    # of the tool list, keeping all existing tool positions stable.
+    # Add MCP servers wrapped in ToolProxyToolset for on-demand invocation.
+    # This is intentionally last: proxy tools occupy stable positions at
+    # the end of the tool list, keeping all existing tool positions stable.
     if mcp_config:
         mcp_servers = build_mcp_servers(mcp_config, need_approval_mcps=config.tools.need_approval_mcps)
         if mcp_servers:
             mcp_descriptions = extract_mcp_descriptions(mcp_config)
             optional_mcps = extract_optional_mcps(mcp_config)
-            mcp_toolsearch = ToolSearchToolSet(
+            mcp_proxy = ToolProxyToolset(
                 toolsets=mcp_servers,
                 namespace_descriptions=mcp_descriptions if mcp_descriptions else None,
                 search_strategy=create_best_strategy(),
                 optional_namespaces=optional_mcps if optional_mcps else None,
             )
-            toolsets.append(mcp_toolsearch)
+            toolsets.append(mcp_proxy)
             logger.info(
-                "Added %d MCP servers via ToolSearchToolSet (descriptions: %d)",
+                "Added %d MCP servers via ToolProxyToolset (descriptions: %d)",
                 len(mcp_servers),
                 len(mcp_descriptions),
             )
