@@ -342,7 +342,7 @@ async def test_view_reject_large_text_file(tmp_path: Path) -> None:
 
         result = await tool.call(mock_run_ctx, file_path="huge.txt")
         assert result == snapshot({
-            "error": "File is too large to inspect safely (11.00 MB). Maximum supported text view size is 10.00 MB.",
+            "error": "File is too large to inspect safely (11.00 MB). Maximum supported text view size is 10.00 MB. Use shell tools (e.g. `head`, `tail`, `sed -n`) to read portions of this file.",
             "success": False,
         })
 
@@ -371,7 +371,7 @@ async def test_view_uses_tool_config_text_limit(tmp_path: Path) -> None:
 
         result = await tool.call(mock_run_ctx, file_path="custom-limit.txt")
         assert result == snapshot({
-            "error": "File is too large to inspect safely (2.0 KB). Maximum supported text view size is 1.0 KB.",
+            "error": "File is too large to inspect safely (2.0 KB). Maximum supported text view size is 1.0 KB. Use shell tools (e.g. `head`, `tail`, `sed -n`) to read portions of this file.",
             "success": False,
         })
 

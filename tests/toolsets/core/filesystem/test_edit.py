@@ -8,6 +8,7 @@ from inline_snapshot import snapshot
 from pydantic_ai import RunContext
 
 from ya_agent_sdk.context import AgentContext
+from ya_agent_sdk.context.agent import ToolConfig
 from ya_agent_sdk.environment.local import LocalEnvironment
 from ya_agent_sdk.toolsets.core.filesystem._types import EditItem
 from ya_agent_sdk.toolsets.core.filesystem.edit import EditTool, MultiEditTool
@@ -357,3 +358,79 @@ async def test_multi_edit_with_replace_all(tmp_path: Path) -> None:
         result = await tool.call(mock_run_ctx, file_path="test.txt", edits=edits)
         assert result == snapshot("Successfully applied 1 edits to file: test.txt")
         assert (tmp_path / "test.txt").read_text() == "qux bar qux baz qux"
+
+
+# --- File size limit tests ---
+
+
+async def test_edit_rejects_file_exceeding_size_limit(tmp_path: Path) -> None:
+    """Should return error when file exceeds edit_max_file_size."""
+    async with AsyncExitStack() as stack:
+        env = await stack.enter_async_context(
+            LocalEnvironment(allowed_paths=[tmp_path], default_path=tmp_path, tmp_base_dir=tmp_path)
+        )
+        ctx = await stack.enter_async_context(
+            AgentContext(
+                env=env,
+                tool_config=ToolConfig(edit_max_file_size=100),
+            )
+        )
+        tool = EditTool()
+
+        # Create a file larger than the limit
+        (tmp_path / "large.txt").write_text("x" * 200)
+
+        mock_run_ctx = MagicMock(spec=RunContext)
+        mock_run_ctx.deps = ctx
+
+        result = await tool.call(mock_run_ctx, file_path="large.txt", old_string="x", new_string="y")
+        assert "too large to edit" in result
+        assert "sed" in result
+
+
+async def test_edit_allows_file_within_size_limit(tmp_path: Path) -> None:
+    """Should allow editing when file is within edit_max_file_size."""
+    async with AsyncExitStack() as stack:
+        env = await stack.enter_async_context(
+            LocalEnvironment(allowed_paths=[tmp_path], default_path=tmp_path, tmp_base_dir=tmp_path)
+        )
+        ctx = await stack.enter_async_context(
+            AgentContext(
+                env=env,
+                tool_config=ToolConfig(edit_max_file_size=1024),
+            )
+        )
+        tool = EditTool()
+
+        (tmp_path / "small.txt").write_text("hello world")
+
+        mock_run_ctx = MagicMock(spec=RunContext)
+        mock_run_ctx.deps = ctx
+
+        result = await tool.call(mock_run_ctx, file_path="small.txt", old_string="hello", new_string="hi")
+        assert "Successfully edited" in result
+        assert (tmp_path / "small.txt").read_text() == "hi world"
+
+
+async def test_multi_edit_rejects_file_exceeding_size_limit(tmp_path: Path) -> None:
+    """Should return error when file exceeds edit_max_file_size for multi_edit."""
+    async with AsyncExitStack() as stack:
+        env = await stack.enter_async_context(
+            LocalEnvironment(allowed_paths=[tmp_path], default_path=tmp_path, tmp_base_dir=tmp_path)
+        )
+        ctx = await stack.enter_async_context(
+            AgentContext(
+                env=env,
+                tool_config=ToolConfig(edit_max_file_size=100),
+            )
+        )
+        tool = MultiEditTool()
+
+        (tmp_path / "large.txt").write_text("x" * 200)
+
+        mock_run_ctx = MagicMock(spec=RunContext)
+        mock_run_ctx.deps = ctx
+
+        edits = [EditItem(old_string="x", new_string="y", replace_all=True)]
+        result = await tool.call(mock_run_ctx, file_path="large.txt", edits=edits)
+        assert "too large to edit" in result

@@ -12,9 +12,47 @@ from ya_agent_sdk._logger import get_logger
 from ya_agent_sdk.context import AgentContext
 from ya_agent_sdk.toolsets.core.base import BaseTool
 from ya_agent_sdk.toolsets.core.filesystem._types import EditItem
+from ya_agent_sdk.toolsets.core.filesystem._utils import is_binary_file
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 logger = get_logger(__name__)
+
+
+async def _check_edit_file_size(file_operator: FileOperator, file_path: str, max_size: int) -> str | None:
+    """Check if file size is within the edit limit. Returns error message or None."""
+    stat = await file_operator.stat(file_path)
+    if stat["size"] > max_size:
+        size_mb = stat["size"] / (1024 * 1024)
+        limit_mb = max_size / (1024 * 1024)
+        return (
+            f"Error: File is too large to edit ({size_mb:.1f} MB). "
+            f"Maximum supported size is {limit_mb:.0f} MB. "
+            f"Use shell tools (e.g. `sed`) for large file operations."
+        )
+    return None
+
+
+async def _validate_and_read_file(
+    file_operator: FileOperator, file_path: str, max_size: int
+) -> tuple[str, None] | tuple[None, str]:
+    """Validate file (exists, not dir, size, binary) and read content.
+
+    Returns (content, None) on success or (None, error_message) on failure.
+    """
+    if not await file_operator.exists(file_path):
+        return None, f"Error: File not found: {file_path}"
+
+    if await file_operator.is_dir(file_path):
+        return None, f"Error: Path is a directory, not a file: {file_path}"
+
+    if error := await _check_edit_file_size(file_operator, file_path, max_size):
+        return None, error
+
+    if await is_binary_file(file_operator, file_path):
+        return None, f"Error: {file_path} appears to be a binary file. Edit tools only support text files."
+
+    content = await file_operator.read_file(file_path)
+    return content, None
 
 
 @cache
@@ -81,10 +119,12 @@ class EditTool(BaseTool):
         if not await file_operator.exists(file_path):
             return f"Error: File not found: {file_path}"
 
-        if await file_operator.is_dir(file_path):
-            return f"Error: Path is a directory, not a file: {file_path}"
-
-        content = await file_operator.read_file(file_path)
+        content, error = await _validate_and_read_file(
+            file_operator, file_path, ctx.deps.tool_config.edit_max_file_size
+        )
+        if error:
+            return error
+        content = cast(str, content)
 
         if old_string not in content:
             return "Error: Text not found. Ensure exact match including whitespace and indentation."
@@ -131,6 +171,32 @@ class MultiEditTool(BaseTool):
             return content, f"Error: Edit {index + 1}: Text appears {occurrences} times. Use replace_all=true."
         return content.replace(edit.old_string, edit.new_string, 1), None
 
+    async def _load_or_create(
+        self,
+        file_operator: FileOperator,
+        file_path: str,
+        edits: list[EditItem],
+        max_file_size: int,
+    ) -> tuple[str, list[EditItem]] | str:
+        """Load existing file content or create new file. Returns (content, remaining_edits) or error string."""
+        if not edits[0].old_string:
+            if await file_operator.exists(file_path):
+                return f"Error: File already exists: {file_path}. Use `write` tool to overwrite."
+            parent = str(PurePosixPath(file_path).parent)
+            if parent and parent != ".":
+                await file_operator.mkdir(parent, parents=True)
+            return edits[0].new_string, edits[1:]
+
+        if not await file_operator.exists(file_path):
+            return f"Error: File not found: {file_path}"
+
+        content, error = await _validate_and_read_file(file_operator, file_path, max_file_size)
+        if error:
+            return error
+        content = cast(str, content)
+
+        return content, edits
+
     async def call(
         self,
         ctx: RunContext[AgentContext],
@@ -146,24 +212,10 @@ class MultiEditTool(BaseTool):
         if not edits:
             return "Error: At least one edit operation must be provided."
 
-        if not edits[0].old_string:
-            if await file_operator.exists(file_path):
-                return f"Error: File already exists: {file_path}. Use `write` tool to overwrite."
-            # Auto-create parent directories if needed
-            parent = str(PurePosixPath(file_path).parent)
-            if parent and parent != ".":
-                await file_operator.mkdir(parent, parents=True)
-            content = edits[0].new_string
-            remaining_edits = edits[1:]
-        else:
-            if not await file_operator.exists(file_path):
-                return f"Error: File not found: {file_path}"
-
-            if await file_operator.is_dir(file_path):
-                return f"Error: Path is a directory, not a file: {file_path}"
-
-            content = await file_operator.read_file(file_path)
-            remaining_edits = edits
+        result = await self._load_or_create(file_operator, file_path, edits, ctx.deps.tool_config.edit_max_file_size)
+        if isinstance(result, str):
+            return result
+        content, remaining_edits = result
 
         for i, edit in enumerate(remaining_edits):
             content, error = self._apply_edit(content, edit, i)

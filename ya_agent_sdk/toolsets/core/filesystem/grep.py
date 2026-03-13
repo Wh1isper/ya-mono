@@ -15,6 +15,7 @@ from ya_agent_sdk.context import AgentContext
 from ya_agent_sdk.toolsets.core.base import BaseTool
 from ya_agent_sdk.toolsets.core.filesystem._gitignore import filter_gitignored
 from ya_agent_sdk.toolsets.core.filesystem._types import GrepMatch
+from ya_agent_sdk.toolsets.core.filesystem._utils import is_binary_file
 
 logger = get_logger(__name__)
 
@@ -33,11 +34,19 @@ def _add_gitignore_info(results: dict[str, Any], gitignore_summary: list[str]) -
     """Add gitignore exclusion info to results."""
     if gitignore_summary:
         results["<gitignore_excluded>"] = gitignore_summary
-        results["<note>"] = "Some files excluded by .gitignore. Set include_ignored=true to include them."
+        note = "Some files excluded by .gitignore. Set include_ignored=true to include them."
+        results.setdefault("<note>", "")
+        if results["<note>"]:
+            results["<note>"] += " "
+        results["<note>"] += note
 
 
-def _truncate_results(results: dict[str, Any], gitignore_summary: list[str]) -> dict[str, Any]:
-    """Truncate results by dropping context when too large."""
+def _truncate_results(results: dict[str, Any]) -> dict[str, Any]:
+    """Truncate results by dropping context when too large.
+
+    Preserves all metadata keys (e.g. <skipped_large_files>, <note>, <gitignore_excluded>)
+    from the original results.
+    """
     logger.info("Results too long, dropping context")
     truncated: dict[str, Any] = {
         match: {
@@ -49,7 +58,10 @@ def _truncate_results(results: dict[str, Any], gitignore_summary: list[str]) -> 
         if isinstance(match_data, dict) and "line_number" in match_data
     }
     truncated["<system>"] = "Results truncated. Use `view` to read specific files."
-    _add_gitignore_info(truncated, gitignore_summary)
+    # Preserve metadata keys from original results
+    for key, value in results.items():
+        if key.startswith("<") and key != "<system>":
+            truncated[key] = value
     return truncated
 
 
@@ -107,6 +119,32 @@ class GrepTool(BaseTool):
 
         return matches
 
+    async def _check_file_searchable(
+        self,
+        file_operator: FileOperator,
+        file_path: str,
+        max_file_size: int,
+    ) -> str | None:
+        """Check if a file is searchable. Returns skip reason or None if OK."""
+        if await file_operator.is_dir(file_path):
+            return "directory"
+
+        if max_file_size > 0:
+            try:
+                stat = await file_operator.stat(file_path)
+                if stat["size"] > max_file_size:
+                    return "too_large"
+            except Exception:
+                logger.debug(f"Failed to stat file, skipping size check: {file_path}", exc_info=True)
+
+        try:
+            if await is_binary_file(file_operator, file_path):
+                return "binary"
+        except Exception:
+            logger.debug(f"Failed to check binary status: {file_path}", exc_info=True)
+
+        return None
+
     async def _search_files(
         self,
         file_operator: FileOperator,
@@ -115,13 +153,19 @@ class GrepTool(BaseTool):
         context_lines: int,
         max_results: int,
         max_matches_per_file: int,
-    ) -> tuple[dict[str, Any], int]:
-        """Search files and return results with match count."""
+        max_file_size: int = 0,
+    ) -> tuple[dict[str, Any], int, list[str]]:
+        """Search files and return (results, match_count, skipped_large_files)."""
         results: dict[str, Any] = {}
         total_matches_found = 0
+        skipped_large_files: list[str] = []
 
         for file_path in files:
-            if await file_operator.is_dir(file_path):
+            skip_reason = await self._check_file_searchable(file_operator, file_path, max_file_size)
+            if skip_reason == "too_large":
+                skipped_large_files.append(file_path)
+                continue
+            if skip_reason:
                 continue
 
             try:
@@ -137,12 +181,12 @@ class GrepTool(BaseTool):
             for match_key, match_data in file_matches.items():
                 if max_results > 0 and total_matches_found >= max_results:
                     results["<system>"] = f"Hit global limit: {max_results} matches"
-                    return results, total_matches_found
+                    return results, total_matches_found, skipped_large_files
 
                 results[match_key] = match_data
                 total_matches_found += 1
 
-        return results, total_matches_found
+        return results, total_matches_found, skipped_large_files
 
     async def call(
         self,
@@ -191,15 +235,32 @@ class GrepTool(BaseTool):
 
         files_to_search = files[:max_files] if max_files > 0 else files
 
-        results, total_matches = await self._search_files(
-            file_operator, files_to_search, compiled_pattern, context_lines, max_results, max_matches_per_file
+        max_file_size = ctx.deps.tool_config.grep_max_file_size
+
+        results, total_matches, skipped_large_files = await self._search_files(
+            file_operator,
+            files_to_search,
+            compiled_pattern,
+            context_lines,
+            max_results,
+            max_matches_per_file,
+            max_file_size,
         )
 
         logger.info(f"Total matches found: {total_matches}")
+        if skipped_large_files:
+            results["<skipped_large_files>"] = skipped_large_files
+            results.setdefault("<note>", "")
+            if results["<note>"]:
+                results["<note>"] += " "
+            results["<note>"] += (
+                f"{len(skipped_large_files)} file(s) skipped due to size limit. "
+                "Use shell `grep` command to search these files."
+            )
         _add_gitignore_info(results, gitignore_summary)
 
         if len(json.dumps(results, default=str)) > _MAX_RESULT_SIZE:
-            return _truncate_results(results, gitignore_summary)
+            return _truncate_results(results)
 
         return results
 
