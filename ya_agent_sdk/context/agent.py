@@ -518,6 +518,12 @@ class ToolConfig(BaseModel):
     view_max_text_file_size: int = 10 * 1024 * 1024
     """Maximum text file size in bytes that the view tool will inspect."""
 
+    edit_max_file_size: int = 20 * 1024 * 1024
+    """Maximum file size in bytes that edit/multi_edit tools will process. Default: 20 MB."""
+
+    grep_max_file_size: int = 10 * 1024 * 1024
+    """Maximum file size in bytes that grep will read per file. Default: 10 MB."""
+
     view_max_inline_image_bytes: int = 20 * 1024 * 1024
     """Maximum image size in bytes that the view tool will inline into context."""
 

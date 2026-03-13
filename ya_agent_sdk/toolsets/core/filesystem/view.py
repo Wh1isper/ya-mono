@@ -22,6 +22,7 @@ from ya_agent_sdk.toolsets.core.filesystem._types import (
     ViewSegment,
     ViewTruncationInfo,
 )
+from ya_agent_sdk.toolsets.core.filesystem._utils import is_binary_file
 from ya_agent_sdk.utils import run_in_threadpool
 
 logger = get_logger(__name__)
@@ -438,12 +439,19 @@ class ViewTool(BaseTool):
             return {
                 "error": (
                     f"File is too large to inspect safely ({self._format_size(file_size)}). "
-                    f"Maximum supported text view size is {self._format_size(max_text_file_size)}."
+                    f"Maximum supported text view size is {self._format_size(max_text_file_size)}. "
+                    f"Use shell tools (e.g. `head`, `tail`, `sed -n`) to read portions of this file."
                 ),
                 "success": False,
             }
 
         # Safe to read in one shot: stat check above guarantees bounded size
+        if await is_binary_file(file_operator, file_path):
+            return (
+                f"Error: {file_path} appears to be a binary file. "
+                f"Use appropriate tools (e.g. `pdf_convert` for PDFs, `xxd` for hex dumps) instead."
+            )
+
         full_content = await file_operator.read_file(file_path)
         all_lines = full_content.splitlines(keepends=True)
         total_lines = len(all_lines)

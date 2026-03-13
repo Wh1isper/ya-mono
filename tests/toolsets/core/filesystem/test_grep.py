@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from pydantic_ai import RunContext
 
 from ya_agent_sdk.context import AgentContext
+from ya_agent_sdk.context.agent import ToolConfig
 from ya_agent_sdk.environment.local import LocalEnvironment
 from ya_agent_sdk.toolsets.core.filesystem.grep import GrepTool
 
@@ -401,3 +402,41 @@ async def test_grep_no_gitignore_no_excluded_info(tmp_path: Path) -> None:
         # No .gitignore means no excluded info
         assert "<gitignore_excluded>" not in result
         assert "<note>" not in result
+
+
+# --- File size limit tests ---
+
+
+async def test_grep_skips_files_exceeding_size_limit(tmp_path: Path) -> None:
+    """Should skip files larger than grep_max_file_size."""
+    async with AsyncExitStack() as stack:
+        env = await stack.enter_async_context(
+            LocalEnvironment(allowed_paths=[tmp_path], default_path=tmp_path, tmp_base_dir=tmp_path)
+        )
+        ctx = await stack.enter_async_context(
+            AgentContext(
+                env=env,
+                tool_config=ToolConfig(grep_max_file_size=100),
+            )
+        )
+        tool = GrepTool()
+
+        # Create a small file (should be searched)
+        (tmp_path / "small.py").write_text("hello world")
+        # Create a large file (should be skipped)
+        (tmp_path / "large.py").write_text("hello " + "x" * 200)
+
+        mock_run_ctx = MagicMock(spec=RunContext)
+        mock_run_ctx.deps = ctx
+
+        result = await tool.call(mock_run_ctx, pattern="hello", include="*.py")
+        assert isinstance(result, dict)
+        match_keys = [k for k in result if not k.startswith("<")]
+        assert len(match_keys) == 1
+        assert any("small.py" in k for k in match_keys)
+        assert not any("large.py" in k for k in match_keys)
+
+        # Should report skipped files so agent knows to use shell grep
+        assert "<skipped_large_files>" in result
+        assert any("large.py" in f for f in result["<skipped_large_files>"])
+        assert "shell" in result["<note>"]
