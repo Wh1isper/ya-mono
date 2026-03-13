@@ -34,11 +34,19 @@ def _add_gitignore_info(results: dict[str, Any], gitignore_summary: list[str]) -
     """Add gitignore exclusion info to results."""
     if gitignore_summary:
         results["<gitignore_excluded>"] = gitignore_summary
-        results["<note>"] = "Some files excluded by .gitignore. Set include_ignored=true to include them."
+        note = "Some files excluded by .gitignore. Set include_ignored=true to include them."
+        results.setdefault("<note>", "")
+        if results["<note>"]:
+            results["<note>"] += " "
+        results["<note>"] += note
 
 
-def _truncate_results(results: dict[str, Any], gitignore_summary: list[str]) -> dict[str, Any]:
-    """Truncate results by dropping context when too large."""
+def _truncate_results(results: dict[str, Any]) -> dict[str, Any]:
+    """Truncate results by dropping context when too large.
+
+    Preserves all metadata keys (e.g. <skipped_large_files>, <note>, <gitignore_excluded>)
+    from the original results.
+    """
     logger.info("Results too long, dropping context")
     truncated: dict[str, Any] = {
         match: {
@@ -50,7 +58,10 @@ def _truncate_results(results: dict[str, Any], gitignore_summary: list[str]) -> 
         if isinstance(match_data, dict) and "line_number" in match_data
     }
     truncated["<system>"] = "Results truncated. Use `view` to read specific files."
-    _add_gitignore_info(truncated, gitignore_summary)
+    # Preserve metadata keys from original results
+    for key, value in results.items():
+        if key.startswith("<") and key != "<system>":
+            truncated[key] = value
     return truncated
 
 
@@ -249,7 +260,7 @@ class GrepTool(BaseTool):
         _add_gitignore_info(results, gitignore_summary)
 
         if len(json.dumps(results, default=str)) > _MAX_RESULT_SIZE:
-            return _truncate_results(results, gitignore_summary)
+            return _truncate_results(results)
 
         return results
 

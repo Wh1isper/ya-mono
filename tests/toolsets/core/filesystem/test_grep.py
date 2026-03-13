@@ -440,3 +440,89 @@ async def test_grep_skips_files_exceeding_size_limit(tmp_path: Path) -> None:
         assert "<skipped_large_files>" in result
         assert any("large.py" in f for f in result["<skipped_large_files>"])
         assert "shell" in result["<note>"]
+
+
+async def test_grep_skipped_large_files_note_preserved_with_gitignore(tmp_path: Path) -> None:
+    """Should preserve both large-file note and gitignore note when both conditions occur."""
+    async with AsyncExitStack() as stack:
+        env = await stack.enter_async_context(
+            LocalEnvironment(allowed_paths=[tmp_path], default_path=tmp_path, tmp_base_dir=tmp_path)
+        )
+        ctx = await stack.enter_async_context(
+            AgentContext(
+                env=env,
+                tool_config=ToolConfig(grep_max_file_size=100),
+            )
+        )
+        tool = GrepTool()
+
+        # Create .gitignore to exclude node_modules
+        (tmp_path / ".gitignore").write_text("node_modules/\n")
+        (tmp_path / "node_modules").mkdir()
+        (tmp_path / "node_modules" / "pkg.js").write_text("hello from node")
+
+        # Small file (should be searched and matched)
+        (tmp_path / "small.py").write_text("hello world")
+        # Large file (should be skipped due to size limit)
+        (tmp_path / "large.py").write_text("hello " + "x" * 200)
+
+        mock_run_ctx = MagicMock(spec=RunContext)
+        mock_run_ctx.deps = ctx
+
+        result = await tool.call(mock_run_ctx, pattern="hello", include="**/*")
+        assert isinstance(result, dict)
+
+        # Should have both metadata
+        assert "<skipped_large_files>" in result
+        assert "<gitignore_excluded>" in result
+
+        # The note should contain BOTH pieces of guidance
+        note = result["<note>"]
+        assert "shell" in note.lower(), "Large-file shell fallback guidance missing"
+        assert "include_ignored" in note, "Gitignore guidance missing"
+
+
+async def test_grep_truncation_preserves_skipped_large_files(tmp_path: Path) -> None:
+    """Should preserve <skipped_large_files> and <note> metadata when results are truncated."""
+    async with AsyncExitStack() as stack:
+        env = await stack.enter_async_context(
+            LocalEnvironment(allowed_paths=[tmp_path], default_path=tmp_path, tmp_base_dir=tmp_path)
+        )
+        ctx = await stack.enter_async_context(
+            AgentContext(
+                env=env,
+                tool_config=ToolConfig(grep_max_file_size=200_000),
+            )
+        )
+        tool = GrepTool()
+
+        # File with many matches (~100KB) that will produce large output to trigger truncation
+        lines = [f"match_{i}_" + "x" * 500 for i in range(200)]
+        (tmp_path / "many_matches.txt").write_text("\n".join(lines))
+
+        # Large file (>200KB) that exceeds size limit
+        (tmp_path / "large.py").write_text("match_big " + "x" * 300_000)
+
+        mock_run_ctx = MagicMock(spec=RunContext)
+        mock_run_ctx.deps = ctx
+
+        result = await tool.call(
+            mock_run_ctx,
+            pattern="match_\\d+",
+            max_results=-1,
+            max_matches_per_file=-1,
+            context_lines=5,
+        )
+        assert isinstance(result, dict)
+
+        # Results should be truncated
+        assert "<system>" in result
+        assert "truncated" in result["<system>"].lower()
+
+        # Skipped large files metadata should be preserved
+        assert "<skipped_large_files>" in result, "Truncation dropped <skipped_large_files>"
+        assert any("large.py" in f for f in result["<skipped_large_files>"])
+
+        # Note with shell fallback guidance should be preserved
+        assert "<note>" in result, "Truncation dropped <note>"
+        assert "shell" in result["<note>"].lower()
