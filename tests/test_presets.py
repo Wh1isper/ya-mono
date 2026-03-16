@@ -374,10 +374,10 @@ def test_get_model_cfg_by_string() -> None:
 def test_get_model_cfg_by_alias() -> None:
     """Test getting model config by alias."""
     cfg = get_model_cfg("claude")
-    assert cfg["context_window"] == 200_000
+    assert cfg["context_window"] == 1_000_000
 
     cfg = get_model_cfg("anthropic")
-    assert cfg["context_window"] == 200_000
+    assert cfg["context_window"] == 1_000_000
 
     cfg = get_model_cfg("openai")
     assert cfg["context_window"] == 270_000  # GPT-5 series

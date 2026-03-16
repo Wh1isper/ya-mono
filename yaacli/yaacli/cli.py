@@ -61,7 +61,7 @@ PROVIDER_MODEL_SETTINGS = {
 # - anthropic/openai: vision only
 # - unknown: no capabilities
 PROVIDER_MODEL_CFG = {
-    "anthropic": "claude_200k",
+    "anthropic": "claude_1m",
     "openai": "gpt5_270k",
     "openai-chat": "gpt5_270k",
     "openai-responses": "gpt5_270k",

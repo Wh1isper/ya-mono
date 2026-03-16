@@ -834,8 +834,8 @@ _MODEL_CFG_REGISTRY: dict[str, dict[str, Any]] = {
 
 # ModelConfig aliases
 _MODEL_CFG_ALIASES: dict[str, str] = {
-    "claude": ModelConfigPreset.CLAUDE_200K.value,
-    "anthropic": ModelConfigPreset.CLAUDE_200K.value,
+    "claude": ModelConfigPreset.CLAUDE_1M.value,
+    "anthropic": ModelConfigPreset.CLAUDE_1M.value,
     "gpt5": ModelConfigPreset.GPT5_270K.value,
     "openai": ModelConfigPreset.GPT5_270K.value,
     "gemini": ModelConfigPreset.GEMINI_200K.value,
@@ -863,7 +863,7 @@ def get_model_cfg(preset: str | ModelConfigPreset) -> dict[str, Any]:
         cfg = get_model_cfg(ModelConfigPreset.GEMINI_1M)
 
         # By alias
-        cfg = get_model_cfg("claude")  # -> claude_200k
+        cfg = get_model_cfg("claude")  # -> claude_1m
     """
     name = preset.value if isinstance(preset, ModelConfigPreset) else preset
 
