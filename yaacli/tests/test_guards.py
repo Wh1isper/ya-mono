@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic_ai.exceptions import ModelRetry
 from yaacli.events import LoopCompleteEvent, LoopCompleteReason, LoopIterationEvent
-from yaacli.guards import LOOP_COMPLETE_MARKER, loop_guard
+from yaacli.guards import LOOP_COMPLETE_MARKER, _has_completion_marker, loop_guard
 from yaacli.session import TUIContext
 
 
@@ -56,7 +56,7 @@ async def test_loop_guard_verified_complete(tui_ctx: TUIContext) -> None:
     ctx = _make_ctx(tui_ctx)
 
     with patch.object(TUIContext, "emit_event", new_callable=AsyncMock) as mock_emit:
-        output = f"All done. {LOOP_COMPLETE_MARKER}"
+        output = f"All done.\n{LOOP_COMPLETE_MARKER}"
         result = await loop_guard(ctx, output)
 
         assert result == output
@@ -146,6 +146,37 @@ async def test_loop_guard_multiple_iterations(tui_ctx: TUIContext) -> None:
 
         # 3 iteration events + 1 complete event = 4 calls
         assert mock_emit.call_count == 4
+
+
+@pytest.mark.asyncio
+async def test_loop_guard_marker_in_sentence_does_not_complete(tui_ctx: TUIContext) -> None:
+    """Guard should NOT treat marker embedded in a sentence as completion."""
+    tui_ctx.loop_task = "fix tests"
+    tui_ctx.loop_iteration = 0
+    tui_ctx.loop_max_iterations = 10
+    ctx = _make_ctx(tui_ctx)
+
+    with patch.object(TUIContext, "emit_event", new_callable=AsyncMock):
+        # Marker mentioned in explanatory text - should NOT trigger completion
+        with pytest.raises(ModelRetry, match="loop-check"):
+            await loop_guard(ctx, f"I haven't verified so I won't say {LOOP_COMPLETE_MARKER} yet")
+
+        assert tui_ctx.loop_iteration == 1  # Should have continued iterating
+
+
+def test_has_completion_marker_standalone_line() -> None:
+    """Marker on its own line should be detected."""
+    assert _has_completion_marker(f"Done.\n{LOOP_COMPLETE_MARKER}") is True
+    assert _has_completion_marker(f"{LOOP_COMPLETE_MARKER}\nExtra text") is True
+    assert _has_completion_marker(f"  {LOOP_COMPLETE_MARKER}  ") is True
+    assert _has_completion_marker(LOOP_COMPLETE_MARKER) is True
+
+
+def test_has_completion_marker_embedded_text() -> None:
+    """Marker embedded in a sentence should NOT be detected."""
+    assert _has_completion_marker(f"I won't say {LOOP_COMPLETE_MARKER} yet") is False
+    assert _has_completion_marker(f"Output: {LOOP_COMPLETE_MARKER} is the marker") is False
+    assert _has_completion_marker("No marker here") is False
 
 
 def test_tui_context_loop_active_property() -> None:

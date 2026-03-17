@@ -25,6 +25,16 @@ logger = get_logger(__name__)
 LOOP_COMPLETE_MARKER = "[LOOP_COMPLETE]"
 
 
+def _has_completion_marker(output: str) -> bool:
+    """Check if output contains the completion marker as a standalone line.
+
+    The marker must appear on its own line (ignoring surrounding whitespace)
+    to avoid false positives when the model mentions the marker in
+    explanatory text (e.g. "I can't output [LOOP_COMPLETE] yet").
+    """
+    return any(line.strip() == LOOP_COMPLETE_MARKER for line in output.splitlines())
+
+
 async def loop_guard(ctx: RunContext[TUIContext], output: Any) -> Any:
     """Output guard that drives loop mode via ModelRetry.
 
@@ -56,8 +66,8 @@ async def loop_guard(ctx: RunContext[TUIContext], output: Any) -> Any:
 
     task = deps.loop_task or ""
 
-    # Agent verified completion
-    if LOOP_COMPLETE_MARKER in output:
+    # Agent verified completion (marker must be on its own line)
+    if _has_completion_marker(output):
         iteration = deps.loop_iteration
         await deps.emit_event(
             LoopCompleteEvent(
@@ -105,7 +115,7 @@ async def loop_guard(ctx: RunContext[TUIContext], output: Any) -> Any:
         f"Original task: {task}\n"
         f"Review your work against the original task. Have you actually verified the results "
         f"(e.g., ran tests, checked output)? Do NOT assume success without verification.\n"
-        f"Only respond with exactly {LOOP_COMPLETE_MARKER} if you have verified the task is fully complete.\n"
+        f"If you have verified the task is fully complete, respond with {LOOP_COMPLETE_MARKER} on its own line.\n"
         f"Otherwise, continue working on what remains.\n"
         f"</loop-check>"
     )
