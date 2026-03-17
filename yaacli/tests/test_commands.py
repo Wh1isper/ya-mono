@@ -254,7 +254,7 @@ async def test_registry_execute_via_alias():
 
 def test_builtin_commands():
     """Test BUILTIN_COMMANDS contains expected commands."""
-    expected = {"help", "clear", "cost", "tasks", "dump", "load", "exit", "act", "plan"}
+    expected = {"help", "clear", "cost", "tasks", "dump", "load", "exit", "act", "plan", "loop"}
     assert expected.issubset(BUILTIN_COMMANDS)
 
 

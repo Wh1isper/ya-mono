@@ -84,7 +84,7 @@ from yaacli.browser import BrowserManager
 from yaacli.config import ConfigManager, YaacliConfig
 from yaacli.display import EventRenderer, RichRenderer, ToolMessage
 from yaacli.environment import TUIEnvironment
-from yaacli.events import ContextUpdateEvent
+from yaacli.events import ContextUpdateEvent, LoopCompleteEvent, LoopCompleteReason, LoopIterationEvent
 from yaacli.hooks import emit_context_update
 from yaacli.logging import configure_tui_logging, get_logger
 from yaacli.perf import perf_log_report, perf_report, perf_timer
@@ -787,6 +787,12 @@ class TUIApp:
                     ("class:status-bar", " | "),
                     ("class:status-bar", f"Context: {context_pct}%"),
                 ]
+                ctx = self.runtime.ctx
+                if ctx.loop_active:
+                    parts.extend([
+                        ("class:status-bar", " | "),
+                        ("class:status-bar.warning", f"Loop: {ctx.loop_iteration}/{ctx.loop_max_iterations}"),
+                    ])
                 bg_count = self._get_background_task_count()
                 if bg_count > 0:
                     parts.extend([
@@ -979,6 +985,7 @@ class TUIApp:
             self._state = TUIState.IDLE
             if self._app:
                 self._app.invalidate()
+            return
 
     def _check_pending_bus_messages(self) -> None:
         """Check for pending bus messages and trigger agent turn if needed.
@@ -1068,6 +1075,11 @@ class TUIApp:
             # These are messages injected via bus from user during execution.
             # If not cleared, they would leak into unrelated future tasks.
             self.runtime.ctx.steering_messages.clear()
+            # Clean up loop state if still active (cancelled or error)
+            ctx = self.runtime.ctx
+            if ctx.loop_active:
+                self._append_system_output("[Loop] Cancelled")
+                ctx.reset_loop()
             self._agent_phase = "idle"
             self._state = TUIState.IDLE
             if self._app:
@@ -1594,6 +1606,18 @@ class TUIApp:
             self._append_output(rendered.rstrip())
 
         # Handle TUI-specific events
+        elif isinstance(message_event, LoopIterationEvent):
+            self._append_system_output(f"[Loop] Iteration {message_event.iteration}/{message_event.max_iterations}")
+
+        elif isinstance(message_event, LoopCompleteEvent):
+            if message_event.reason == LoopCompleteReason.verified:
+                self._append_system_output(f"[Loop] Task completed in {message_event.iteration} iteration(s)")
+            elif message_event.reason == LoopCompleteReason.max_iterations:
+                self._append_system_output(
+                    f"[Loop] Reached max iterations ({message_event.iteration}). "
+                    "Task may be incomplete. You can run /loop again to continue."
+                )
+
         elif isinstance(message_event, ContextUpdateEvent):
             self._current_context_tokens = message_event.total_tokens
             if message_event.context_window_size > 0:
@@ -1903,6 +1927,23 @@ class TUIApp:
             case "/tasks":
                 self._append_user_input(command)
                 self._show_tasks()
+            case "/loop":
+                self._append_user_input(command)
+                ctx = self.runtime.ctx
+                if ctx.loop_active:
+                    self._append_system_output("Loop is already running. Use Ctrl+C to stop it first.")
+                elif not args.strip():
+                    self._append_system_output("Usage: /loop <task description>")
+                else:
+                    task = args.strip()
+                    ctx.loop_task = task
+                    ctx.loop_iteration = 0
+                    ctx.loop_max_iterations = self.config.general.max_loop_iterations
+                    self._append_system_output(
+                        f"[Loop] Starting loop mode ({ctx.loop_max_iterations} max iterations). Ctrl+C to stop."
+                    )
+                    self._agent_task = asyncio.create_task(self._run_agent(task))
+                    self._agent_task.add_done_callback(self._on_agent_task_done)
             case _:
                 # Check custom commands
                 cmd_name = cmd[1:]  # Remove leading /
@@ -1913,13 +1954,20 @@ class TUIApp:
                     if cmd_def.mode:
                         new_mode = TUIMode.ACT if cmd_def.mode == "act" else TUIMode.PLAN
                         self.switch_mode(new_mode)
+                    # Append user instruction to prompt if provided
+                    prompt = cmd_def.prompt
+                    if args.strip():
+                        prompt = f"{prompt}\n\nUser instruction: {args.strip()}"
                     # Show expanded prompt instead of command name
-                    self._append_user_input(cmd_def.prompt)
-                    self._agent_task = asyncio.create_task(self._run_agent(cmd_def.prompt))
+                    self._append_user_input(prompt)
+                    self._agent_task = asyncio.create_task(self._run_agent(prompt))
                     self._agent_task.add_done_callback(self._on_agent_task_done)
                 else:
+                    # Unknown command - treat as regular prompt input
+                    # This handles cases like /mnt/dev (file paths) gracefully
                     self._append_user_input(command)
-                    self._append_system_output(f"Unknown command: {cmd}")
+                    self._agent_task = asyncio.create_task(self._run_agent(command))
+                    self._agent_task.add_done_callback(self._on_agent_task_done)
 
         self._scroll_to_bottom()
         if self._app:
@@ -2013,6 +2061,7 @@ class TUIApp:
         sys_table.add_row("/load <folder>", "Load session from folder")
         sys_table.add_row("/act", "Switch to ACT mode")
         sys_table.add_row("/plan", "Switch to PLAN mode")
+        sys_table.add_row("/loop <task>", "Run task in autonomous loop until complete")
         sys_table.add_row("/exit", "Exit TUI")
         lines.append(self._renderer.render(sys_table).rstrip())
 
@@ -2027,7 +2076,7 @@ class TUIApp:
             custom_table.add_column("Description")
             for name, cmd_def in sorted(commands.items()):
                 desc = cmd_def.description or "(no description)"
-                custom_table.add_row(f"/{name}", desc)
+                custom_table.add_row(f"/{name} [instruction]", desc)
             lines.append(self._renderer.render(custom_table).rstrip())
 
         # Shell

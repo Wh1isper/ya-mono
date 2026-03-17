@@ -53,6 +53,7 @@ from ya_agent_sdk.toolsets.tool_search import create_best_strategy
 from yaacli.browser import BrowserManager
 from yaacli.config import ConfigManager, MCPConfig, SubagentsConfig, YaacliConfig
 from yaacli.environment import TUIEnvironment
+from yaacli.guards import attach_loop_guard
 from yaacli.logging import get_logger
 from yaacli.mcp import build_mcp_servers, extract_mcp_descriptions, extract_optional_mcps
 from yaacli.session import TUIContext
@@ -333,6 +334,10 @@ def create_tui_runtime(
     output_type: OutputSpec[str | DeferredToolRequests] = [str, DeferredToolRequests]
     # Create runtime using SDK factory
     # Use unified_subagents=True to create single 'delegate' tool for all subagents
+    # output_retries must be large enough to support loop iterations + normal retries
+    max_loop = config.general.max_loop_iterations
+    output_retries = max_loop + 5
+
     runtime = create_agent(
         model=config.general.model or None,
         model_settings=cast(ModelSettings, model_settings),
@@ -349,12 +354,17 @@ def create_tui_runtime(
         need_user_approve_mcps=config.tools.need_approval_mcps or None,
         subagent_configs=subagent_configs if subagent_configs else None,
         unified_subagents=True,
+        output_retries=output_retries,
     )
 
+    # Attach loop guard for /loop command support
+    attach_loop_guard(runtime.agent)
+
     logger.info(
-        "Created TUI runtime: model=%s, toolsets=%d",
+        "Created TUI runtime: model=%s, toolsets=%d, output_retries=%d",
         config.general.model,
         len(toolsets),
+        output_retries,
     )
 
     return runtime

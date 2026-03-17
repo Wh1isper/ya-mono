@@ -53,6 +53,9 @@ class GeneralConfig(BaseModel):
     max_requests: int = 1000
     """Maximum requests per session."""
 
+    max_loop_iterations: int = 10
+    """Maximum iterations for /loop command."""
+
     system_prompt_file: str = ""
     """Path to custom system prompt file. Empty uses built-in default."""
 
