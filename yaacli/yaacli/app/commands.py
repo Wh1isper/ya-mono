@@ -146,6 +146,7 @@ BUILTIN_COMMANDS = frozenset({
     "exit",
     "act",
     "plan",
+    "loop",
 })
 
 

@@ -561,6 +561,7 @@ def cli(verbose: bool, worktree: bool, worktree_branch: str | None) -> None:
       /help     - Show available commands
       /config   - Show/edit configuration
       /mode     - Switch between act/plan modes
+      /loop     - Run task in autonomous loop
       /tasks    - Show background tasks and processes
       /session  - List/restore sessions
       /dump     - Save session to folder

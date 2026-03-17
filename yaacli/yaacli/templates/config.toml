@@ -31,6 +31,9 @@ model = ""
 # Maximum requests per session
 max_requests = 1000
 
+# Maximum iterations for /loop command
+# max_loop_iterations = 10
+
 # Custom system prompt file path (optional)
 # If empty, uses built-in default from CLI package
 # system_prompt_file = "~/.yaacli/system_prompt.md"

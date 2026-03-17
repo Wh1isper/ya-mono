@@ -14,6 +14,7 @@ and receives MessageReceivedEvent when they are injected.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 
 from ya_agent_sdk.events import AgentEvent
 
@@ -31,3 +32,48 @@ class ContextUpdateEvent(AgentEvent):
 
     total_tokens: int = 0
     context_window_size: int = 0
+
+
+# =============================================================================
+# Loop Events
+# =============================================================================
+
+
+class LoopCompleteReason(StrEnum):
+    """Enumerated reasons for loop completion."""
+
+    verified = "verified"
+    """Agent verified the task is complete."""
+
+    max_iterations = "max_iterations"
+    """Reached the maximum iteration limit."""
+
+
+@dataclass
+class LoopIterationEvent(AgentEvent):
+    """Emitted when the loop guard triggers a new iteration.
+
+    Attributes:
+        iteration: Current iteration number (1-based).
+        max_iterations: Maximum iterations allowed.
+        task: Original task description.
+    """
+
+    iteration: int = 0
+    max_iterations: int = 0
+    task: str = ""
+
+
+@dataclass
+class LoopCompleteEvent(AgentEvent):
+    """Emitted when loop mode ends.
+
+    Attributes:
+        iteration: Final iteration count.
+        reason: Why the loop ended (enumerated).
+        task: Original task description.
+    """
+
+    iteration: int = 0
+    reason: LoopCompleteReason = LoopCompleteReason.verified
+    task: str = ""
