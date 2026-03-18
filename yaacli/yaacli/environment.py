@@ -18,6 +18,7 @@ from pathlib import Path
 from y_agent_environment import ResourceFactory, ResourceRegistryState
 
 from ya_agent_sdk.environment.local import LocalEnvironment
+from ya_agent_sdk.workspace.base import WorkspaceStrategy
 from yaacli.background import BACKGROUND_MANAGER_KEY, BackgroundTaskManager
 from yaacli.processes import PROCESS_MANAGER_KEY, ProcessManager
 
@@ -39,6 +40,7 @@ class TUIEnvironment(LocalEnvironment):
         enable_tmp_dir: bool = True,
         resource_state: ResourceRegistryState | None = None,
         resource_factories: dict[str, ResourceFactory] | None = None,
+        fork_strategy: WorkspaceStrategy | None = None,
     ) -> None:
         super().__init__(
             allowed_paths=allowed_paths,
@@ -48,6 +50,7 @@ class TUIEnvironment(LocalEnvironment):
             enable_tmp_dir=enable_tmp_dir,
             resource_state=resource_state,
             resource_factories=resource_factories,
+            fork_strategy=fork_strategy,
         )
         self._process_manager: ProcessManager | None = None
         self._background_manager: BackgroundTaskManager | None = None

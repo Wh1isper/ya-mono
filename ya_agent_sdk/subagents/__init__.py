@@ -60,6 +60,7 @@ from ya_agent_sdk.context import AgentContext, ModelConfig
 from ya_agent_sdk.presets import INHERIT
 from ya_agent_sdk.subagents.builder import build_subagent_agent
 from ya_agent_sdk.subagents.config import (
+    IsolationMode,
     SubagentConfig,
     load_subagent_from_file,
     load_subagents_from_dir,
@@ -291,6 +292,7 @@ def __getattr__(name: str) -> Any:
 
 __all__ = [
     "INHERIT",
+    "IsolationMode",
     "SubagentConfig",
     "build_subagent_agent",
     "create_subagent_call_func",

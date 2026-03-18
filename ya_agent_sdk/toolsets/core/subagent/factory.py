@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Container
 from contextlib import AbstractAsyncContextManager, nullcontext
 from inspect import isawaitable
-from typing import Annotated, Any, cast
+from typing import TYPE_CHECKING, Annotated, Any, cast
 from uuid import uuid4
 
 from pydantic import Field
@@ -20,7 +20,11 @@ from pydantic_ai.models import Model
 from ya_agent_sdk.context import AgentContext, ModelConfig
 from ya_agent_sdk.events import SubagentCompleteEvent, SubagentStartEvent
 from ya_agent_sdk.toolsets.core.base import BaseTool
+from ya_agent_sdk.toolsets.core.subagent.isolation import resolve_env
 from ya_agent_sdk.usage import InternalUsage
+
+if TYPE_CHECKING:
+    from ya_agent_sdk.subagents.config import IsolationMode
 
 # Type alias for instruction functions
 InstructionFunc = Callable[[RunContext[AgentContext]], str | None]
@@ -188,73 +192,66 @@ def generate_unique_id(existing: Container[str], *, max_retries: int = 10) -> st
     raise RuntimeError(f"Failed to generate unique agent_id after {max_retries} retries")
 
 
-def create_subagent_call_func(
+async def _execute_subagent(  # noqa: C901
     agent: Agent[AgentContext, Any],
-    *,
-    model_cfg: ModelConfig | None = None,
-) -> SubagentCallFunc:
-    """Create a BaseTool.call compatible function from a pydantic-ai Agent.
+    agent_name: str,
+    model_cfg: ModelConfig | None,
+    self: BaseTool,
+    ctx: RunContext[AgentContext],
+    prompt: str,
+    agent_id: str | None,
+    should_isolate: bool,
+) -> str:
+    """Core subagent execution logic shared by all isolation modes.
 
-    This function creates a call method that:
-    - Has the correct signature for BaseTool.call: (ctx: RunContext[AgentContext], **kwargs) -> str
-    - Generates stable agent_id in format {agent.name}-{short_id}
-    - Registers the agent in parent's agent_registry
-    - Manages subagent_history for conversation continuity
-    - Records usage in extra_usages
-    - Streams events to parent context
-
-    Args:
-        agent: A pydantic-ai Agent with AgentContext as deps type.
-        model_cfg: Optional ModelConfig to override in subagent context.
-                   If None, subagent inherits parent's model_cfg.
-
-    Returns:
-        A function compatible with BaseTool.call signature.
-
-    Example::
-
-        from pydantic_ai import Agent
-
-        search_agent: Agent[AgentContext, str] = Agent(...)
-
-        # Create the call function
-        search_call = create_subagent_call_func(search_agent)
-
-        # Pass to create_subagent_tool
-        SearchTool = create_subagent_tool("search", "Search the web", search_call)
+    Handles agent_id generation, context creation, event emission,
+    model wrapping, usage tracking, and workspace isolation.
     """
-    agent_name = agent.name or "subagent"
+    deps = ctx.deps
 
-    async def call_func(
-        self: BaseTool,
-        ctx: RunContext[AgentContext],
-        prompt: Annotated[str, Field(description="The prompt to send to the subagent")],
-        agent_id: Annotated[str | None, Field(description="Optional agent ID to resume")] = None,
-    ) -> str:
-        """Execute the agent with the given prompt."""
-        deps = ctx.deps
+    # Generate stable agent_id if not provided
+    if not agent_id:
+        short_id = generate_unique_id(deps.subagent_history)
+        agent_id = f"{agent_name}-{short_id}"
 
-        # Generate stable agent_id if not provided
-        if not agent_id:
-            short_id = generate_unique_id(deps.subagent_history)
-            agent_id = f"{agent_name}-{short_id}"
+    # Track whether this is a new agent (not a resume) for cleanup on failure
+    is_new_agent = agent_id not in deps.agent_registry
 
-        # Track whether this is a new agent (not a resume) for cleanup on failure
-        is_new_agent = agent_id not in deps.agent_registry
+    # Create subagent context (handles registration in agent_registry)
+    override_kwargs: dict[str, Any] = {}
+    if model_cfg is not None:
+        override_kwargs["model_cfg"] = model_cfg
 
-        # Create subagent context (handles registration in agent_registry)
-        override_kwargs: dict[str, Any] = {}
-        if model_cfg is not None:
-            override_kwargs["model_cfg"] = model_cfg
+    error_msg = ""
+    success = True
+    result_output = ""
+    request_count = 0
 
-        error_msg = ""
-        success = True
-        result_output = ""
-        request_count = 0
+    async with resolve_env(deps.env, should_isolate) as effective_env:
+        # Detect whether isolation was requested but not achieved
+        isolation_failed = should_isolate and effective_env is deps.env
+
+        # Pass forked env to subagent context if different from parent
+        if effective_env is not deps.env:
+            override_kwargs["env"] = effective_env
+
+        # Prepare the effective prompt: inject workspace context for the subagent
+        effective_prompt = prompt
+        if should_isolate and not isolation_failed:
+            effective_prompt = (
+                "[WORKSPACE: You are running in an ISOLATED workspace. "
+                "File changes will NOT affect the parent agent's workspace.]\n\n" + prompt
+            )
+        elif isolation_failed:
+            effective_prompt = (
+                "[WORKSPACE: Isolation was requested but is NOT available. "
+                "You are SHARING the parent agent's workspace. "
+                "Be cautious with file modifications.]\n\n" + prompt
+            )
 
         async with deps.create_subagent_context(agent_name, agent_id=agent_id, **override_kwargs) as sub_ctx:
             # Set the subagent's initial prompt for compact
-            sub_ctx.user_prompts = prompt
+            sub_ctx.user_prompts = effective_prompt
 
             # Emit start event to subagent's queue (inside context so sub_ctx.start_at is set)
             prompt_preview = prompt[:100] + "..." if len(prompt) > 100 else prompt
@@ -332,9 +329,92 @@ def create_subagent_call_func(
                     )
                 )
 
-        # Return formatted result
-        return f"""<id>{agent_id}</id>
-<response>{result.output}</response>
+    # Return formatted result
+    isolation_warning = ""
+    if isolation_failed:
+        isolation_warning = "<warning>Workspace isolation unavailable -- subagent ran in shared workspace</warning>\n"
+    return f"""<id>{agent_id}</id>
+{isolation_warning}<response>{result.output}</response>
 """
 
-    return call_func  # type: ignore[return-value]
+
+def create_subagent_call_func(
+    agent: Agent[AgentContext, Any],
+    *,
+    model_cfg: ModelConfig | None = None,
+    isolation: IsolationMode = "always",  # type: ignore[assignment]  # StrEnum default avoids circular import
+) -> SubagentCallFunc:
+    """Create a BaseTool.call compatible function from a pydantic-ai Agent.
+
+    This function creates a call method that:
+    - Has the correct signature for BaseTool.call: (ctx: RunContext[AgentContext], **kwargs) -> str
+    - Generates stable agent_id in format {agent.name}-{short_id}
+    - Registers the agent in parent's agent_registry
+    - Manages subagent_history for conversation continuity
+    - Records usage in extra_usages
+    - Streams events to parent context
+    - Supports workspace isolation via IsolationMode
+
+    Args:
+        agent: A pydantic-ai Agent with AgentContext as deps type.
+        model_cfg: Optional ModelConfig to override in subagent context.
+                   If None, subagent inherits parent's model_cfg.
+        isolation: Workspace isolation mode. Controls whether the subagent
+                   runs in a forked environment.
+
+    Returns:
+        A function compatible with BaseTool.call signature.
+        When isolation is OPTIONAL, the function includes an ``isolated`` parameter.
+
+    Example::
+
+        from pydantic_ai import Agent
+
+        search_agent: Agent[AgentContext, str] = Agent(...)
+
+        # Create the call function
+        search_call = create_subagent_call_func(search_agent)
+
+        # Pass to create_subagent_tool
+        SearchTool = create_subagent_tool("search", "Search the web", search_call)
+    """
+    agent_name = agent.name or "subagent"
+
+    # Generate the appropriate call_func based on isolation mode.
+    # Different modes produce different function signatures so that
+    # pydantic-ai only exposes the 'isolated' parameter when the
+    # subagent config allows the LLM to choose.
+
+    if isolation == "optional":
+
+        async def call_func_optional(
+            self: BaseTool,
+            ctx: RunContext[AgentContext],
+            prompt: Annotated[str, Field(description="The prompt to send to the subagent")],
+            agent_id: Annotated[str | None, Field(description="Optional agent ID to resume")] = None,
+            isolated: Annotated[
+                bool,
+                Field(
+                    description="Run in an isolated workspace (separate copy/branch). "
+                    "Falls back to shared workspace if not supported."
+                ),
+            ] = False,
+        ) -> str:
+            """Execute the agent with the given prompt."""
+            return await _execute_subagent(agent, agent_name, model_cfg, self, ctx, prompt, agent_id, isolated)
+
+        return call_func_optional  # type: ignore[return-value]
+
+    else:
+        _always_isolate = isolation == "always"
+
+        async def call_func_fixed(
+            self: BaseTool,
+            ctx: RunContext[AgentContext],
+            prompt: Annotated[str, Field(description="The prompt to send to the subagent")],
+            agent_id: Annotated[str | None, Field(description="Optional agent ID to resume")] = None,
+        ) -> str:
+            """Execute the agent with the given prompt."""
+            return await _execute_subagent(agent, agent_name, model_cfg, self, ctx, prompt, agent_id, _always_isolate)
+
+        return call_func_fixed  # type: ignore[return-value]

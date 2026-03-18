@@ -84,7 +84,7 @@ def _build_subagent_entry(
         model_cfg=model_cfg,
         inherit_hooks=inherit_hooks,
     )
-    call_func = create_subagent_call_func(agent, model_cfg=resolved_model_cfg)
+    call_func = create_subagent_call_func(agent, model_cfg=resolved_model_cfg, isolation=config.isolation)
 
     return SubagentEntry(
         config=config,

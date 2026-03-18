@@ -74,7 +74,7 @@ def create_subagent_tool_from_config(
     return create_subagent_tool(
         name=config.name,
         description=config.description,
-        call_func=create_subagent_call_func(agent, model_cfg=resolved_model_cfg),
+        call_func=create_subagent_call_func(agent, model_cfg=resolved_model_cfg, isolation=config.isolation),
         instruction=config.instruction,
         availability_check=check_tools_available,
     )

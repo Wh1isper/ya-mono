@@ -12,6 +12,11 @@ from ya_agent_sdk.environment.local import (
     VirtualLocalFileOperator,
     VirtualMount,
 )
+from ya_agent_sdk.workspace import (
+    GitWorktreeStrategy,
+    WorkspaceStrategy,
+    auto_detect_strategy,
+)
 
 # Sandbox environment is optional (requires docker package)
 try:
@@ -25,11 +30,14 @@ except ModuleNotFoundError:
     _DOCKER_AVAILABLE = False
 
 __all__ = [
+    "GitWorktreeStrategy",
     "LocalEnvironment",
     "LocalFileOperator",
     "LocalShell",
     "VirtualLocalFileOperator",
     "VirtualMount",
+    "WorkspaceStrategy",
+    "auto_detect_strategy",
 ]
 
 # Add Sandbox exports if available

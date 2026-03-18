@@ -6,11 +6,27 @@ This module handles parsing markdown files with YAML frontmatter into SubagentCo
 from __future__ import annotations
 
 import re
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict
+
+
+class IsolationMode(StrEnum):
+    """Controls workspace isolation behavior for subagent execution.
+
+    - ALWAYS: Subagent always runs in a forked (isolated) environment (default).
+      Falls back to shared environment if fork is not supported.
+    - NEVER: Subagent always shares the parent environment.
+    - OPTIONAL: The ``isolated`` parameter is exposed on the tool,
+      letting the main agent LLM decide per invocation.
+    """
+
+    NEVER = "never"
+    ALWAYS = "always"
+    OPTIONAL = "optional"
 
 
 class SubagentConfig(BaseModel):
@@ -64,6 +80,18 @@ class SubagentConfig(BaseModel):
 
     model_cfg: str | dict[str, Any] | None = None
     """ModelConfig: 'inherit' (default), preset name (e.g., 'claude_200k'), or dict config."""
+
+    isolation: IsolationMode = IsolationMode.ALWAYS
+    """Workspace isolation mode for this subagent.
+
+    Controls whether the subagent runs in a forked (isolated) environment:
+    - 'always' (default): always forks a new workspace
+    - 'never': shares parent environment
+    - 'optional': exposes an 'isolated' parameter on the tool for LLM control
+
+    When the environment does not support forking (e.g., no git repo and copy
+    is unavailable), isolation degrades gracefully to shared environment.
+    """
 
 
 def parse_subagent_markdown(content: str) -> SubagentConfig:
@@ -146,6 +174,7 @@ def parse_subagent_markdown(content: str) -> SubagentConfig:
         model=frontmatter.get("model"),
         model_settings=frontmatter.get("model_settings"),
         model_cfg=frontmatter.get("model_cfg"),
+        isolation=frontmatter.get("isolation", IsolationMode.ALWAYS),
     )
 
 

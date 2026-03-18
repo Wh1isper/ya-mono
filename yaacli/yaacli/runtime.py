@@ -50,6 +50,7 @@ from ya_agent_sdk.toolsets.core.web import tools as web_tools
 from ya_agent_sdk.toolsets.skills.toolset import SHARED_SKILLS_DIR_NAME, SkillToolset
 from ya_agent_sdk.toolsets.tool_proxy.toolset import ToolProxyToolset
 from ya_agent_sdk.toolsets.tool_search import create_best_strategy
+from ya_agent_sdk.workspace import auto_detect_strategy
 from yaacli.browser import BrowserManager
 from yaacli.config import ConfigManager, MCPConfig, SubagentsConfig, YaacliConfig
 from yaacli.environment import TUIEnvironment
@@ -253,6 +254,13 @@ def create_tui_runtime(
         cwd = Path.cwd()
         env_kwargs["default_path"] = cwd
         env_kwargs["allowed_paths"] = [shared_agents_dir, global_config_dir, cwd]
+
+    # Auto-detect workspace strategy for subagent fork() support
+    effective_dir = env_kwargs["default_path"]
+    fork_strategy = auto_detect_strategy(effective_dir)
+    if fork_strategy is not None:
+        env_kwargs["fork_strategy"] = fork_strategy
+        logger.debug("Workspace fork strategy: %s", type(fork_strategy).__name__)
 
     # Model configuration - resolve from preset name or dict
     model_cfg = _resolve_model_cfg(config.general.model_cfg)

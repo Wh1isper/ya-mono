@@ -9,9 +9,10 @@ import glob as glob_module
 import os
 import shutil
 import tempfile
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import anyio
 from y_agent_environment import (
@@ -28,8 +29,7 @@ from y_agent_environment import (
     TmpFileOperator,
 )
 
-if TYPE_CHECKING:
-    pass
+from ya_agent_sdk.workspace import WorkspaceStrategy, auto_detect_strategy
 
 
 class LocalFileOperator(FileOperator):
@@ -997,6 +997,7 @@ class LocalEnvironment(Environment):
         enable_tmp_dir: bool = True,
         resource_state: ResourceRegistryState | None = None,
         resource_factories: dict[str, ResourceFactory] | None = None,
+        fork_strategy: WorkspaceStrategy | None = None,
     ):
         """Initialize LocalEnvironment.
 
@@ -1012,6 +1013,8 @@ class LocalEnvironment(Environment):
                 Resources will be restored when entering the context.
             resource_factories: Optional dictionary of resource factories.
                 Required for any resources in resource_state.
+            fork_strategy: Strategy for creating isolated workspaces via fork().
+                If None, auto-detects the best strategy when fork() is called.
         """
         super().__init__(
             resource_state=resource_state,
@@ -1022,6 +1025,7 @@ class LocalEnvironment(Environment):
         self._shell_timeout = shell_timeout
         self._tmp_base_dir = tmp_base_dir
         self._enable_tmp_dir = enable_tmp_dir
+        self._fork_strategy = fork_strategy
         self._tmp_dir_obj: tempfile.TemporaryDirectory[str] | None = None
 
     @property
@@ -1081,3 +1085,39 @@ class LocalEnvironment(Environment):
 
         self._file_operator = None
         self._shell = None
+
+    @asynccontextmanager
+    async def fork(self) -> AsyncIterator["LocalEnvironment"]:
+        """Create an isolated copy of this environment.
+
+        Uses the configured fork_strategy, or auto-detects the best strategy:
+        1. GitWorktreeStrategy -- if inside a git repository.
+        2. None -- raises NotImplementedError (no universal fallback).
+
+        The forked environment has its own file_operator, shell, and tmp_dir.
+        Resources are NOT shared -- the fork starts with an empty registry.
+
+        Yields:
+            A new LocalEnvironment with an isolated workspace.
+
+        Raises:
+            NotImplementedError: If no strategy is available.
+        """
+        strategy: WorkspaceStrategy | None = self._fork_strategy
+        if strategy is None:
+            strategy = auto_detect_strategy(self._default_path)
+        if strategy is None:
+            raise NotImplementedError(
+                "Cannot fork LocalEnvironment: no fork_strategy configured "
+                "and auto-detection found no suitable strategy (default_path is None)."
+            )
+
+        async with strategy.create(self._default_path) as ws_path:  # type: ignore[arg-type]
+            forked = LocalEnvironment(
+                default_path=ws_path,
+                allowed_paths=[ws_path],
+                shell_timeout=self._shell_timeout,
+                enable_tmp_dir=self._enable_tmp_dir,
+            )
+            async with forked:
+                yield forked
