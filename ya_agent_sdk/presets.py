@@ -209,10 +209,10 @@ ANTHROPIC_DEFAULT: dict[str, Any] = _anthropic_settings(
 """Anthropic default: Same as medium, 16K thinking budget."""
 
 ANTHROPIC_HIGH: dict[str, Any] = _anthropic_settings(
-    thinking_budget=32 * K_TOKENS,
-    max_tokens=21 * K_TOKENS,
+    thinking_budget=21 * K_TOKENS,
+    max_tokens=32 * K_TOKENS,
 )
-"""Anthropic high thinking: 32K thinking budget, max reasoning depth."""
+"""Anthropic high thinking: 21K thinking budget, max reasoning depth."""
 
 ANTHROPIC_MEDIUM: dict[str, Any] = _anthropic_settings(
     thinking_budget=16 * K_TOKENS,
@@ -241,11 +241,11 @@ ANTHROPIC_DEFAULT_INTERLEAVED_THINKING: dict[str, Any] = _anthropic_settings(
 """Anthropic interleaved default: Same as medium with interleaved thinking beta."""
 
 ANTHROPIC_HIGH_INTERLEAVED_THINKING: dict[str, Any] = _anthropic_settings(
-    thinking_budget=32 * K_TOKENS,
-    max_tokens=21 * K_TOKENS,
+    thinking_budget=21 * K_TOKENS,
+    max_tokens=32 * K_TOKENS,
     use_interleaved_thinking=True,
 )
-"""Anthropic interleaved high: 32K thinking budget with interleaved thinking beta."""
+"""Anthropic interleaved high: 21K thinking budget with interleaved thinking beta."""
 
 ANTHROPIC_MEDIUM_INTERLEAVED_THINKING: dict[str, Any] = _anthropic_settings(
     thinking_budget=16 * K_TOKENS,
@@ -272,21 +272,21 @@ ANTHROPIC_OFF_INTERLEAVED_THINKING: dict[str, Any] = _anthropic_off_settings(
 
 ANTHROPIC_1M_DEFAULT: dict[str, Any] = _anthropic_settings(
     thinking_budget=16 * K_TOKENS,
-    max_tokens=16 * K_TOKENS,
+    max_tokens=21 * K_TOKENS,
     use_1m_context=True,
 )
 """Anthropic 1M default: Same as medium, 16K thinking budget, with 1M context beta."""
 
 ANTHROPIC_1M_HIGH: dict[str, Any] = _anthropic_settings(
-    thinking_budget=32 * K_TOKENS,
-    max_tokens=21 * K_TOKENS,
+    thinking_budget=21 * K_TOKENS,
+    max_tokens=32 * K_TOKENS,
     use_1m_context=True,
 )
-"""Anthropic 1M high thinking: 32K thinking budget, max reasoning depth, with 1M context beta."""
+"""Anthropic 1M high thinking: 21K thinking budget, max reasoning depth, with 1M context beta."""
 
 ANTHROPIC_1M_MEDIUM: dict[str, Any] = _anthropic_settings(
     thinking_budget=16 * K_TOKENS,
-    max_tokens=16 * K_TOKENS,
+    max_tokens=21 * K_TOKENS,
     use_1m_context=True,
 )
 """Anthropic 1M medium thinking: 16K thinking budget, balanced reasoning, with 1M context beta."""
@@ -307,23 +307,23 @@ ANTHROPIC_1M_OFF: dict[str, Any] = _anthropic_off_settings(use_1m_context=True)
 
 ANTHROPIC_1M_DEFAULT_INTERLEAVED_THINKING: dict[str, Any] = _anthropic_settings(
     thinking_budget=16 * K_TOKENS,
-    max_tokens=16 * K_TOKENS,
+    max_tokens=21 * K_TOKENS,
     use_1m_context=True,
     use_interleaved_thinking=True,
 )
 """Anthropic 1M interleaved default: 16K thinking budget with 1M + interleaved betas."""
 
 ANTHROPIC_1M_HIGH_INTERLEAVED_THINKING: dict[str, Any] = _anthropic_settings(
-    thinking_budget=32 * K_TOKENS,
-    max_tokens=21 * K_TOKENS,
+    thinking_budget=21 * K_TOKENS,
+    max_tokens=32 * K_TOKENS,
     use_1m_context=True,
     use_interleaved_thinking=True,
 )
-"""Anthropic 1M interleaved high: 32K thinking budget with 1M + interleaved betas."""
+"""Anthropic 1M interleaved high: 21K thinking budget with 1M + interleaved betas."""
 
 ANTHROPIC_1M_MEDIUM_INTERLEAVED_THINKING: dict[str, Any] = _anthropic_settings(
     thinking_budget=16 * K_TOKENS,
-    max_tokens=16 * K_TOKENS,
+    max_tokens=21 * K_TOKENS,
     use_1m_context=True,
     use_interleaved_thinking=True,
 )
