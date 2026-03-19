@@ -69,10 +69,12 @@ from ya_agent_sdk.events import (
     HandoffCompleteEvent,
     HandoffFailedEvent,
     HandoffStartEvent,
+    MemoryEvent,
     MessageReceivedEvent,
     ModelRequestStartEvent,
     SubagentCompleteEvent,
     SubagentStartEvent,
+    TaskEvent,
     ToolCallsStartEvent,
 )
 from ya_agent_sdk.utils import get_latest_request_usage
@@ -1603,6 +1605,15 @@ class TUIApp:
 
         elif isinstance(message_event, HandoffFailedEvent):
             rendered = self._event_renderer.render_handoff_failed(message_event.error)
+            self._append_output(rendered.rstrip())
+
+        # Handle task/memory state events
+        elif isinstance(message_event, TaskEvent):
+            rendered = self._event_renderer.render_task_event(message_event)
+            self._append_output(rendered.rstrip())
+
+        elif isinstance(message_event, MemoryEvent):
+            rendered = self._event_renderer.render_memory_event(message_event)
             self._append_output(rendered.rstrip())
 
         # Handle TUI-specific events

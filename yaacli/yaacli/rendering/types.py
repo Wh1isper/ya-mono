@@ -47,10 +47,6 @@ class ToolCallInfo(BaseModel):
         "to_do_read",
         "to_do_write",
         "multi_edit",
-        "task_create",
-        "task_get",
-        "task_update",
-        "task_list",
     })
 
     def duration(self) -> float:

@@ -12,6 +12,7 @@ from pydantic import Field
 from pydantic_ai import RunContext
 
 from ya_agent_sdk.context import AgentContext
+from ya_agent_sdk.events import MemoryEvent
 from ya_agent_sdk.toolsets.base import Instruction
 from ya_agent_sdk.toolsets.core.base import BaseTool
 
@@ -47,8 +48,18 @@ class MemoryUpdateTool(BaseTool):
     ) -> str:
         if value is None:
             if ctx.deps.memory_manager.delete(key):
+                await ctx.deps.emit_event(self._build_memory_event(ctx))
                 return f"Memory entry '{key}' deleted."
             return f"Memory entry '{key}' not found."
 
         ctx.deps.memory_manager.set(key, value)
+        await ctx.deps.emit_event(self._build_memory_event(ctx))
         return f"Memory entry '{key}' stored."
+
+    @staticmethod
+    def _build_memory_event(ctx: RunContext[AgentContext]) -> MemoryEvent:
+        """Build a MemoryEvent with full snapshot of all entries."""
+        return MemoryEvent(
+            event_id=f"memory-{ctx.deps.run_id[:8]}",
+            entries=dict(ctx.deps.memory_manager.entries),
+        )

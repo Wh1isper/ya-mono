@@ -12,12 +12,34 @@ from pydantic_ai import RunContext
 
 from ya_agent_sdk._logger import get_logger
 from ya_agent_sdk.context import AgentContext, BusMessage, TaskStatus
+from ya_agent_sdk.events import TaskEvent, TaskInfo
 from ya_agent_sdk.toolsets.base import Instruction
 from ya_agent_sdk.toolsets.core.base import BaseTool
 
 logger = get_logger(__name__)
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
+
+
+def _build_task_event(ctx: RunContext[AgentContext]) -> TaskEvent:
+    """Build a TaskEvent with full snapshot of all tasks."""
+    tasks = ctx.deps.task_manager.list_all()
+    return TaskEvent(
+        event_id=f"task-{ctx.deps.run_id[:8]}",
+        tasks=[
+            TaskInfo(
+                id=t.id,
+                subject=t.subject,
+                description=t.description,
+                status=t.status.value,
+                active_form=t.active_form,
+                owner=t.owner,
+                blocked_by=list(t.blocked_by),
+                blocks=list(t.blocks),
+            )
+            for t in tasks
+        ],
+    )
 
 
 class TaskCreateParams(BaseModel):
@@ -62,6 +84,7 @@ class TaskCreateTool(BaseTool):
             active_form=active_form,
             metadata=metadata,
         )
+        await ctx.deps.emit_event(_build_task_event(ctx))
         return f"Task #{task.id} created successfully: {task.subject}"
 
 
@@ -204,6 +227,7 @@ class TaskUpdateTool(BaseTool):
         # Broadcast task update to message bus (subagents only)
         self._broadcast_update(ctx, task, update_text)
 
+        await ctx.deps.emit_event(_build_task_event(ctx))
         return f"Updated task #{task_id}: {update_text}"
 
 
@@ -229,6 +253,8 @@ class TaskListTool(BaseTool):
 
         if not tasks:
             return "No tasks found."
+
+        await ctx.deps.emit_event(_build_task_event(ctx))
 
         lines = []
         for task in tasks:
