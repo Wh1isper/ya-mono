@@ -6,6 +6,11 @@ import pytest
 from inline_snapshot import snapshot
 
 from ya_agent_sdk.presets import (
+    ANTHROPIC_1M_CM_DEFAULT,
+    ANTHROPIC_1M_CM_HIGH,
+    ANTHROPIC_1M_CM_LOW,
+    ANTHROPIC_1M_CM_MEDIUM,
+    ANTHROPIC_1M_CM_OFF,
     ANTHROPIC_1M_DEFAULT,
     ANTHROPIC_1M_DEFAULT_INTERLEAVED_THINKING,
     ANTHROPIC_1M_HIGH,
@@ -16,6 +21,12 @@ from ya_agent_sdk.presets import (
     ANTHROPIC_1M_MEDIUM_INTERLEAVED_THINKING,
     ANTHROPIC_1M_OFF,
     ANTHROPIC_1M_OFF_INTERLEAVED_THINKING,
+    ANTHROPIC_CM_DEFAULT,
+    ANTHROPIC_CM_HIGH,
+    ANTHROPIC_CM_LOW,
+    ANTHROPIC_CM_MEDIUM,
+    ANTHROPIC_CM_OFF,
+    ANTHROPIC_CONTEXT_MANAGEMENT_BETA,
     ANTHROPIC_DEFAULT,
     ANTHROPIC_DEFAULT_INTERLEAVED_THINKING,
     ANTHROPIC_HIGH,
@@ -37,12 +48,14 @@ from ya_agent_sdk.presets import (
     OPENAI_RESPONSES_MEDIUM,
     ModelConfigPreset,
     ModelSettingsPreset,
+    build_context_management,
     get_model_cfg,
     get_model_settings,
     list_model_cfg_presets,
     list_presets,
     resolve_model_cfg,
     resolve_model_settings,
+    with_context_management,
 )
 
 
@@ -110,6 +123,63 @@ def test_anthropic_interleaved_presets_structure() -> None:
     assert "extra_headers" in ANTHROPIC_OFF_INTERLEAVED_THINKING
     assert "anthropic-beta" in ANTHROPIC_OFF_INTERLEAVED_THINKING["extra_headers"]
     assert "interleaved-thinking" in ANTHROPIC_OFF_INTERLEAVED_THINKING["extra_headers"]["anthropic-beta"]
+
+
+def test_anthropic_cm_presets_structure() -> None:
+    """Test that Anthropic context management presets have beta headers and extra_body."""
+    for preset in [
+        ANTHROPIC_CM_DEFAULT,
+        ANTHROPIC_CM_HIGH,
+        ANTHROPIC_CM_MEDIUM,
+        ANTHROPIC_CM_LOW,
+    ]:
+        assert "extra_headers" in preset
+        assert "anthropic-beta" in preset["extra_headers"]
+        assert "context-management" in preset["extra_headers"]["anthropic-beta"]
+        assert "extra_body" in preset
+        assert "context_management" in preset["extra_body"]
+        cm = preset["extra_body"]["context_management"]
+        assert "edits" in cm
+        # Should have both thinking and tool use edits
+        edit_types = [e["type"] for e in cm["edits"]]
+        assert "clear_thinking_20251015" in edit_types
+        assert "clear_tool_uses_20250919" in edit_types
+        # Thinking must come first
+        assert edit_types.index("clear_thinking_20251015") < edit_types.index("clear_tool_uses_20250919")
+        # Thinking should be enabled
+        assert preset["anthropic_thinking"]["type"] == "enabled"
+
+    # OFF should have thinking disabled and only tool result clearing
+    assert ANTHROPIC_CM_OFF["anthropic_thinking"]["type"] == "disabled"
+    assert "extra_body" in ANTHROPIC_CM_OFF
+    cm_off = ANTHROPIC_CM_OFF["extra_body"]["context_management"]
+    edit_types_off = [e["type"] for e in cm_off["edits"]]
+    assert "clear_tool_uses_20250919" in edit_types_off
+    assert "clear_thinking_20251015" not in edit_types_off
+
+
+def test_anthropic_1m_cm_presets_structure() -> None:
+    """Test that Anthropic 1M + context management presets have both beta headers and extra_body."""
+    for preset in [
+        ANTHROPIC_1M_CM_DEFAULT,
+        ANTHROPIC_1M_CM_HIGH,
+        ANTHROPIC_1M_CM_MEDIUM,
+        ANTHROPIC_1M_CM_LOW,
+    ]:
+        assert "extra_headers" in preset
+        beta_header = preset["extra_headers"]["anthropic-beta"]
+        assert "context-1m" in beta_header
+        assert "context-management" in beta_header
+        assert "extra_body" in preset
+        assert "context_management" in preset["extra_body"]
+        assert preset["anthropic_thinking"]["type"] == "enabled"
+
+    # OFF should have both betas but thinking disabled
+    assert ANTHROPIC_1M_CM_OFF["anthropic_thinking"]["type"] == "disabled"
+    beta_off = ANTHROPIC_1M_CM_OFF["extra_headers"]["anthropic-beta"]
+    assert "context-1m" in beta_off
+    assert "context-management" in beta_off
+    assert "extra_body" in ANTHROPIC_1M_CM_OFF
 
 
 def test_anthropic_1m_interleaved_presets_structure() -> None:
@@ -215,6 +285,12 @@ def test_get_model_settings_by_alias() -> None:
     settings_1m_interleaved = get_model_settings("anthropic_1m_interleaved")
     assert settings_1m_interleaved == ANTHROPIC_1M_DEFAULT_INTERLEAVED_THINKING
 
+    settings_cm = get_model_settings("anthropic_cm")
+    assert settings_cm == ANTHROPIC_CM_DEFAULT
+
+    settings_1m_cm = get_model_settings("anthropic_1m_cm")
+    assert settings_1m_cm == ANTHROPIC_1M_CM_DEFAULT
+
     settings = get_model_settings("openai")
     assert settings == OPENAI_DEFAULT
 
@@ -255,6 +331,12 @@ def test_list_presets() -> None:
     assert presets == snapshot([
         "anthropic",
         "anthropic_1m",
+        "anthropic_1m_cm",
+        "anthropic_1m_cm_default",
+        "anthropic_1m_cm_high",
+        "anthropic_1m_cm_low",
+        "anthropic_1m_cm_medium",
+        "anthropic_1m_cm_off",
         "anthropic_1m_default",
         "anthropic_1m_default_interleaved_thinking",
         "anthropic_1m_high",
@@ -266,6 +348,12 @@ def test_list_presets() -> None:
         "anthropic_1m_medium_interleaved_thinking",
         "anthropic_1m_off",
         "anthropic_1m_off_interleaved_thinking",
+        "anthropic_cm",
+        "anthropic_cm_default",
+        "anthropic_cm_high",
+        "anthropic_cm_low",
+        "anthropic_cm_medium",
+        "anthropic_cm_off",
         "anthropic_default",
         "anthropic_default_interleaved_thinking",
         "anthropic_high",
@@ -303,6 +391,119 @@ def test_list_presets() -> None:
         "openai_responses_low",
         "openai_responses_medium",
     ])
+
+
+# =============================================================================
+# build_context_management Tests
+# =============================================================================
+
+
+def test_build_context_management_defaults() -> None:
+    """Test build_context_management with default parameters."""
+    cm = build_context_management()
+    assert "edits" in cm
+    edits = cm["edits"]
+    assert len(edits) == 2
+    # Thinking clearing must come first
+    assert edits[0]["type"] == "clear_thinking_20251015"
+    assert edits[0]["keep"] == {"type": "thinking_turns", "value": 2}
+    # Tool use clearing second
+    assert edits[1]["type"] == "clear_tool_uses_20250919"
+    assert edits[1]["trigger"] == {"type": "input_tokens", "value": 100_000}
+    assert edits[1]["keep"] == {"type": "tool_uses", "value": 3}
+    assert edits[1]["clear_at_least"] == {"type": "input_tokens", "value": 20_000}
+
+
+def test_build_context_management_thinking_only() -> None:
+    """Test build_context_management with only thinking clearing."""
+    cm = build_context_management(clear_tool_uses=False)
+    edits = cm["edits"]
+    assert len(edits) == 1
+    assert edits[0]["type"] == "clear_thinking_20251015"
+
+
+def test_build_context_management_tool_uses_only() -> None:
+    """Test build_context_management with only tool use clearing."""
+    cm = build_context_management(clear_thinking=False)
+    edits = cm["edits"]
+    assert len(edits) == 1
+    assert edits[0]["type"] == "clear_tool_uses_20250919"
+
+
+def test_build_context_management_thinking_keep_all() -> None:
+    """Test build_context_management with keep all thinking blocks."""
+    cm = build_context_management(thinking_keep_turns="all")
+    edits = cm["edits"]
+    assert edits[0]["keep"] == "all"
+
+
+def test_build_context_management_custom_tool_params() -> None:
+    """Test build_context_management with custom tool use parameters."""
+    cm = build_context_management(
+        clear_thinking=False,
+        tool_use_trigger_tokens=50_000,
+        tool_use_keep=5,
+        tool_use_clear_at_least=None,
+        tool_use_clear_inputs=True,
+        tool_use_exclude_tools=["web_search"],
+    )
+    edits = cm["edits"]
+    assert len(edits) == 1
+    tool_edit = edits[0]
+    assert tool_edit["trigger"]["value"] == 50_000
+    assert tool_edit["keep"]["value"] == 5
+    assert "clear_at_least" not in tool_edit
+    assert tool_edit["clear_tool_inputs"] is True
+    assert tool_edit["exclude_tools"] == ["web_search"]
+
+
+# =============================================================================
+# with_context_management Tests
+# =============================================================================
+
+
+def test_with_context_management_on_standard_preset() -> None:
+    """Test with_context_management adds beta header and extra_body."""
+    result = with_context_management(ANTHROPIC_HIGH)
+    # Original should be unmodified
+    assert "extra_headers" not in ANTHROPIC_HIGH
+    assert "extra_body" not in ANTHROPIC_HIGH
+    # Result should have context management
+    assert ANTHROPIC_CONTEXT_MANAGEMENT_BETA in result["extra_headers"]["anthropic-beta"]
+    assert "context_management" in result["extra_body"]
+    # Original thinking settings preserved
+    assert result["anthropic_thinking"] == ANTHROPIC_HIGH["anthropic_thinking"]
+
+
+def test_with_context_management_on_1m_preset() -> None:
+    """Test with_context_management merges beta header with existing ones."""
+    result = with_context_management(ANTHROPIC_1M_HIGH)
+    beta_header = result["extra_headers"]["anthropic-beta"]
+    # Should have both 1M and context management betas
+    assert "context-1m" in beta_header
+    assert "context-management" in beta_header
+
+
+def test_with_context_management_custom_kwargs() -> None:
+    """Test with_context_management forwards kwargs to build_context_management."""
+    result = with_context_management(
+        ANTHROPIC_MEDIUM,
+        tool_use_trigger_tokens=50_000,
+        thinking_keep_turns="all",
+    )
+    cm = result["extra_body"]["context_management"]
+    edits = cm["edits"]
+    assert edits[0]["keep"] == "all"  # thinking keep all
+    assert edits[1]["trigger"]["value"] == 50_000
+
+
+def test_with_context_management_prebuilt_config() -> None:
+    """Test with_context_management with a pre-built context_management config."""
+    cm = build_context_management(clear_thinking=False, tool_use_keep=10)
+    result = with_context_management(ANTHROPIC_DEFAULT, context_management=cm)
+    edits = result["extra_body"]["context_management"]["edits"]
+    assert len(edits) == 1  # Only tool use, no thinking
+    assert edits[0]["keep"]["value"] == 10
 
 
 # =============================================================================

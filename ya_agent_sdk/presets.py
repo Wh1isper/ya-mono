@@ -29,6 +29,7 @@ Usage::
 
 from __future__ import annotations
 
+import copy
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -46,12 +47,14 @@ K_TOKENS = 1024
 # Anthropic beta headers for extended context
 ANTHROPIC_1M_BETA = "context-1m-2025-08-07"
 ANTHROPIC_INTERLEAVED_BETA = "interleaved-thinking-2025-05-14"
+ANTHROPIC_CONTEXT_MANAGEMENT_BETA = "context-management-2025-06-27"
 
 
 def build_anthropic_betas(
     *,
     use_1m_context: bool = False,
     use_interleaved_thinking: bool = False,
+    use_context_management: bool = False,
 ) -> dict[str, str]:
     """Build list of Anthropic beta headers for extended context."""
     betas = []
@@ -59,12 +62,134 @@ def build_anthropic_betas(
         betas.append(ANTHROPIC_1M_BETA)
     if use_interleaved_thinking:
         betas.append(ANTHROPIC_INTERLEAVED_BETA)
+    if use_context_management:
+        betas.append(ANTHROPIC_CONTEXT_MANAGEMENT_BETA)
 
     if not betas:
         return {}
     return {
         "anthropic-beta": ",".join(betas),
     }
+
+
+def build_context_management(
+    *,
+    clear_tool_uses: bool = True,
+    tool_use_trigger_tokens: int = 100_000,
+    tool_use_keep: int = 3,
+    tool_use_clear_at_least: int | None = 20_000,
+    tool_use_clear_inputs: bool = False,
+    tool_use_exclude_tools: list[str] | None = None,
+    clear_thinking: bool = True,
+    thinking_keep_turns: int | Literal["all"] = 2,
+) -> dict[str, Any]:
+    """Build context_management config for Anthropic API.
+
+    Creates a context management configuration that controls server-side clearing
+    of tool results and thinking blocks from conversation history.
+
+    Args:
+        clear_tool_uses: Enable clearing old tool results.
+        tool_use_trigger_tokens: Input token threshold to trigger clearing.
+        tool_use_keep: Number of recent tool use/result pairs to keep.
+        tool_use_clear_at_least: Minimum tokens to clear (None to disable).
+        tool_use_clear_inputs: Also clear tool call parameters (not just results).
+        tool_use_exclude_tools: Tool names that should never be cleared.
+        clear_thinking: Enable clearing old thinking blocks.
+        thinking_keep_turns: Number of recent assistant turns with thinking to keep,
+            or "all" to keep all thinking blocks.
+
+    Returns:
+        Dict suitable for the ``context_management`` field in Anthropic API requests.
+
+    Example::
+
+        cm = build_context_management(tool_use_trigger_tokens=50_000, thinking_keep_turns=3)
+    """
+    edits: list[dict[str, Any]] = []
+
+    # Thinking clearing must come first per Anthropic docs
+    if clear_thinking:
+        thinking_edit: dict[str, Any] = {"type": "clear_thinking_20251015"}
+        if thinking_keep_turns == "all":
+            thinking_edit["keep"] = "all"
+        else:
+            thinking_edit["keep"] = {"type": "thinking_turns", "value": thinking_keep_turns}
+        edits.append(thinking_edit)
+
+    if clear_tool_uses:
+        tool_edit: dict[str, Any] = {
+            "type": "clear_tool_uses_20250919",
+            "trigger": {"type": "input_tokens", "value": tool_use_trigger_tokens},
+            "keep": {"type": "tool_uses", "value": tool_use_keep},
+        }
+        if tool_use_clear_at_least is not None:
+            tool_edit["clear_at_least"] = {"type": "input_tokens", "value": tool_use_clear_at_least}
+        if tool_use_exclude_tools:
+            tool_edit["exclude_tools"] = tool_use_exclude_tools
+        if tool_use_clear_inputs:
+            tool_edit["clear_tool_inputs"] = True
+        edits.append(tool_edit)
+
+    return {"edits": edits}
+
+
+def with_context_management(
+    settings: dict[str, Any],
+    context_management: dict[str, Any] | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Add Anthropic context management to existing model settings.
+
+    Creates a new settings dict (deep copy) with the context management beta header
+    and ``extra_body`` containing the ``context_management`` configuration.
+
+    Args:
+        settings: Existing Anthropic model settings dict (e.g., from a preset).
+        context_management: Pre-built context_management config from
+            :func:`build_context_management`, or None to build one from kwargs.
+        **kwargs: Passed to :func:`build_context_management` when
+            ``context_management`` is None.
+
+    Returns:
+        New settings dict with context management enabled.
+
+    Example::
+
+        # Default context management on any preset
+        settings = with_context_management(ANTHROPIC_HIGH)
+
+        # Customize parameters
+        settings = with_context_management(
+            ANTHROPIC_DEFAULT,
+            tool_use_trigger_tokens=50_000,
+            thinking_keep_turns="all",
+        )
+
+        # Use pre-built config
+        cm = build_context_management(clear_thinking=False)
+        settings = with_context_management(ANTHROPIC_MEDIUM, context_management=cm)
+    """
+    new_settings = copy.deepcopy(settings)
+
+    if context_management is None:
+        context_management = build_context_management(**kwargs)
+
+    # Merge beta header
+    existing_beta = new_settings.get("extra_headers", {}).get("anthropic-beta", "")
+    betas = [b.strip() for b in existing_beta.split(",") if b.strip()]
+    if ANTHROPIC_CONTEXT_MANAGEMENT_BETA not in betas:
+        betas.append(ANTHROPIC_CONTEXT_MANAGEMENT_BETA)
+    new_settings.setdefault("extra_headers", {})["anthropic-beta"] = ",".join(betas)
+
+    # Merge extra_body
+    existing_body = new_settings.get("extra_body") or {}
+    if not isinstance(existing_body, dict):
+        existing_body = {}
+    existing_body["context_management"] = context_management
+    new_settings["extra_body"] = existing_body
+
+    return new_settings
 
 
 # =============================================================================
@@ -103,6 +228,20 @@ class ModelSettingsPreset(StrEnum):
     ANTHROPIC_1M_LOW_INTERLEAVED_THINKING = "anthropic_1m_low_interleaved_thinking"
     ANTHROPIC_1M_OFF_INTERLEAVED_THINKING = "anthropic_1m_off_interleaved_thinking"
 
+    # Anthropic context management presets (server-side tool result and thinking block clearing)
+    ANTHROPIC_CM_DEFAULT = "anthropic_cm_default"
+    ANTHROPIC_CM_HIGH = "anthropic_cm_high"
+    ANTHROPIC_CM_MEDIUM = "anthropic_cm_medium"
+    ANTHROPIC_CM_LOW = "anthropic_cm_low"
+    ANTHROPIC_CM_OFF = "anthropic_cm_off"
+
+    # Anthropic 1M context + context management presets
+    ANTHROPIC_1M_CM_DEFAULT = "anthropic_1m_cm_default"
+    ANTHROPIC_1M_CM_HIGH = "anthropic_1m_cm_high"
+    ANTHROPIC_1M_CM_MEDIUM = "anthropic_1m_cm_medium"
+    ANTHROPIC_1M_CM_LOW = "anthropic_1m_cm_low"
+    ANTHROPIC_1M_CM_OFF = "anthropic_1m_cm_off"
+
     # OpenAI Chat Completions presets (GPT-4, etc.)
     OPENAI_DEFAULT = "openai_default"
     OPENAI_HIGH = "openai_high"
@@ -140,6 +279,8 @@ def _anthropic_settings(
     *,
     use_1m_context: bool = False,
     use_interleaved_thinking: bool = False,
+    use_context_management: bool = False,
+    context_management: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create Anthropic model settings with thinking enabled.
 
@@ -148,6 +289,9 @@ def _anthropic_settings(
         max_tokens: Maximum output tokens.
         use_1m_context: Whether to include 1M context beta headers.
         use_interleaved_thinking: Whether to include interleaved thinking beta headers.
+        use_context_management: Whether to include context management beta headers.
+        context_management: Context management config to include via extra_body.
+            If None and use_context_management is True, uses build_context_management() defaults.
 
     Returns:
         Dict suitable for AnthropicModelSettings.
@@ -165,18 +309,31 @@ def _anthropic_settings(
     extra_headers = build_anthropic_betas(
         use_1m_context=use_1m_context,
         use_interleaved_thinking=use_interleaved_thinking,
+        use_context_management=use_context_management,
     )
     if extra_headers:
         settings["extra_headers"] = extra_headers
+    if use_context_management:
+        cm = context_management if context_management is not None else build_context_management()
+        settings["extra_body"] = {"context_management": cm}
     return settings
 
 
-def _anthropic_off_settings(*, use_1m_context: bool = False, use_interleaved_thinking: bool = False) -> dict[str, Any]:
+def _anthropic_off_settings(
+    *,
+    use_1m_context: bool = False,
+    use_interleaved_thinking: bool = False,
+    use_context_management: bool = False,
+    context_management: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Create Anthropic model settings with thinking disabled.
 
     Args:
         use_1m_context: Whether to include 1M context beta headers.
         use_interleaved_thinking: Whether to include interleaved thinking beta headers.
+        use_context_management: Whether to include context management beta headers.
+        context_management: Context management config to include via extra_body.
+            If None and use_context_management is True, uses build_context_management() defaults.
 
     Returns:
         Dict suitable for AnthropicModelSettings.
@@ -192,9 +349,13 @@ def _anthropic_off_settings(*, use_1m_context: bool = False, use_interleaved_thi
     extra_headers = build_anthropic_betas(
         use_1m_context=use_1m_context,
         use_interleaved_thinking=use_interleaved_thinking,
+        use_context_management=use_context_management,
     )
     if extra_headers:
         settings["extra_headers"] = extra_headers
+    if use_context_management:
+        cm = context_management if context_management is not None else build_context_management(clear_thinking=False)
+        settings["extra_body"] = {"context_management": cm}
     return settings
 
 
@@ -342,6 +503,83 @@ ANTHROPIC_1M_OFF_INTERLEAVED_THINKING: dict[str, Any] = _anthropic_off_settings(
     use_interleaved_thinking=True,
 )
 """Anthropic 1M interleaved off: Thinking disabled with 1M + interleaved betas and caching enabled."""
+
+# -----------------------------------------------------------------------------
+# Anthropic context management presets (server-side tool result / thinking clearing)
+# -----------------------------------------------------------------------------
+
+ANTHROPIC_CM_DEFAULT: dict[str, Any] = _anthropic_settings(
+    thinking_budget=16 * K_TOKENS,
+    max_tokens=21 * K_TOKENS,
+    use_context_management=True,
+)
+"""Anthropic CM default: Same as medium, 16K thinking budget, with context management."""
+
+ANTHROPIC_CM_HIGH: dict[str, Any] = _anthropic_settings(
+    thinking_budget=21 * K_TOKENS,
+    max_tokens=32 * K_TOKENS,
+    use_context_management=True,
+)
+"""Anthropic CM high: 21K thinking budget, max reasoning depth, with context management."""
+
+ANTHROPIC_CM_MEDIUM: dict[str, Any] = _anthropic_settings(
+    thinking_budget=16 * K_TOKENS,
+    max_tokens=21 * K_TOKENS,
+    use_context_management=True,
+)
+"""Anthropic CM medium: 16K thinking budget, balanced reasoning, with context management."""
+
+ANTHROPIC_CM_LOW: dict[str, Any] = _anthropic_settings(
+    thinking_budget=4 * K_TOKENS,
+    max_tokens=8 * K_TOKENS,
+    use_context_management=True,
+)
+"""Anthropic CM low: 4K thinking budget, minimal reasoning overhead, with context management."""
+
+ANTHROPIC_CM_OFF: dict[str, Any] = _anthropic_off_settings(use_context_management=True)
+"""Anthropic CM off: Thinking disabled, with context management (tool result clearing only)."""
+
+# -----------------------------------------------------------------------------
+# Anthropic 1M context + context management presets
+# -----------------------------------------------------------------------------
+
+ANTHROPIC_1M_CM_DEFAULT: dict[str, Any] = _anthropic_settings(
+    thinking_budget=16 * K_TOKENS,
+    max_tokens=21 * K_TOKENS,
+    use_1m_context=True,
+    use_context_management=True,
+)
+"""Anthropic 1M CM default: 16K thinking budget, with 1M context + context management."""
+
+ANTHROPIC_1M_CM_HIGH: dict[str, Any] = _anthropic_settings(
+    thinking_budget=21 * K_TOKENS,
+    max_tokens=32 * K_TOKENS,
+    use_1m_context=True,
+    use_context_management=True,
+)
+"""Anthropic 1M CM high: 21K thinking budget, with 1M context + context management."""
+
+ANTHROPIC_1M_CM_MEDIUM: dict[str, Any] = _anthropic_settings(
+    thinking_budget=16 * K_TOKENS,
+    max_tokens=21 * K_TOKENS,
+    use_1m_context=True,
+    use_context_management=True,
+)
+"""Anthropic 1M CM medium: 16K thinking budget, with 1M context + context management."""
+
+ANTHROPIC_1M_CM_LOW: dict[str, Any] = _anthropic_settings(
+    thinking_budget=4 * K_TOKENS,
+    max_tokens=8 * K_TOKENS,
+    use_1m_context=True,
+    use_context_management=True,
+)
+"""Anthropic 1M CM low: 4K thinking budget, with 1M context + context management."""
+
+ANTHROPIC_1M_CM_OFF: dict[str, Any] = _anthropic_off_settings(
+    use_1m_context=True,
+    use_context_management=True,
+)
+"""Anthropic 1M CM off: Thinking disabled, with 1M context + context management."""
 
 
 # =============================================================================
@@ -613,6 +851,18 @@ _PRESET_REGISTRY: dict[str, dict[str, Any]] = {
     ModelSettingsPreset.ANTHROPIC_1M_MEDIUM_INTERLEAVED_THINKING.value: ANTHROPIC_1M_MEDIUM_INTERLEAVED_THINKING,
     ModelSettingsPreset.ANTHROPIC_1M_LOW_INTERLEAVED_THINKING.value: ANTHROPIC_1M_LOW_INTERLEAVED_THINKING,
     ModelSettingsPreset.ANTHROPIC_1M_OFF_INTERLEAVED_THINKING.value: ANTHROPIC_1M_OFF_INTERLEAVED_THINKING,
+    # Anthropic context management
+    ModelSettingsPreset.ANTHROPIC_CM_DEFAULT.value: ANTHROPIC_CM_DEFAULT,
+    ModelSettingsPreset.ANTHROPIC_CM_HIGH.value: ANTHROPIC_CM_HIGH,
+    ModelSettingsPreset.ANTHROPIC_CM_MEDIUM.value: ANTHROPIC_CM_MEDIUM,
+    ModelSettingsPreset.ANTHROPIC_CM_LOW.value: ANTHROPIC_CM_LOW,
+    ModelSettingsPreset.ANTHROPIC_CM_OFF.value: ANTHROPIC_CM_OFF,
+    # Anthropic 1M context + context management
+    ModelSettingsPreset.ANTHROPIC_1M_CM_DEFAULT.value: ANTHROPIC_1M_CM_DEFAULT,
+    ModelSettingsPreset.ANTHROPIC_1M_CM_HIGH.value: ANTHROPIC_1M_CM_HIGH,
+    ModelSettingsPreset.ANTHROPIC_1M_CM_MEDIUM.value: ANTHROPIC_1M_CM_MEDIUM,
+    ModelSettingsPreset.ANTHROPIC_1M_CM_LOW.value: ANTHROPIC_1M_CM_LOW,
+    ModelSettingsPreset.ANTHROPIC_1M_CM_OFF.value: ANTHROPIC_1M_CM_OFF,
     # OpenAI Chat
     ModelSettingsPreset.OPENAI_DEFAULT.value: OPENAI_DEFAULT,
     ModelSettingsPreset.OPENAI_HIGH.value: OPENAI_HIGH,
@@ -643,6 +893,8 @@ _PRESET_ALIASES: dict[str, str] = {
     "anthropic_interleaved": ModelSettingsPreset.ANTHROPIC_DEFAULT_INTERLEAVED_THINKING.value,
     "anthropic_1m": ModelSettingsPreset.ANTHROPIC_1M_DEFAULT.value,
     "anthropic_1m_interleaved": ModelSettingsPreset.ANTHROPIC_1M_DEFAULT_INTERLEAVED_THINKING.value,
+    "anthropic_cm": ModelSettingsPreset.ANTHROPIC_CM_DEFAULT.value,
+    "anthropic_1m_cm": ModelSettingsPreset.ANTHROPIC_1M_CM_DEFAULT.value,
     "openai": ModelSettingsPreset.OPENAI_DEFAULT.value,
     "openai_responses": ModelSettingsPreset.OPENAI_RESPONSES_DEFAULT.value,
     "gemini_2.5": ModelSettingsPreset.GEMINI_THINKING_BUDGET_DEFAULT.value,
