@@ -395,6 +395,76 @@ class ToolSearchInitEvent(AgentEvent):
 
 
 # =============================================================================
+# File Change Events
+# =============================================================================
+
+
+class FileChangeAction(StrEnum):
+    """Type of file system change."""
+
+    created = "created"
+    """A new file was created."""
+
+    modified = "modified"
+    """An existing file was modified."""
+
+    moved = "moved"
+    """A file or directory was moved/renamed."""
+
+    copied = "copied"
+    """A file was copied."""
+
+
+@dataclass
+class TextReplacement:
+    """A single text replacement within a file.
+
+    Attributes:
+        old_string: Original text that was replaced (empty for new file creation).
+        new_string: Replacement text.
+    """
+
+    old_string: str = ""
+    new_string: str = ""
+
+
+@dataclass
+class FileChange:
+    """A single file change entry.
+
+    Attributes:
+        path: File path that changed (relative to working directory).
+        action: Type of change.
+        destination: Target path for move/copy operations.
+        replacements: Structured text replacements for edit operations.
+    """
+
+    path: str = ""
+    action: FileChangeAction = FileChangeAction.modified
+    destination: str | None = None
+    replacements: list[TextReplacement] = field(default_factory=list)
+
+
+@dataclass
+class FileChangeEvent(AgentEvent):
+    """Emitted when files are created, modified, moved, or copied.
+
+    One event per tool call, may contain multiple file changes
+    (e.g., multi_edit edits one file, move/copy handle multiple pairs).
+
+    Only emitted on successful operations. Failed operations (file not found,
+    text not matched, etc.) do not produce events.
+
+    Attributes:
+        changes: List of file changes in this operation.
+        tool_name: Which tool triggered the changes (e.g., "edit", "write", "move").
+    """
+
+    changes: list[FileChange] = field(default_factory=list)
+    tool_name: str = ""
+
+
+# =============================================================================
 # Task Events
 # =============================================================================
 

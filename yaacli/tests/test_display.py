@@ -112,12 +112,9 @@ def test_tool_call_info_is_special_tool():
         "to_do_read",
         "to_do_write",
         "multi_edit",
-        "task_create",
-        "task_get",
-        "task_update",
-        "task_list",
     ]
-    normal_tools = ["grep", "shell", "view", "glob", "search"]
+    # Task tools are no longer special -- rendering is event-driven
+    normal_tools = ["grep", "shell", "view", "glob", "search", "task_create", "task_get", "task_update", "task_list"]
 
     for tool_name in special_tools:
         info = ToolCallInfo(
@@ -447,16 +444,16 @@ def test_tool_message_special_panel_thinking():
 
 
 def test_tool_message_special_panel_task():
-    """Test special panel for task tools."""
+    """Task tools are no longer special -- rendering is event-driven."""
     msg = ToolMessage(
         tool_call_id="task-1",
         name="task_list",
         content="#1 [pending] Do something\n#2 [completed] Done task",
     )
     panel = msg.to_special_panel()
+    # task_list is not a special tool anymore, panel should have default style
     assert panel is not None
-    # Should have cyan border for task
-    assert panel.border_style == "cyan"
+    assert panel.border_style != "cyan"
 
 
 def test_tool_message_generate_clean_diff():
@@ -682,3 +679,167 @@ def test_multiple_tools_parallel():
     assert len(calling) == 1
     assert calling[0].name == "glob"
     assert len(completed) == 2
+
+
+# =============================================================================
+# FileChangeEvent Rendering Tests
+# =============================================================================
+
+
+def _make_event_id() -> str:
+    return "test-event-1"
+
+
+def test_render_file_change_event_edit_single():
+    """Test rendering a single edit FileChangeEvent with diff."""
+    from ya_agent_sdk.events import FileChange, FileChangeAction, FileChangeEvent, TextReplacement
+
+    renderer = EventRenderer(width=120)
+    event = FileChangeEvent(
+        event_id=_make_event_id(),
+        tool_name="edit",
+        changes=[
+            FileChange(
+                path="src/main.py",
+                action=FileChangeAction.modified,
+                replacements=[TextReplacement(old_string="def old():", new_string="def new():")],
+            )
+        ],
+    )
+    result = renderer.render_file_change_event(event)
+    assert "src/main.py" in result
+    assert "old" in result
+    assert "new" in result
+
+
+def test_render_file_change_event_multi_edit():
+    """Test rendering multi_edit FileChangeEvent with multiple diffs."""
+    from ya_agent_sdk.events import FileChange, FileChangeAction, FileChangeEvent, TextReplacement
+
+    renderer = EventRenderer(width=120)
+    event = FileChangeEvent(
+        event_id=_make_event_id(),
+        tool_name="multi_edit",
+        changes=[
+            FileChange(
+                path="src/main.py",
+                action=FileChangeAction.modified,
+                replacements=[
+                    TextReplacement(old_string="import os", new_string="import sys"),
+                    TextReplacement(old_string="print('hello')", new_string="print('world')"),
+                ],
+            )
+        ],
+    )
+    result = renderer.render_file_change_event(event)
+    assert "src/main.py" in result
+    assert "Edit #1" in result
+    assert "Edit #2" in result
+
+
+def test_render_file_change_event_new_file():
+    """Test rendering FileChangeEvent for new file creation."""
+    from ya_agent_sdk.events import FileChange, FileChangeAction, FileChangeEvent, TextReplacement
+
+    renderer = EventRenderer(width=120)
+    event = FileChangeEvent(
+        event_id=_make_event_id(),
+        tool_name="edit",
+        changes=[
+            FileChange(
+                path="src/new_file.py",
+                action=FileChangeAction.created,
+                replacements=[TextReplacement(old_string="", new_string="print('hello world')")],
+            )
+        ],
+    )
+    result = renderer.render_file_change_event(event)
+    assert "src/new_file.py" in result
+    assert "New file" in result
+
+
+def test_render_file_change_event_write():
+    """Test rendering FileChangeEvent for write (create, no replacements)."""
+    from ya_agent_sdk.events import FileChange, FileChangeAction, FileChangeEvent
+
+    renderer = EventRenderer(width=120)
+    event = FileChangeEvent(
+        event_id=_make_event_id(),
+        tool_name="write",
+        changes=[FileChange(path="output.txt", action=FileChangeAction.created)],
+    )
+    result = renderer.render_file_change_event(event)
+    assert "Created" in result
+    assert "output.txt" in result
+
+
+def test_render_file_change_event_write_modified():
+    """Test rendering FileChangeEvent for write overwrite (modified, no replacements)."""
+    from ya_agent_sdk.events import FileChange, FileChangeAction, FileChangeEvent
+
+    renderer = EventRenderer(width=120)
+    event = FileChangeEvent(
+        event_id=_make_event_id(),
+        tool_name="write",
+        changes=[FileChange(path="output.txt", action=FileChangeAction.modified)],
+    )
+    result = renderer.render_file_change_event(event)
+    assert "Modified" in result
+    assert "output.txt" in result
+
+
+def test_render_file_change_event_move():
+    """Test rendering FileChangeEvent for file move."""
+    from ya_agent_sdk.events import FileChange, FileChangeAction, FileChangeEvent
+
+    renderer = EventRenderer(width=120)
+    event = FileChangeEvent(
+        event_id=_make_event_id(),
+        tool_name="move",
+        changes=[FileChange(path="old.py", action=FileChangeAction.moved, destination="new.py")],
+    )
+    result = renderer.render_file_change_event(event)
+    assert "Moved" in result
+    assert "old.py" in result
+    assert "new.py" in result
+
+
+def test_render_file_change_event_copy():
+    """Test rendering FileChangeEvent for file copy."""
+    from ya_agent_sdk.events import FileChange, FileChangeAction, FileChangeEvent
+
+    renderer = EventRenderer(width=120)
+    event = FileChangeEvent(
+        event_id=_make_event_id(),
+        tool_name="copy",
+        changes=[FileChange(path="src.py", action=FileChangeAction.copied, destination="dst.py")],
+    )
+    result = renderer.render_file_change_event(event)
+    assert "Copied" in result
+    assert "src.py" in result
+    assert "dst.py" in result
+
+
+def test_render_file_change_event_empty():
+    """Test rendering FileChangeEvent with no changes returns empty string."""
+    from ya_agent_sdk.events import FileChangeEvent
+
+    renderer = EventRenderer(width=120)
+    event = FileChangeEvent(event_id=_make_event_id(), tool_name="edit", changes=[])
+    result = renderer.render_file_change_event(event)
+    assert result == ""
+
+
+def test_edit_tool_no_longer_special_panel():
+    """Test that edit/multi_edit are no longer rendered as special panels."""
+    renderer = EventRenderer(width=120)
+    msg = ToolMessage(
+        tool_call_id="edit-1",
+        name="edit",
+        args={"file_path": "test.py", "old_string": "old", "new_string": "new"},
+        content="File edited successfully",
+    )
+    # Should now use inline text format, not special panel
+    result = renderer.render_tool_call_complete(msg, duration=0.1)
+    assert "Complete:" in result
+    assert "edit" in result

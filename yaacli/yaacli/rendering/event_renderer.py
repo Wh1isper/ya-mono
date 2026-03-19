@@ -7,11 +7,20 @@ from __future__ import annotations
 
 from rich.console import Group, RenderableType
 from rich.panel import Panel
+from rich.syntax import Syntax
 from rich.text import Text
 
-from ya_agent_sdk.events import MemoryEvent, TaskEvent, TaskInfo
+from ya_agent_sdk.events import (
+    FileChange,
+    FileChangeAction,
+    FileChangeEvent,
+    MemoryEvent,
+    TaskEvent,
+    TaskInfo,
+)
 from yaacli.rendering.renderer import RichRenderer
 from yaacli.rendering.tool_message import ToolMessage
+from yaacli.rendering.tool_panels.base import generate_unified_diff
 from yaacli.rendering.tracker import ToolCallTracker
 
 
@@ -115,11 +124,9 @@ class EventRenderer:
         """
         render_width = width or 120
         if tool_message.name in {
-            "edit",
             "thinking",
             "to_do_read",
             "to_do_write",
-            "multi_edit",
         }:
             panel = tool_message.to_special_panel(code_theme=self._code_theme)
             return self._renderer.render(panel, width=render_width)
@@ -274,6 +281,135 @@ class EventRenderer:
     # =========================================================================
     # Memory Event Rendering
     # =========================================================================
+
+    # =========================================================================
+    # File Change Event Rendering
+    # =========================================================================
+
+    def render_file_change_event(self, event: FileChangeEvent, width: int | None = None) -> str:
+        """Render file change event as diff panels or notification lines.
+
+        For edit/multi_edit: shows file path + diff using TextReplacement data.
+        For write: shows file creation notification.
+        For move/copy: shows source -> destination.
+        """
+        if not event.changes:
+            return ""
+
+        parts: list[RenderableType] = []
+
+        for change in event.changes:
+            if change.replacements:
+                # Edit operations: render diffs
+                parts.extend(self._render_edit_change(change, event.tool_name))
+            elif change.action == FileChangeAction.created:
+                # Write/new file
+                line = Text()
+                line.append("+ ", style="bold green")
+                line.append("Created: ", style="dim")
+                line.append(change.path, style="bold")
+                parts.append(line)
+            elif change.action == FileChangeAction.moved:
+                line = Text()
+                line.append("> ", style="bold yellow")
+                line.append("Moved: ", style="dim")
+                line.append(change.path, style="bold")
+                line.append(" -> ", style="dim")
+                line.append(change.destination or "?", style="bold")
+                parts.append(line)
+            elif change.action == FileChangeAction.copied:
+                line = Text()
+                line.append("= ", style="bold cyan")
+                line.append("Copied: ", style="dim")
+                line.append(change.path, style="bold")
+                line.append(" -> ", style="dim")
+                line.append(change.destination or "?", style="bold")
+                parts.append(line)
+            elif change.action == FileChangeAction.modified:
+                # Modified without replacements (e.g., write to existing file)
+                line = Text()
+                line.append("~ ", style="bold yellow")
+                line.append("Modified: ", style="dim")
+                line.append(change.path, style="bold")
+                parts.append(line)
+
+        if not parts:
+            return ""
+
+        render_width = width or 120
+        if any(c.replacements for c in event.changes):
+            # Has diffs: use panel
+            file_path = event.changes[0].path
+            title_label = "Edit" if event.tool_name in ("edit", "multi_edit") else "File Change"
+            panel = Panel(
+                Group(*parts),
+                border_style="green",
+                title=f"[green]{title_label}: {file_path}[/green]",
+                title_align="left",
+            )
+            return self._renderer.render(panel, width=render_width)
+        else:
+            # No diffs: render as simple lines
+            rendered_parts = []
+            for part in parts:
+                rendered_parts.append(self._renderer.render(part, width=render_width).rstrip())
+            return "\n".join(rendered_parts)
+
+    def _render_edit_change(self, change: FileChange, tool_name: str) -> list[RenderableType]:
+        """Render a single file change with text replacements as diffs."""
+        parts: list[RenderableType] = []
+        code_theme = self._code_theme
+
+        is_new_file = (
+            len(change.replacements) == 1
+            and not change.replacements[0].old_string
+            and change.action == FileChangeAction.created
+        )
+
+        if is_new_file:
+            # New file creation: show content preview
+            new_content = change.replacements[0].new_string
+            lines = new_content.split("\n")
+            preview = "\n".join(lines[:20])
+            if len(lines) > 20:
+                preview += f"\n... ({len(lines) - 20} more lines)"
+            syntax = Syntax(
+                preview,
+                lexer="text",
+                theme=code_theme,
+                line_numbers=False,
+                background_color="default",
+            )
+            header = Text()
+            header.append("+ ", style="bold green")
+            header.append(f"New file ({len(lines)} lines)", style="dim")
+            parts.append(header)
+            parts.append(syntax)
+        else:
+            # Modifications: show diffs
+            for i, replacement in enumerate(change.replacements):
+                if len(change.replacements) > 1:
+                    edit_header = Text(f"Edit #{i + 1}", style="bold blue")
+                    parts.append(edit_header)
+
+                diff_content = generate_unified_diff(replacement.old_string, replacement.new_string)
+                if diff_content.strip() and diff_content != "No changes detected":
+                    syntax_diff = Syntax(
+                        diff_content,
+                        lexer="diff",
+                        theme=code_theme,
+                        line_numbers=False,
+                        background_color="default",
+                    )
+                    parts.append(syntax_diff)
+                else:
+                    parts.append(Text("No changes detected", style="dim"))
+
+                # Spacing between edits
+                if i < len(change.replacements) - 1:
+                    parts.append(Text(""))
+
+        return parts
 
     def render_memory_event(self, event: MemoryEvent) -> str:
         """Render memory event as a memory panel with full snapshot."""

@@ -10,6 +10,7 @@ from y_agent_environment import FileOperator
 
 from ya_agent_sdk._logger import get_logger
 from ya_agent_sdk.context import AgentContext
+from ya_agent_sdk.events import FileChange, FileChangeAction, FileChangeEvent
 from ya_agent_sdk.toolsets.core.base import BaseTool
 from ya_agent_sdk.toolsets.core.filesystem._types import CopyResult, MoveResult, PathPair
 
@@ -88,6 +89,20 @@ class MoveTool(BaseTool):
             except Exception as e:
                 results.append(MoveResult(src=src, dst=dst, success=False, message=f"Error: {e!s}"))
 
+        changes = [
+            FileChange(path=r["src"], action=FileChangeAction.moved, destination=r["dst"])
+            for r in results
+            if r["success"]
+        ]
+        if changes:
+            await ctx.deps.emit_event(
+                FileChangeEvent(
+                    event_id=f"file-change-{ctx.deps.run_id[:8]}",
+                    changes=changes,
+                    tool_name="move",
+                )
+            )
+
         return results
 
 
@@ -152,6 +167,20 @@ class CopyTool(BaseTool):
                 results.append(CopyResult(src=src, dst=dst, success=True, message=f"Copied {src} to {dst}"))
             except Exception as e:
                 results.append(CopyResult(src=src, dst=dst, success=False, message=f"Error: {e!s}"))
+
+        changes = [
+            FileChange(path=r["src"], action=FileChangeAction.copied, destination=r["dst"])
+            for r in results
+            if r["success"]
+        ]
+        if changes:
+            await ctx.deps.emit_event(
+                FileChangeEvent(
+                    event_id=f"file-change-{ctx.deps.run_id[:8]}",
+                    changes=changes,
+                    tool_name="copy",
+                )
+            )
 
         return results
 

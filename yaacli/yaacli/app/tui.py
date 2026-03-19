@@ -66,6 +66,7 @@ from ya_agent_sdk.events import (
     CompactCompleteEvent,
     CompactFailedEvent,
     CompactStartEvent,
+    FileChangeEvent,
     HandoffCompleteEvent,
     HandoffFailedEvent,
     HandoffStartEvent,
@@ -1615,6 +1616,11 @@ class TUIApp:
         elif isinstance(message_event, MemoryEvent):
             rendered = self._event_renderer.render_memory_event(message_event)
             self._append_output(rendered.rstrip())
+
+        elif isinstance(message_event, FileChangeEvent):
+            rendered = self._event_renderer.render_file_change_event(message_event, width=self._get_terminal_width())
+            if rendered:
+                self._append_output(rendered.rstrip())
 
         # Handle TUI-specific events
         elif isinstance(message_event, LoopIterationEvent):

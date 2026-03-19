@@ -7,10 +7,15 @@ from inline_snapshot import snapshot
 
 from ya_agent_sdk.presets import (
     ANTHROPIC_1M_CM_DEFAULT,
+    ANTHROPIC_1M_CM_DEFAULT_INTERLEAVED_THINKING,
     ANTHROPIC_1M_CM_HIGH,
+    ANTHROPIC_1M_CM_HIGH_INTERLEAVED_THINKING,
     ANTHROPIC_1M_CM_LOW,
+    ANTHROPIC_1M_CM_LOW_INTERLEAVED_THINKING,
     ANTHROPIC_1M_CM_MEDIUM,
+    ANTHROPIC_1M_CM_MEDIUM_INTERLEAVED_THINKING,
     ANTHROPIC_1M_CM_OFF,
+    ANTHROPIC_1M_CM_OFF_INTERLEAVED_THINKING,
     ANTHROPIC_1M_DEFAULT,
     ANTHROPIC_1M_DEFAULT_INTERLEAVED_THINKING,
     ANTHROPIC_1M_HIGH,
@@ -22,10 +27,15 @@ from ya_agent_sdk.presets import (
     ANTHROPIC_1M_OFF,
     ANTHROPIC_1M_OFF_INTERLEAVED_THINKING,
     ANTHROPIC_CM_DEFAULT,
+    ANTHROPIC_CM_DEFAULT_INTERLEAVED_THINKING,
     ANTHROPIC_CM_HIGH,
+    ANTHROPIC_CM_HIGH_INTERLEAVED_THINKING,
     ANTHROPIC_CM_LOW,
+    ANTHROPIC_CM_LOW_INTERLEAVED_THINKING,
     ANTHROPIC_CM_MEDIUM,
+    ANTHROPIC_CM_MEDIUM_INTERLEAVED_THINKING,
     ANTHROPIC_CM_OFF,
+    ANTHROPIC_CM_OFF_INTERLEAVED_THINKING,
     ANTHROPIC_CONTEXT_MANAGEMENT_BETA,
     ANTHROPIC_DEFAULT,
     ANTHROPIC_DEFAULT_INTERLEAVED_THINKING,
@@ -105,7 +115,7 @@ def test_anthropic_1m_presets_structure() -> None:
 
 
 def test_anthropic_interleaved_presets_structure() -> None:
-    """Test that Anthropic interleaved presets have interleaved + context management betas."""
+    """Test that Anthropic interleaved presets have only interleaved beta (no context management)."""
     for preset in [
         ANTHROPIC_DEFAULT_INTERLEAVED_THINKING,
         ANTHROPIC_HIGH_INTERLEAVED_THINKING,
@@ -115,27 +125,19 @@ def test_anthropic_interleaved_presets_structure() -> None:
         assert "extra_headers" in preset
         assert "anthropic-beta" in preset["extra_headers"]
         assert "interleaved-thinking" in preset["extra_headers"]["anthropic-beta"]
-        assert "context-management" in preset["extra_headers"]["anthropic-beta"]
+        # Should NOT have context management
+        assert "context-management" not in preset["extra_headers"]["anthropic-beta"]
+        assert "extra_body" not in preset
         assert preset["anthropic_cache_instructions"] is True
         assert preset["anthropic_cache_messages"] is True
-        # Context management should include both thinking and tool use clearing
-        assert "extra_body" in preset
-        assert "context_management" in preset["extra_body"]
-        edit_types = [e["type"] for e in preset["extra_body"]["context_management"]["edits"]]
-        assert "clear_thinking_20251015" in edit_types
-        assert "clear_tool_uses_20250919" in edit_types
 
-    # OFF should disable thinking but still include interleaved + context management betas
+    # OFF should disable thinking but still include interleaved beta only
     assert ANTHROPIC_OFF_INTERLEAVED_THINKING["anthropic_thinking"]["type"] == "disabled"
     assert "extra_headers" in ANTHROPIC_OFF_INTERLEAVED_THINKING
     assert "anthropic-beta" in ANTHROPIC_OFF_INTERLEAVED_THINKING["extra_headers"]
     assert "interleaved-thinking" in ANTHROPIC_OFF_INTERLEAVED_THINKING["extra_headers"]["anthropic-beta"]
-    assert "context-management" in ANTHROPIC_OFF_INTERLEAVED_THINKING["extra_headers"]["anthropic-beta"]
-    # OFF should only clear tool uses (no thinking to clear)
-    cm_off = ANTHROPIC_OFF_INTERLEAVED_THINKING["extra_body"]["context_management"]
-    edit_types_off = [e["type"] for e in cm_off["edits"]]
-    assert "clear_tool_uses_20250919" in edit_types_off
-    assert "clear_thinking_20251015" not in edit_types_off
+    assert "context-management" not in ANTHROPIC_OFF_INTERLEAVED_THINKING["extra_headers"]["anthropic-beta"]
+    assert "extra_body" not in ANTHROPIC_OFF_INTERLEAVED_THINKING
 
 
 def test_anthropic_cm_presets_structure() -> None:
@@ -196,7 +198,7 @@ def test_anthropic_1m_cm_presets_structure() -> None:
 
 
 def test_anthropic_1m_interleaved_presets_structure() -> None:
-    """Test that Anthropic 1M interleaved presets include all three betas and caching."""
+    """Test that Anthropic 1M interleaved presets include 1M + interleaved betas (no context management)."""
     for preset in [
         ANTHROPIC_1M_DEFAULT_INTERLEAVED_THINKING,
         ANTHROPIC_1M_HIGH_INTERLEAVED_THINKING,
@@ -207,21 +209,80 @@ def test_anthropic_1m_interleaved_presets_structure() -> None:
         assert "anthropic-beta" in preset["extra_headers"]
         assert "context-1m" in preset["extra_headers"]["anthropic-beta"]
         assert "interleaved-thinking" in preset["extra_headers"]["anthropic-beta"]
-        assert "context-management" in preset["extra_headers"]["anthropic-beta"]
+        # Should NOT have context management
+        assert "context-management" not in preset["extra_headers"]["anthropic-beta"]
+        assert "extra_body" not in preset
         assert preset["anthropic_cache_instructions"] is True
         assert preset["anthropic_cache_messages"] is True
-        # Context management should be present
-        assert "extra_body" in preset
-        assert "context_management" in preset["extra_body"]
 
-    # OFF should disable thinking but still include all three beta headers
+    # OFF should disable thinking but still include 1M + interleaved betas only
     assert ANTHROPIC_1M_OFF_INTERLEAVED_THINKING["anthropic_thinking"]["type"] == "disabled"
     assert "extra_headers" in ANTHROPIC_1M_OFF_INTERLEAVED_THINKING
     assert "anthropic-beta" in ANTHROPIC_1M_OFF_INTERLEAVED_THINKING["extra_headers"]
     assert "context-1m" in ANTHROPIC_1M_OFF_INTERLEAVED_THINKING["extra_headers"]["anthropic-beta"]
     assert "interleaved-thinking" in ANTHROPIC_1M_OFF_INTERLEAVED_THINKING["extra_headers"]["anthropic-beta"]
-    assert "context-management" in ANTHROPIC_1M_OFF_INTERLEAVED_THINKING["extra_headers"]["anthropic-beta"]
-    assert "extra_body" in ANTHROPIC_1M_OFF_INTERLEAVED_THINKING
+    assert "context-management" not in ANTHROPIC_1M_OFF_INTERLEAVED_THINKING["extra_headers"]["anthropic-beta"]
+    assert "extra_body" not in ANTHROPIC_1M_OFF_INTERLEAVED_THINKING
+
+
+def test_anthropic_cm_interleaved_presets_structure() -> None:
+    """Test that Anthropic CM + interleaved presets have both betas and extra_body."""
+    for preset in [
+        ANTHROPIC_CM_DEFAULT_INTERLEAVED_THINKING,
+        ANTHROPIC_CM_HIGH_INTERLEAVED_THINKING,
+        ANTHROPIC_CM_MEDIUM_INTERLEAVED_THINKING,
+        ANTHROPIC_CM_LOW_INTERLEAVED_THINKING,
+    ]:
+        assert "extra_headers" in preset
+        beta_header = preset["extra_headers"]["anthropic-beta"]
+        assert "interleaved-thinking" in beta_header
+        assert "context-management" in beta_header
+        assert preset["anthropic_cache_instructions"] is True
+        assert preset["anthropic_cache_messages"] is True
+        # Context management should include both thinking and tool use clearing
+        assert "extra_body" in preset
+        assert "context_management" in preset["extra_body"]
+        edit_types = [e["type"] for e in preset["extra_body"]["context_management"]["edits"]]
+        assert "clear_thinking_20251015" in edit_types
+        assert "clear_tool_uses_20250919" in edit_types
+
+    # OFF should disable thinking but still include both betas
+    assert ANTHROPIC_CM_OFF_INTERLEAVED_THINKING["anthropic_thinking"]["type"] == "disabled"
+    beta_off = ANTHROPIC_CM_OFF_INTERLEAVED_THINKING["extra_headers"]["anthropic-beta"]
+    assert "interleaved-thinking" in beta_off
+    assert "context-management" in beta_off
+    # OFF should only clear tool uses (no thinking to clear)
+    cm_off = ANTHROPIC_CM_OFF_INTERLEAVED_THINKING["extra_body"]["context_management"]
+    edit_types_off = [e["type"] for e in cm_off["edits"]]
+    assert "clear_tool_uses_20250919" in edit_types_off
+    assert "clear_thinking_20251015" not in edit_types_off
+
+
+def test_anthropic_1m_cm_interleaved_presets_structure() -> None:
+    """Test that Anthropic 1M + CM + interleaved presets have all three betas and extra_body."""
+    for preset in [
+        ANTHROPIC_1M_CM_DEFAULT_INTERLEAVED_THINKING,
+        ANTHROPIC_1M_CM_HIGH_INTERLEAVED_THINKING,
+        ANTHROPIC_1M_CM_MEDIUM_INTERLEAVED_THINKING,
+        ANTHROPIC_1M_CM_LOW_INTERLEAVED_THINKING,
+    ]:
+        assert "extra_headers" in preset
+        beta_header = preset["extra_headers"]["anthropic-beta"]
+        assert "context-1m" in beta_header
+        assert "interleaved-thinking" in beta_header
+        assert "context-management" in beta_header
+        assert preset["anthropic_cache_instructions"] is True
+        assert preset["anthropic_cache_messages"] is True
+        assert "extra_body" in preset
+        assert "context_management" in preset["extra_body"]
+
+    # OFF should disable thinking but still include all three betas
+    assert ANTHROPIC_1M_CM_OFF_INTERLEAVED_THINKING["anthropic_thinking"]["type"] == "disabled"
+    beta_off = ANTHROPIC_1M_CM_OFF_INTERLEAVED_THINKING["extra_headers"]["anthropic-beta"]
+    assert "context-1m" in beta_off
+    assert "interleaved-thinking" in beta_off
+    assert "context-management" in beta_off
+    assert "extra_body" in ANTHROPIC_1M_CM_OFF_INTERLEAVED_THINKING
 
 
 def test_anthropic_thinking_budgets() -> None:
@@ -310,6 +371,12 @@ def test_get_model_settings_by_alias() -> None:
     settings_1m_cm = get_model_settings("anthropic_1m_cm")
     assert settings_1m_cm == ANTHROPIC_1M_CM_DEFAULT
 
+    settings_cm_interleaved = get_model_settings("anthropic_cm_interleaved")
+    assert settings_cm_interleaved == ANTHROPIC_CM_DEFAULT_INTERLEAVED_THINKING
+
+    settings_1m_cm_interleaved = get_model_settings("anthropic_1m_cm_interleaved")
+    assert settings_1m_cm_interleaved == ANTHROPIC_1M_CM_DEFAULT_INTERLEAVED_THINKING
+
     settings = get_model_settings("openai")
     assert settings == OPENAI_DEFAULT
 
@@ -352,10 +419,16 @@ def test_list_presets() -> None:
         "anthropic_1m",
         "anthropic_1m_cm",
         "anthropic_1m_cm_default",
+        "anthropic_1m_cm_default_interleaved_thinking",
         "anthropic_1m_cm_high",
+        "anthropic_1m_cm_high_interleaved_thinking",
+        "anthropic_1m_cm_interleaved",
         "anthropic_1m_cm_low",
+        "anthropic_1m_cm_low_interleaved_thinking",
         "anthropic_1m_cm_medium",
+        "anthropic_1m_cm_medium_interleaved_thinking",
         "anthropic_1m_cm_off",
+        "anthropic_1m_cm_off_interleaved_thinking",
         "anthropic_1m_default",
         "anthropic_1m_default_interleaved_thinking",
         "anthropic_1m_high",
@@ -369,10 +442,16 @@ def test_list_presets() -> None:
         "anthropic_1m_off_interleaved_thinking",
         "anthropic_cm",
         "anthropic_cm_default",
+        "anthropic_cm_default_interleaved_thinking",
         "anthropic_cm_high",
+        "anthropic_cm_high_interleaved_thinking",
+        "anthropic_cm_interleaved",
         "anthropic_cm_low",
+        "anthropic_cm_low_interleaved_thinking",
         "anthropic_cm_medium",
+        "anthropic_cm_medium_interleaved_thinking",
         "anthropic_cm_off",
+        "anthropic_cm_off_interleaved_thinking",
         "anthropic_default",
         "anthropic_default_interleaved_thinking",
         "anthropic_high",

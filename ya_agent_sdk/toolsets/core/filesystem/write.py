@@ -10,6 +10,7 @@ from y_agent_environment import FileOperator
 
 from ya_agent_sdk._logger import get_logger
 from ya_agent_sdk.context import AgentContext
+from ya_agent_sdk.events import FileChange, FileChangeAction, FileChangeEvent
 from ya_agent_sdk.toolsets.core.base import BaseTool
 
 logger = get_logger(__name__)
@@ -66,9 +67,20 @@ class WriteTool(BaseTool):
             await file_operator.mkdir(parent, parents=True)
 
         if mode == "w":
+            existed = await file_operator.exists(file_path)
             await file_operator.write_file(file_path, content)
+            action = FileChangeAction.modified if existed else FileChangeAction.created
         else:
             await file_operator.append_file(file_path, content)
+            action = FileChangeAction.modified
+
+        await ctx.deps.emit_event(
+            FileChangeEvent(
+                event_id=f"file-change-{ctx.deps.run_id[:8]}",
+                changes=[FileChange(path=file_path, action=action)],
+                tool_name="write",
+            )
+        )
 
         return f"Successfully wrote to file: {file_path}"
 
