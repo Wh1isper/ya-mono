@@ -10,6 +10,7 @@ from y_agent_environment import FileOperator
 
 from ya_agent_sdk._logger import get_logger
 from ya_agent_sdk.context import AgentContext
+from ya_agent_sdk.events import FileChange, FileChangeAction, FileChangeEvent, TextReplacement
 from ya_agent_sdk.toolsets.core.base import BaseTool
 from ya_agent_sdk.toolsets.core.filesystem._types import EditItem
 from ya_agent_sdk.toolsets.core.filesystem._utils import is_binary_file
@@ -114,6 +115,19 @@ class EditTool(BaseTool):
             if parent and parent != ".":
                 await file_operator.mkdir(parent, parents=True)
             await file_operator.write_file(file_path, new_string)
+            await ctx.deps.emit_event(
+                FileChangeEvent(
+                    event_id=f"file-change-{ctx.deps.run_id[:8]}",
+                    changes=[
+                        FileChange(
+                            path=file_path,
+                            action=FileChangeAction.created,
+                            replacements=[TextReplacement(old_string="", new_string=new_string)],
+                        )
+                    ],
+                    tool_name="edit",
+                )
+            )
             return f"Successfully created new file: {file_path}"
 
         if not await file_operator.exists(file_path):
@@ -138,6 +152,19 @@ class EditTool(BaseTool):
             content = content.replace(old_string, new_string, 1)
 
         await file_operator.write_file(file_path, content)
+        await ctx.deps.emit_event(
+            FileChangeEvent(
+                event_id=f"file-change-{ctx.deps.run_id[:8]}",
+                changes=[
+                    FileChange(
+                        path=file_path,
+                        action=FileChangeAction.modified,
+                        replacements=[TextReplacement(old_string=old_string, new_string=new_string)],
+                    )
+                ],
+                tool_name="edit",
+            )
+        )
         return f"Successfully edited file: {file_path}"
 
 
@@ -224,7 +251,22 @@ class MultiEditTool(BaseTool):
 
         await file_operator.write_file(file_path, content)
 
-        if not edits[0].old_string:
+        is_create = not edits[0].old_string
+        await ctx.deps.emit_event(
+            FileChangeEvent(
+                event_id=f"file-change-{ctx.deps.run_id[:8]}",
+                changes=[
+                    FileChange(
+                        path=file_path,
+                        action=FileChangeAction.created if is_create else FileChangeAction.modified,
+                        replacements=[TextReplacement(old_string=e.old_string, new_string=e.new_string) for e in edits],
+                    )
+                ],
+                tool_name="multi_edit",
+            )
+        )
+
+        if is_create:
             return f"Successfully created new file with {len(edits)} edits: {file_path}"
         return f"Successfully applied {len(edits)} edits to file: {file_path}"
 

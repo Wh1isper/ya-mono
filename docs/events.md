@@ -170,6 +170,112 @@ if isinstance(event, SubagentStartEvent):
     print(f"Delegating to {event.agent_name}: {event.prompt_preview}")
 ```
 
+### Tool Search Events
+
+Emitted during `ToolSearchToolSet` initialization to report namespace (wrapped toolset) connection status. This event fires once on the first `get_tools()` call after all wrapped toolsets have been initialized.
+
+| Event                 | Description                              | Key Fields         |
+| --------------------- | ---------------------------------------- | ------------------ |
+| `ToolSearchInitEvent` | Namespace initialization status reported | `namespace_status` |
+
+The `namespace_status` field is a `dict[str, NamespaceStatus]` where each key is a namespace ID and the value is one of:
+
+| Status      | Description                                               |
+| ----------- | --------------------------------------------------------- |
+| `connected` | Namespace initialized successfully and is available       |
+| `skipped`   | Namespace failed to initialize but was optional (skipped) |
+| `error`     | Namespace was connected but encountered a runtime error   |
+
+Required namespaces that fail initialization raise during `__aenter__` and do not appear in this event.
+
+```python
+from ya_agent_sdk.events import ToolSearchInitEvent, NamespaceStatus
+
+if isinstance(event, ToolSearchInitEvent):
+    for ns, status in event.namespace_status.items():
+        print(f"  {ns}: {status}")
+```
+
+### File Change Events
+
+Emitted when files are created, modified, moved, or copied. One event per tool call, may contain multiple file changes. Only emitted on **successful** operations; failed operations do not produce events.
+
+| Event             | Description                  | Key Fields             |
+| ----------------- | ---------------------------- | ---------------------- |
+| `FileChangeEvent` | File system changes occurred | `changes`, `tool_name` |
+
+The `tool_name` field indicates which tool triggered the changes (e.g., `"edit"`, `"multi_edit"`, `"write"`, `"move"`, `"copy"`).
+
+Each entry in `changes` is a `FileChange` dataclass:
+
+| Field          | Type                    | Description                                              |
+| -------------- | ----------------------- | -------------------------------------------------------- |
+| `path`         | `str`                   | File path that changed (relative to working dir)         |
+| `action`       | `FileChangeAction`      | Type of change: `created`, `modified`, `moved`, `copied` |
+| `destination`  | `str \| None`           | Target path for move/copy operations                     |
+| `replacements` | `list[TextReplacement]` | Structured text replacements for edit operations         |
+
+`TextReplacement` contains `old_string` and `new_string` fields (empty `old_string` indicates new file creation).
+
+```python
+from ya_agent_sdk.events import FileChangeEvent
+
+if isinstance(event, FileChangeEvent):
+    print(f"[{event.tool_name}] {len(event.changes)} file(s) changed")
+    for change in event.changes:
+        if change.destination:
+            print(f"  {change.action}: {change.path} -> {change.destination}")
+        else:
+            print(f"  {change.action}: {change.path}")
+```
+
+### Task Events
+
+Emitted when task state changes (create, update, list). Each event contains a **full snapshot** of all tasks, enabling stateless rendering without tracking incremental changes:
+
+| Event       | Description                      | Key Fields |
+| ----------- | -------------------------------- | ---------- |
+| `TaskEvent` | Task created, updated, or listed | `tasks`    |
+
+The `tasks` field is a list of `TaskInfo` dataclasses:
+
+| Field         | Type          | Description                                            |
+| ------------- | ------------- | ------------------------------------------------------ |
+| `id`          | `str`         | Task identifier                                        |
+| `subject`     | `str`         | Task title                                             |
+| `description` | `str`         | Task description                                       |
+| `status`      | `str`         | Current status (`pending`, `in_progress`, `completed`) |
+| `active_form` | `str \| None` | Present progressive form shown during `in_progress`    |
+| `owner`       | `str \| None` | Task owner/assignee                                    |
+| `blocked_by`  | `list[str]`   | Task IDs that block this task                          |
+| `blocks`      | `list[str]`   | Task IDs that this task blocks                         |
+
+```python
+from ya_agent_sdk.events import TaskEvent
+
+if isinstance(event, TaskEvent):
+    for task in event.tasks:
+        print(f"#{task.id} [{task.status}] {task.subject}")
+```
+
+### Memory Events
+
+Emitted when memory state changes (set, delete). Each event contains a **full snapshot** of all memory entries for stateless rendering:
+
+| Event         | Description                 | Key Fields |
+| ------------- | --------------------------- | ---------- |
+| `MemoryEvent` | Memory entry set or deleted | `entries`  |
+
+The `entries` field is a `dict[str, str]` mapping keys to values.
+
+```python
+from ya_agent_sdk.events import MemoryEvent
+
+if isinstance(event, MemoryEvent):
+    for key, value in event.entries.items():
+        print(f"{key}: {value}")
+```
+
 ### Message Bus Events
 
 Emitted when messages are received from the message bus:
