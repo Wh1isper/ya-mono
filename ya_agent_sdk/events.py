@@ -395,6 +395,71 @@ class ToolSearchInitEvent(AgentEvent):
 
 
 # =============================================================================
+# Task Events
+# =============================================================================
+
+
+@dataclass
+class TaskInfo:
+    """Snapshot of a single task for event transport.
+
+    Attributes:
+        id: Task identifier.
+        subject: Task title.
+        description: Task description.
+        status: Current status ("pending", "in_progress", "completed").
+        active_form: Present progressive form shown during in_progress.
+        owner: Task owner/assignee.
+        blocked_by: Task IDs that block this task.
+        blocks: Task IDs that this task blocks.
+    """
+
+    id: str = ""
+    subject: str = ""
+    description: str = ""
+    status: str = "pending"
+    active_form: str | None = None
+    owner: str | None = None
+    blocked_by: list[str] = field(default_factory=list)
+    blocks: list[str] = field(default_factory=list)
+
+
+@dataclass
+class TaskEvent(AgentEvent):
+    """Emitted when task state changes (create, update, list).
+
+    Contains a full snapshot of all tasks for stateless rendering.
+    Consumers can render the complete task board from this event
+    without tracking incremental changes.
+
+    Attributes:
+        tasks: Full list of all tasks in current state.
+    """
+
+    tasks: list[TaskInfo] = field(default_factory=list)
+
+
+# =============================================================================
+# Memory Events
+# =============================================================================
+
+
+@dataclass
+class MemoryEvent(AgentEvent):
+    """Emitted when memory state changes (set, delete).
+
+    Contains a full snapshot of all memory entries for stateless rendering.
+    Consumers can render the complete memory view from this event
+    without tracking incremental changes.
+
+    Attributes:
+        entries: Full dict of all memory entries (key -> value).
+    """
+
+    entries: dict[str, str] = field(default_factory=dict)
+
+
+# =============================================================================
 # Type Aliases
 # =============================================================================
 
