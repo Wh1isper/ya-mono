@@ -155,22 +155,19 @@ def test_anthropic_cm_presets_structure() -> None:
         assert "context_management" in preset["extra_body"]
         cm = preset["extra_body"]["context_management"]
         assert "edits" in cm
-        # Should have both thinking and tool use edits
+        # Default: only thinking clearing with keep all
         edit_types = [e["type"] for e in cm["edits"]]
         assert "clear_thinking_20251015" in edit_types
-        assert "clear_tool_uses_20250919" in edit_types
-        # Thinking must come first
-        assert edit_types.index("clear_thinking_20251015") < edit_types.index("clear_tool_uses_20250919")
+        assert cm["edits"][0]["keep"] == "all"
         # Thinking should be enabled
         assert preset["anthropic_thinking"]["type"] == "enabled"
 
-    # OFF should have thinking disabled and only tool result clearing
+    # OFF should have thinking disabled and no clearing edits (clear_thinking defaults to False for OFF)
     assert ANTHROPIC_CM_OFF["anthropic_thinking"]["type"] == "disabled"
     assert "extra_body" in ANTHROPIC_CM_OFF
     cm_off = ANTHROPIC_CM_OFF["extra_body"]["context_management"]
-    edit_types_off = [e["type"] for e in cm_off["edits"]]
-    assert "clear_tool_uses_20250919" in edit_types_off
-    assert "clear_thinking_20251015" not in edit_types_off
+    # OFF uses clear_thinking=False, so no edits
+    assert len(cm_off["edits"]) == 0
 
 
 def test_anthropic_1m_cm_presets_structure() -> None:
@@ -239,23 +236,20 @@ def test_anthropic_cm_interleaved_presets_structure() -> None:
         assert "context-management" in beta_header
         assert preset["anthropic_cache_instructions"] is True
         assert preset["anthropic_cache_messages"] is True
-        # Context management should include both thinking and tool use clearing
+        # Context management should have thinking clearing with keep all
         assert "extra_body" in preset
         assert "context_management" in preset["extra_body"]
         edit_types = [e["type"] for e in preset["extra_body"]["context_management"]["edits"]]
         assert "clear_thinking_20251015" in edit_types
-        assert "clear_tool_uses_20250919" in edit_types
 
     # OFF should disable thinking but still include both betas
     assert ANTHROPIC_CM_OFF_INTERLEAVED_THINKING["anthropic_thinking"]["type"] == "disabled"
     beta_off = ANTHROPIC_CM_OFF_INTERLEAVED_THINKING["extra_headers"]["anthropic-beta"]
     assert "interleaved-thinking" in beta_off
     assert "context-management" in beta_off
-    # OFF should only clear tool uses (no thinking to clear)
+    # OFF should have empty edits (clear_thinking=False, clear_tool_uses=False)
     cm_off = ANTHROPIC_CM_OFF_INTERLEAVED_THINKING["extra_body"]["context_management"]
-    edit_types_off = [e["type"] for e in cm_off["edits"]]
-    assert "clear_tool_uses_20250919" in edit_types_off
-    assert "clear_thinking_20251015" not in edit_types_off
+    assert len(cm_off["edits"]) == 0
 
 
 def test_anthropic_1m_cm_interleaved_presets_structure() -> None:
@@ -497,9 +491,19 @@ def test_list_presets() -> None:
 
 
 def test_build_context_management_defaults() -> None:
-    """Test build_context_management with default parameters."""
+    """Test build_context_management with default parameters (thinking only, keep all)."""
     cm = build_context_management()
     assert "edits" in cm
+    edits = cm["edits"]
+    assert len(edits) == 1
+    # Only thinking clearing with keep all
+    assert edits[0]["type"] == "clear_thinking_20251015"
+    assert edits[0]["keep"] == "all"
+
+
+def test_build_context_management_with_tool_uses() -> None:
+    """Test build_context_management with both thinking and tool use clearing."""
+    cm = build_context_management(clear_tool_uses=True, thinking_keep_turns=2)
     edits = cm["edits"]
     assert len(edits) == 2
     # Thinking clearing must come first
@@ -512,33 +516,26 @@ def test_build_context_management_defaults() -> None:
     assert edits[1]["clear_at_least"] == {"type": "input_tokens", "value": 20_000}
 
 
-def test_build_context_management_thinking_only() -> None:
-    """Test build_context_management with only thinking clearing."""
-    cm = build_context_management(clear_tool_uses=False)
-    edits = cm["edits"]
-    assert len(edits) == 1
-    assert edits[0]["type"] == "clear_thinking_20251015"
-
-
 def test_build_context_management_tool_uses_only() -> None:
     """Test build_context_management with only tool use clearing."""
-    cm = build_context_management(clear_thinking=False)
+    cm = build_context_management(clear_thinking=False, clear_tool_uses=True)
     edits = cm["edits"]
     assert len(edits) == 1
     assert edits[0]["type"] == "clear_tool_uses_20250919"
 
 
-def test_build_context_management_thinking_keep_all() -> None:
-    """Test build_context_management with keep all thinking blocks."""
-    cm = build_context_management(thinking_keep_turns="all")
+def test_build_context_management_thinking_keep_turns() -> None:
+    """Test build_context_management with specific thinking keep turns."""
+    cm = build_context_management(thinking_keep_turns=3)
     edits = cm["edits"]
-    assert edits[0]["keep"] == "all"
+    assert edits[0]["keep"] == {"type": "thinking_turns", "value": 3}
 
 
 def test_build_context_management_custom_tool_params() -> None:
     """Test build_context_management with custom tool use parameters."""
     cm = build_context_management(
         clear_thinking=False,
+        clear_tool_uses=True,
         tool_use_trigger_tokens=50_000,
         tool_use_keep=5,
         tool_use_clear_at_least=None,
@@ -586,18 +583,20 @@ def test_with_context_management_custom_kwargs() -> None:
     """Test with_context_management forwards kwargs to build_context_management."""
     result = with_context_management(
         ANTHROPIC_MEDIUM,
+        clear_tool_uses=True,
         tool_use_trigger_tokens=50_000,
-        thinking_keep_turns="all",
+        thinking_keep_turns=3,
     )
     cm = result["extra_body"]["context_management"]
     edits = cm["edits"]
-    assert edits[0]["keep"] == "all"  # thinking keep all
+    assert edits[0]["type"] == "clear_thinking_20251015"
+    assert edits[0]["keep"] == {"type": "thinking_turns", "value": 3}
     assert edits[1]["trigger"]["value"] == 50_000
 
 
 def test_with_context_management_prebuilt_config() -> None:
     """Test with_context_management with a pre-built context_management config."""
-    cm = build_context_management(clear_thinking=False, tool_use_keep=10)
+    cm = build_context_management(clear_thinking=False, clear_tool_uses=True, tool_use_keep=10)
     result = with_context_management(ANTHROPIC_DEFAULT, context_management=cm)
     edits = result["extra_body"]["context_management"]["edits"]
     assert len(edits) == 1  # Only tool use, no thinking

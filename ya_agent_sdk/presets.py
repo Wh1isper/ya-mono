@@ -74,14 +74,14 @@ def build_anthropic_betas(
 
 def build_context_management(
     *,
-    clear_tool_uses: bool = True,
+    clear_tool_uses: bool = False,
     tool_use_trigger_tokens: int = 100_000,
     tool_use_keep: int = 3,
     tool_use_clear_at_least: int | None = 20_000,
     tool_use_clear_inputs: bool = False,
     tool_use_exclude_tools: list[str] | None = None,
     clear_thinking: bool = True,
-    thinking_keep_turns: int | Literal["all"] = 2,
+    thinking_keep_turns: int | Literal["all"] = "all",
 ) -> dict[str, Any]:
     """Build context_management config for Anthropic API.
 
