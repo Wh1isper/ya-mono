@@ -398,34 +398,39 @@ ANTHROPIC_DEFAULT_INTERLEAVED_THINKING: dict[str, Any] = _anthropic_settings(
     thinking_budget=16 * K_TOKENS,
     max_tokens=21 * K_TOKENS,
     use_interleaved_thinking=True,
+    use_context_management=True,
 )
-"""Anthropic interleaved default: Same as medium with interleaved thinking beta."""
+"""Anthropic interleaved default: Same as medium with interleaved thinking + context management."""
 
 ANTHROPIC_HIGH_INTERLEAVED_THINKING: dict[str, Any] = _anthropic_settings(
     thinking_budget=21 * K_TOKENS,
     max_tokens=32 * K_TOKENS,
     use_interleaved_thinking=True,
+    use_context_management=True,
 )
-"""Anthropic interleaved high: 21K thinking budget with interleaved thinking beta."""
+"""Anthropic interleaved high: 21K thinking budget with interleaved thinking + context management."""
 
 ANTHROPIC_MEDIUM_INTERLEAVED_THINKING: dict[str, Any] = _anthropic_settings(
     thinking_budget=16 * K_TOKENS,
     max_tokens=21 * K_TOKENS,
     use_interleaved_thinking=True,
+    use_context_management=True,
 )
-"""Anthropic interleaved medium: 16K thinking budget with interleaved thinking beta."""
+"""Anthropic interleaved medium: 16K thinking budget with interleaved thinking + context management."""
 
 ANTHROPIC_LOW_INTERLEAVED_THINKING: dict[str, Any] = _anthropic_settings(
     thinking_budget=4 * K_TOKENS,
     max_tokens=8 * K_TOKENS,
     use_interleaved_thinking=True,
+    use_context_management=True,
 )
-"""Anthropic interleaved low: 4K thinking budget with interleaved thinking beta."""
+"""Anthropic interleaved low: 4K thinking budget with interleaved thinking + context management."""
 
 ANTHROPIC_OFF_INTERLEAVED_THINKING: dict[str, Any] = _anthropic_off_settings(
     use_interleaved_thinking=True,
+    use_context_management=True,
 )
-"""Anthropic interleaved off: Thinking disabled with interleaved thinking beta and caching enabled."""
+"""Anthropic interleaved off: Thinking disabled with interleaved thinking + context management."""
 
 # -----------------------------------------------------------------------------
 # Anthropic 1M context presets (with beta headers for extended context)
@@ -471,38 +476,43 @@ ANTHROPIC_1M_DEFAULT_INTERLEAVED_THINKING: dict[str, Any] = _anthropic_settings(
     max_tokens=21 * K_TOKENS,
     use_1m_context=True,
     use_interleaved_thinking=True,
+    use_context_management=True,
 )
-"""Anthropic 1M interleaved default: 16K thinking budget with 1M + interleaved betas."""
+"""Anthropic 1M interleaved default: 16K thinking budget with 1M + interleaved + context management."""
 
 ANTHROPIC_1M_HIGH_INTERLEAVED_THINKING: dict[str, Any] = _anthropic_settings(
     thinking_budget=21 * K_TOKENS,
     max_tokens=32 * K_TOKENS,
     use_1m_context=True,
     use_interleaved_thinking=True,
+    use_context_management=True,
 )
-"""Anthropic 1M interleaved high: 21K thinking budget with 1M + interleaved betas."""
+"""Anthropic 1M interleaved high: 21K thinking budget with 1M + interleaved + context management."""
 
 ANTHROPIC_1M_MEDIUM_INTERLEAVED_THINKING: dict[str, Any] = _anthropic_settings(
     thinking_budget=16 * K_TOKENS,
     max_tokens=21 * K_TOKENS,
     use_1m_context=True,
     use_interleaved_thinking=True,
+    use_context_management=True,
 )
-"""Anthropic 1M interleaved medium: 16K thinking budget with 1M + interleaved betas."""
+"""Anthropic 1M interleaved medium: 16K thinking budget with 1M + interleaved + context management."""
 
 ANTHROPIC_1M_LOW_INTERLEAVED_THINKING: dict[str, Any] = _anthropic_settings(
     thinking_budget=4 * K_TOKENS,
     max_tokens=8 * K_TOKENS,
     use_1m_context=True,
     use_interleaved_thinking=True,
+    use_context_management=True,
 )
-"""Anthropic 1M interleaved low: 4K thinking budget with 1M + interleaved betas."""
+"""Anthropic 1M interleaved low: 4K thinking budget with 1M + interleaved + context management."""
 
 ANTHROPIC_1M_OFF_INTERLEAVED_THINKING: dict[str, Any] = _anthropic_off_settings(
     use_1m_context=True,
     use_interleaved_thinking=True,
+    use_context_management=True,
 )
-"""Anthropic 1M interleaved off: Thinking disabled with 1M + interleaved betas and caching enabled."""
+"""Anthropic 1M interleaved off: Thinking disabled with 1M + interleaved + context management."""
 
 # -----------------------------------------------------------------------------
 # Anthropic context management presets (server-side tool result / thinking clearing)
