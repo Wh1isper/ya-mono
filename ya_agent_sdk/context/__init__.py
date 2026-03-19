@@ -42,6 +42,7 @@ from .agent import (
     ToolSettings,
 )
 from .bus import BusMessage, MessageBus, content_as_text
+from .memory import MemoryManager
 from .tasks import Task, TaskManager, TaskStatus
 
 __all__ = [
@@ -51,6 +52,7 @@ __all__ = [
     "BusMessage",
     "ExtraUsageRecord",
     "MediaToUrlHook",
+    "MemoryManager",
     "MessageBus",
     "ModelCapability",
     "ModelConfig",
