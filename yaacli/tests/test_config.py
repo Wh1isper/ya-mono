@@ -508,3 +508,52 @@ prompt = "Please review"
     assert "review" in commands  # From config
     assert commands["commit"].mode == "act"
     assert commands["review"].prompt == "Please review"
+
+
+# =============================================================================
+# Gitignore Tests (file tree context filtering)
+# =============================================================================
+
+
+def test_ensure_config_dir_creates_gitignore(tmp_path: Path) -> None:
+    """ensure_config_dir creates .gitignore to exclude ephemeral dirs from file tree."""
+    config_dir = tmp_path / "config"
+    cm = ConfigManager(config_dir=config_dir)
+    cm.ensure_config_dir()
+
+    gitignore = config_dir / ".gitignore"
+    assert gitignore.exists()
+    content = gitignore.read_text()
+    assert "sessions/" in content
+    assert "message_history/" in content
+    assert "worktrees/" in content
+
+
+def test_ensure_config_dir_gitignore_idempotent(tmp_path: Path) -> None:
+    """Running ensure_config_dir multiple times does not duplicate entries."""
+    config_dir = tmp_path / "config"
+    cm = ConfigManager(config_dir=config_dir)
+    cm.ensure_config_dir()
+    cm.ensure_config_dir()
+    cm.ensure_config_dir()
+
+    gitignore = config_dir / ".gitignore"
+    lines = [line for line in gitignore.read_text().splitlines() if line.strip()]
+    assert len(lines) == len(set(lines)), f"Duplicate entries found: {lines}"
+
+
+def test_ensure_config_dir_gitignore_appends_missing(tmp_path: Path) -> None:
+    """If .gitignore exists but is incomplete, missing entries are appended."""
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+    gitignore = config_dir / ".gitignore"
+    gitignore.write_text("sessions/\ncustom_ignore/\n")
+
+    cm = ConfigManager(config_dir=config_dir)
+    cm.ensure_config_dir()
+
+    content = gitignore.read_text()
+    assert "sessions/" in content
+    assert "message_history/" in content
+    assert "worktrees/" in content
+    assert "custom_ignore/" in content  # User entries preserved

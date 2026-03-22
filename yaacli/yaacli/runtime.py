@@ -244,6 +244,8 @@ def create_tui_runtime(
     # Order matters for skill priority (later = higher priority):
     #   ~/.agents < ~/.yaacli < project dir
     global_config_dir = ConfigManager.DEFAULT_CONFIG_DIR
+    # Ensure .gitignore exists in config dir to keep session data out of file tree context
+    ConfigManager().ensure_config_dir()
     shared_agents_dir = Path.home() / ".agents"
     env_kwargs: dict[str, Any] = {}
     if working_dir:

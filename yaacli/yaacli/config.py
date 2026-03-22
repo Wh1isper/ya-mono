@@ -518,10 +518,34 @@ class ConfigManager:
             return global_mcp
         return None
 
+    # Directories to exclude from file tree context in ~/.yaacli/
+    _TREEIGNORE_ENTRIES = frozenset({"sessions", "message_history", "worktrees"})
+
     def ensure_config_dir(self) -> None:
         """Create global config directory structure."""
         self._config_dir.mkdir(parents=True, exist_ok=True)
         (self._config_dir / "subagents").mkdir(exist_ok=True)
+        self._ensure_gitignore()
+
+    def _ensure_gitignore(self) -> None:
+        """Ensure .gitignore exists in config dir to exclude ephemeral data from file tree context.
+
+        The file tree generator reads .gitignore per allowed_path root.
+        This keeps session/history directories out of the agent's context.
+        """
+        gitignore_path = self._config_dir / ".gitignore"
+        needed = {f"{d}/" for d in self._TREEIGNORE_ENTRIES}
+        if gitignore_path.exists():
+            existing = set(gitignore_path.read_text().splitlines())
+            missing = needed - existing
+            if not missing:
+                return
+            # Append missing entries
+            with gitignore_path.open("a") as f:
+                for entry in sorted(missing):
+                    f.write(f"\n{entry}")
+        else:
+            gitignore_path.write_text("\n".join(sorted(needed)) + "\n")
 
     def ensure_project_config_dir(self) -> None:
         """Create project config directory."""
