@@ -845,6 +845,7 @@ class LocalShell(Shell):
         default_cwd: Path | None = None,
         allowed_paths: list[Path] | None = None,
         default_timeout: float = 30.0,
+        include_os_env: bool = True,
     ):
         """Initialize LocalShell.
 
@@ -854,6 +855,12 @@ class LocalShell(Shell):
             allowed_paths: Directories allowed as working directories.
                 If None, defaults to [default_cwd] when default_cwd is set.
             default_timeout: Default timeout in seconds.
+            include_os_env: Whether to include the parent process environment
+                variables when an explicit env dict is provided to execute().
+                When True (default), os.environ is merged as the base layer.
+                When False, only the explicitly provided env dict is used.
+                Note: when env=None, subprocess always inherits os.environ
+                regardless of this setting (Python subprocess behavior).
         """
         # Fallback: use first allowed_path as default when only allowed_paths is provided
         if default_cwd is None and allowed_paths:
@@ -864,6 +871,7 @@ class LocalShell(Shell):
             allowed_paths=allowed_paths,
             default_timeout=default_timeout,
         )
+        self._include_os_env = include_os_env
 
     def _resolve_cwd(self, cwd: str | None) -> Path:
         """Resolve and validate working directory."""
@@ -922,12 +930,23 @@ class LocalShell(Shell):
         effective_timeout = timeout if timeout is not None else self._default_timeout
 
         try:
+            # Build effective environment for the subprocess.
+            # - include_os_env=True + env provided: merge os.environ as base layer
+            # - include_os_env=True + env=None: inherit naturally (pass None)
+            # - include_os_env=False + env provided: use only provided env
+            # - include_os_env=False + env=None: pass empty dict to prevent inheritance
+            effective_env = env
+            if env is not None and self._include_os_env:
+                effective_env = {**os.environ, **env}
+            elif env is None and not self._include_os_env:
+                effective_env = {}
+
             process = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=resolved_cwd,
-                env=env,
+                env=effective_env,
             )
 
             try:
@@ -997,6 +1016,7 @@ class LocalEnvironment(Environment):
         enable_tmp_dir: bool = True,
         resource_state: ResourceRegistryState | None = None,
         resource_factories: dict[str, ResourceFactory] | None = None,
+        include_os_env: bool = True,
     ):
         """Initialize LocalEnvironment.
 
@@ -1012,6 +1032,9 @@ class LocalEnvironment(Environment):
                 Resources will be restored when entering the context.
             resource_factories: Optional dictionary of resource factories.
                 Required for any resources in resource_state.
+            include_os_env: Whether shell subprocesses include parent process
+                environment variables when explicit env is provided.
+                Passed through to LocalShell. See LocalShell for details.
         """
         super().__init__(
             resource_state=resource_state,
@@ -1022,6 +1045,7 @@ class LocalEnvironment(Environment):
         self._shell_timeout = shell_timeout
         self._tmp_base_dir = tmp_base_dir
         self._enable_tmp_dir = enable_tmp_dir
+        self._include_os_env = include_os_env
         self._tmp_dir_obj: tempfile.TemporaryDirectory[str] | None = None
 
     @property
@@ -1071,6 +1095,7 @@ class LocalEnvironment(Environment):
                 default_cwd=default_path,
                 allowed_paths=allowed or None,
                 default_timeout=self._shell_timeout,
+                include_os_env=self._include_os_env,
             )
 
     async def _teardown(self) -> None:

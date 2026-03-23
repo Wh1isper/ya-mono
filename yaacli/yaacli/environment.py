@@ -39,6 +39,7 @@ class TUIEnvironment(LocalEnvironment):
         enable_tmp_dir: bool = True,
         resource_state: ResourceRegistryState | None = None,
         resource_factories: dict[str, ResourceFactory] | None = None,
+        include_os_env: bool = True,
     ) -> None:
         super().__init__(
             allowed_paths=allowed_paths,
@@ -48,6 +49,7 @@ class TUIEnvironment(LocalEnvironment):
             enable_tmp_dir=enable_tmp_dir,
             resource_state=resource_state,
             resource_factories=resource_factories,
+            include_os_env=include_os_env,
         )
         self._process_manager: ProcessManager | None = None
         self._background_manager: BackgroundTaskManager | None = None

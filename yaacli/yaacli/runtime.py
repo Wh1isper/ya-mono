@@ -256,6 +256,9 @@ def create_tui_runtime(
         env_kwargs["default_path"] = cwd
         env_kwargs["allowed_paths"] = [shared_agents_dir, global_config_dir, cwd]
 
+    # Shell environment isolation: configurable via config.toml
+    env_kwargs["include_os_env"] = config.include_os_env
+
     # Model configuration - resolve from preset name or dict
     model_cfg = _resolve_model_cfg(config.general.model_cfg)
     if config.general.model_cfg:
@@ -340,6 +343,11 @@ def create_tui_runtime(
     max_loop = config.general.max_loop_iterations
     output_retries = max_loop + 5
 
+    # Pass config [shell_env] for shell command execution
+    extra_ctx_kwargs: dict[str, Any] | None = None
+    if config.shell_env:
+        extra_ctx_kwargs = {"shell_env": dict(config.shell_env)}
+
     runtime = create_agent(
         model=config.general.model or None,
         model_settings=cast(ModelSettings, model_settings),
@@ -357,6 +365,7 @@ def create_tui_runtime(
         subagent_configs=subagent_configs if subagent_configs else None,
         unified_subagents=True,
         output_retries=output_retries,
+        extra_context_kwargs=extra_ctx_kwargs,
     )
 
     # Attach loop guard for /loop command support

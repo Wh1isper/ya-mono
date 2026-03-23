@@ -269,7 +269,22 @@ class YaacliConfig(BaseModel):
     media: MediaConfig = Field(default_factory=MediaConfig)
     """Media handling configuration (S3 upload, etc.)."""
     env: dict[str, str] = Field(default_factory=dict)
-    """Environment variable overrides (e.g., API keys)."""
+    """Environment variable overrides for the CLI process (e.g., API keys)."""
+    shell_env: dict[str, str] = Field(default_factory=dict)
+    """Environment variables injected into shell command execution.
+
+    Separate from [env] to isolate CLI process env (API keys, etc.)
+    from shell subprocess env. These are passed to AgentContext.shell_env.
+    """
+    include_os_env: bool = True
+    """Whether shell subprocesses include the parent process environment.
+
+    When True (default), os.environ is merged as the base layer when
+    shell_env or per-call env is provided. When False, only the explicitly
+    configured shell_env (and per-call env) is used.
+    Set to False to prevent CLI process env vars (API keys, etc.)
+    from leaking into shell subprocesses.
+    """
     # From project config
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     # Custom slash commands
