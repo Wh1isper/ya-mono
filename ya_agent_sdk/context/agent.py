@@ -923,6 +923,16 @@ class AgentContext(BaseModel):
     env: Environment | None = None
     """Environment instance. file_operator/shell/resources are derived from it."""
 
+    shell_env: dict[str, str] = Field(default_factory=dict)
+    """Extra environment variables for shell command execution.
+
+    These variables are merged into the shell environment for every command.
+    Per-call environment variables (from tool invocation) take priority.
+    Whether os.environ is included as the base layer depends on the Shell's
+    include_os_env setting (see LocalShell).
+    When empty (default), shell commands behave as usual (no extra env injected).
+    """
+
     model_cfg: ModelConfig = Field(default_factory=ModelConfig)
     """Model configuration for context management."""
 

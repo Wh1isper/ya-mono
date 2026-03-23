@@ -92,6 +92,12 @@ class ShellTool(BaseTool):
         shell = cast(Shell, ctx.deps.shell)
         file_op = ctx.deps.file_operator
 
+        # Merge environment: ctx.shell_env (base) + per-call env (overrides)
+        shell_env = ctx.deps.shell_env
+        if shell_env or environment:
+            merged_env = {**shell_env, **(environment or {})}
+            environment = merged_env
+
         try:
             exit_code, stdout, stderr = await shell.execute(
                 command,
