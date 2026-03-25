@@ -22,6 +22,7 @@ from ya_agent_sdk._logger import logger
 from ya_agent_sdk.agents.models import infer_model
 from ya_agent_sdk.presets import resolve_model_settings
 from ya_agent_sdk.usage import InternalUsage
+from ya_agent_sdk.utils import detect_image_media_type
 
 # =============================================================================
 # Exceptions
@@ -163,7 +164,7 @@ def build_image_content(
     logger.debug(f"Building image content from binary data: {len(image_bytes)} bytes")
     return BinaryContent(
         data=image_bytes,
-        media_type=media_type or "image/png",
+        media_type=media_type or detect_image_media_type(image_bytes) or "image/png",
     )
 
 

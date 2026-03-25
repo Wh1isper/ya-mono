@@ -20,6 +20,7 @@ from ya_agent_sdk.toolsets.core.web._http_client import (
     safe_stream_request,
     verify_url,
 )
+from ya_agent_sdk.utils import detect_image_media_type
 
 logger = get_logger(__name__)
 
@@ -138,7 +139,14 @@ class FetchTool(BaseTool):
             if len(image_data) > max_bytes:
                 return self._build_binary_size_error(max_bytes, len(image_data), downloaded=True)
 
-        return BinaryContent(data=bytes(image_data), media_type=content_type)
+        data = bytes(image_data)
+        # Verify declared content type against actual content for images
+        # (some servers declare wrong MIME types; API providers reject mismatches)
+        if content_type.startswith("image/"):
+            detected = detect_image_media_type(data)
+            if detected:
+                content_type = detected
+        return BinaryContent(data=data, media_type=content_type)
 
     async def _read_text_response(
         self, ctx: RunContext[AgentContext], response: httpx.Response

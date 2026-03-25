@@ -7,6 +7,7 @@ from pydantic_ai.messages import BinaryContent, ModelResponse, ToolCallPart
 
 from ya_agent_sdk.utils import (
     _split_image_data_sync,
+    detect_image_media_type,
     get_available_port,
     get_tool_name_from_id,
     run_in_threadpool,
@@ -133,13 +134,44 @@ def test_split_image_data_large_image_split() -> None:
         assert isinstance(segment, BinaryContent)
 
 
-def test_split_image_data_different_media_types() -> None:
-    """Should support different output formats."""
-    image_bytes = _create_test_image(100, 100)
+def test_split_image_data_no_split_detects_actual_type() -> None:
+    """No-split path should detect actual content type from bytes, not trust declared media_type."""
+    png_bytes = _create_test_image(100, 100)  # always creates PNG
+
+    # Even when declaring image/jpeg, detection should return image/png (the real format)
+    result = _split_image_data_sync(png_bytes, media_type="image/jpeg")  # type: ignore[arg-type]
+    assert result[0].media_type == "image/png"
+
+
+def test_split_image_data_different_media_types_with_split() -> None:
+    """Split path re-encodes via PIL, so output format should match the requested media_type."""
+    image_bytes = _create_test_image(100, 500)  # tall enough to trigger split
 
     for media_type in ["image/png", "image/jpeg", "image/webp"]:
-        result = _split_image_data_sync(image_bytes, media_type=media_type)  # type: ignore[arg-type]
-        assert result[0].media_type == media_type
+        result = _split_image_data_sync(image_bytes, max_height=200, overlap=50, media_type=media_type)  # type: ignore[arg-type]
+        assert len(result) > 1
+        for segment in result:
+            assert segment.media_type == media_type
+
+
+def test_detect_image_media_type_png() -> None:
+    """Should detect PNG from bytes."""
+    png_bytes = _create_test_image(10, 10)
+    assert detect_image_media_type(png_bytes) == "image/png"
+
+
+def test_detect_image_media_type_jpeg() -> None:
+    """Should detect JPEG from bytes."""
+    img = Image.new("RGB", (10, 10), color="blue")
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    assert detect_image_media_type(buf.getvalue()) == "image/jpeg"
+
+
+def test_detect_image_media_type_invalid() -> None:
+    """Should return None for non-image data."""
+    assert detect_image_media_type(b"not an image") is None
+    assert detect_image_media_type(b"") is None
 
 
 async def test_split_image_data_async() -> None:
