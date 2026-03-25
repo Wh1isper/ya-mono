@@ -24,6 +24,40 @@ EnvT = TypeVar("EnvT", bound=Environment, default=Environment)
 
 ImageMediaType = Literal["image/png", "image/jpeg", "image/gif", "image/webp"]
 
+# PIL format name -> MIME type mapping for image content detection
+_PIL_FORMAT_TO_MEDIA_TYPE: dict[str, ImageMediaType] = {
+    "JPEG": "image/jpeg",
+    "PNG": "image/png",
+    "GIF": "image/gif",
+    "WEBP": "image/webp",
+}
+
+
+def detect_image_media_type(data: bytes) -> ImageMediaType | None:
+    """Detect actual image media type from raw bytes using PIL.
+
+    Inspects the image content (magic bytes / file header) rather than relying
+    on the file extension, which may not match the actual content.  This prevents
+    Anthropic API rejections caused by a declared ``media_type`` that disagrees
+    with the real payload.
+
+    Args:
+        data: Raw image bytes.
+
+    Returns:
+        The detected media type (one of the ``ImageMediaType`` literals), or
+        ``None`` when the format cannot be determined (e.g. corrupted data or
+        an unsupported image format).
+    """
+    try:
+        img = Image.open(io.BytesIO(data))
+        fmt = img.format  # e.g. "JPEG", "PNG", "GIF", "WEBP"
+        if fmt is None:
+            return None
+        return _PIL_FORMAT_TO_MEDIA_TYPE.get(fmt.upper())
+    except Exception:
+        return None
+
 
 def get_available_port() -> int:
     """Get an available port on localhost.
@@ -145,7 +179,10 @@ def _split_image_data_sync(
     width, height = image.size
 
     if height <= max_height:
-        return [BinaryContent(data=image_bytes, media_type=media_type)]
+        # Detect actual media type from content to avoid mismatch with declared type
+        detected = detect_image_media_type(image_bytes)
+        actual_type = detected or media_type
+        return [BinaryContent(data=image_bytes, media_type=actual_type)]
 
     segments: list[BinaryContent] = []
     y = 0
