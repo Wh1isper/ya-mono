@@ -13,6 +13,13 @@ Thinking Levels:
 - `medium`: Balanced reasoning (default)
 - `low`: Minimal reasoning, lower latency
 
+Adaptive Thinking (Anthropic Opus 4.6 / Sonnet 4.6):
+- Uses `thinking.type: "adaptive"` instead of fixed budget_tokens
+- Claude dynamically determines when and how much to think
+- Effort parameter (`anthropic_effort`) guides thinking depth
+- Automatically enables interleaved thinking (no beta header needed)
+- Presets: `anthropic_adaptive_{level}` where level is the effort level
+
 Usage::
 
     from ya_agent_sdk.subagents.presets import get_model_settings, ModelSettingsPreset
@@ -207,6 +214,30 @@ class ModelSettingsPreset(StrEnum):
     ANTHROPIC_LOW = "anthropic_low"
     ANTHROPIC_OFF = "anthropic_off"
 
+    # Anthropic adaptive thinking presets (for Opus 4.6 / Sonnet 4.6)
+    ANTHROPIC_ADAPTIVE_DEFAULT = "anthropic_adaptive_default"
+    ANTHROPIC_ADAPTIVE_HIGH = "anthropic_adaptive_high"
+    ANTHROPIC_ADAPTIVE_MEDIUM = "anthropic_adaptive_medium"
+    ANTHROPIC_ADAPTIVE_LOW = "anthropic_adaptive_low"
+
+    # Anthropic adaptive + 1M context presets
+    ANTHROPIC_ADAPTIVE_1M_DEFAULT = "anthropic_adaptive_1m_default"
+    ANTHROPIC_ADAPTIVE_1M_HIGH = "anthropic_adaptive_1m_high"
+    ANTHROPIC_ADAPTIVE_1M_MEDIUM = "anthropic_adaptive_1m_medium"
+    ANTHROPIC_ADAPTIVE_1M_LOW = "anthropic_adaptive_1m_low"
+
+    # Anthropic adaptive + context management presets
+    ANTHROPIC_ADAPTIVE_CM_DEFAULT = "anthropic_adaptive_cm_default"
+    ANTHROPIC_ADAPTIVE_CM_HIGH = "anthropic_adaptive_cm_high"
+    ANTHROPIC_ADAPTIVE_CM_MEDIUM = "anthropic_adaptive_cm_medium"
+    ANTHROPIC_ADAPTIVE_CM_LOW = "anthropic_adaptive_cm_low"
+
+    # Anthropic adaptive + 1M context + context management presets
+    ANTHROPIC_ADAPTIVE_1M_CM_DEFAULT = "anthropic_adaptive_1m_cm_default"
+    ANTHROPIC_ADAPTIVE_1M_CM_HIGH = "anthropic_adaptive_1m_cm_high"
+    ANTHROPIC_ADAPTIVE_1M_CM_MEDIUM = "anthropic_adaptive_1m_cm_medium"
+    ANTHROPIC_ADAPTIVE_1M_CM_LOW = "anthropic_adaptive_1m_cm_low"
+
     # Anthropic interleaved thinking presets (with beta headers)
     ANTHROPIC_DEFAULT_INTERLEAVED_THINKING = "anthropic_default_interleaved_thinking"
     ANTHROPIC_HIGH_INTERLEAVED_THINKING = "anthropic_high_interleaved_thinking"
@@ -333,6 +364,56 @@ def _anthropic_settings(
     return settings
 
 
+def _anthropic_adaptive_settings(
+    effort: Literal["low", "medium", "high", "max"] = "high",
+    max_tokens: int = 32 * K_TOKENS,
+    *,
+    use_1m_context: bool = False,
+    use_context_management: bool = False,
+    context_management: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create Anthropic model settings with adaptive thinking.
+
+    Adaptive thinking lets Claude dynamically determine when and how much to use
+    extended thinking. It automatically enables interleaved thinking (no beta
+    header needed). Supported on Opus 4.6 and Sonnet 4.6.
+
+    Args:
+        effort: Effort level guiding how much thinking Claude does.
+            'high' (default) always thinks deeply, 'medium' uses moderate thinking,
+            'low' minimizes thinking, 'max' is unconstrained (Opus 4.6 only).
+        max_tokens: Maximum output tokens (includes thinking + response).
+        use_1m_context: Whether to include 1M context beta headers.
+        use_context_management: Whether to include context management beta headers.
+        context_management: Context management config to include via extra_body.
+            If None and use_context_management is True, uses build_context_management() defaults.
+
+    Returns:
+        Dict suitable for AnthropicModelSettings.
+    """
+    settings: dict[str, Any] = {
+        "max_tokens": max_tokens,
+        "anthropic_thinking": {
+            "type": "adaptive",
+        },
+        "anthropic_effort": effort,
+        "anthropic_cache_instructions": True,
+        "anthropic_cache_response": True,
+        "anthropic_cache_messages": True,
+    }
+    # Adaptive thinking does NOT need interleaved thinking beta (it's automatic)
+    extra_headers = build_anthropic_betas(
+        use_1m_context=use_1m_context,
+        use_context_management=use_context_management,
+    )
+    if extra_headers:
+        settings["extra_headers"] = extra_headers
+    if use_context_management:
+        cm = context_management if context_management is not None else build_context_management()
+        settings["extra_body"] = {"context_management": cm}
+    return settings
+
+
 def _anthropic_off_settings(
     *,
     use_1m_context: bool = False,
@@ -403,6 +484,135 @@ ANTHROPIC_LOW: dict[str, Any] = _anthropic_settings(
 
 ANTHROPIC_OFF: dict[str, Any] = _anthropic_off_settings()
 """Anthropic off: Thinking disabled, caching enabled."""
+
+# -----------------------------------------------------------------------------
+# Anthropic adaptive thinking presets (for Opus 4.6 / Sonnet 4.6)
+# Adaptive thinking automatically enables interleaved thinking.
+# -----------------------------------------------------------------------------
+
+ANTHROPIC_ADAPTIVE_DEFAULT: dict[str, Any] = _anthropic_adaptive_settings(
+    effort="high",
+    max_tokens=32 * K_TOKENS,
+)
+"""Anthropic adaptive default: High effort (API default), Claude always thinks deeply."""
+
+ANTHROPIC_ADAPTIVE_HIGH: dict[str, Any] = _anthropic_adaptive_settings(
+    effort="high",
+    max_tokens=32 * K_TOKENS,
+)
+"""Anthropic adaptive high: High effort, Claude always thinks deeply."""
+
+ANTHROPIC_ADAPTIVE_MEDIUM: dict[str, Any] = _anthropic_adaptive_settings(
+    effort="medium",
+    max_tokens=21 * K_TOKENS,
+)
+"""Anthropic adaptive medium: Moderate thinking, may skip for simple queries."""
+
+ANTHROPIC_ADAPTIVE_LOW: dict[str, Any] = _anthropic_adaptive_settings(
+    effort="low",
+    max_tokens=16 * K_TOKENS,
+)
+"""Anthropic adaptive low: Minimal thinking, skips for simple tasks."""
+
+# -----------------------------------------------------------------------------
+# Anthropic adaptive + 1M context presets
+# -----------------------------------------------------------------------------
+
+ANTHROPIC_ADAPTIVE_1M_DEFAULT: dict[str, Any] = _anthropic_adaptive_settings(
+    effort="high",
+    max_tokens=32 * K_TOKENS,
+    use_1m_context=True,
+)
+"""Anthropic adaptive 1M default: High effort with 1M context beta."""
+
+ANTHROPIC_ADAPTIVE_1M_HIGH: dict[str, Any] = _anthropic_adaptive_settings(
+    effort="high",
+    max_tokens=32 * K_TOKENS,
+    use_1m_context=True,
+)
+"""Anthropic adaptive 1M high: High effort with 1M context beta."""
+
+ANTHROPIC_ADAPTIVE_1M_MEDIUM: dict[str, Any] = _anthropic_adaptive_settings(
+    effort="medium",
+    max_tokens=21 * K_TOKENS,
+    use_1m_context=True,
+)
+"""Anthropic adaptive 1M medium: Moderate thinking with 1M context beta."""
+
+ANTHROPIC_ADAPTIVE_1M_LOW: dict[str, Any] = _anthropic_adaptive_settings(
+    effort="low",
+    max_tokens=16 * K_TOKENS,
+    use_1m_context=True,
+)
+"""Anthropic adaptive 1M low: Minimal thinking with 1M context beta."""
+
+# -----------------------------------------------------------------------------
+# Anthropic adaptive + context management presets
+# -----------------------------------------------------------------------------
+
+ANTHROPIC_ADAPTIVE_CM_DEFAULT: dict[str, Any] = _anthropic_adaptive_settings(
+    effort="high",
+    max_tokens=32 * K_TOKENS,
+    use_context_management=True,
+)
+"""Anthropic adaptive CM default: High effort with context management."""
+
+ANTHROPIC_ADAPTIVE_CM_HIGH: dict[str, Any] = _anthropic_adaptive_settings(
+    effort="high",
+    max_tokens=32 * K_TOKENS,
+    use_context_management=True,
+)
+"""Anthropic adaptive CM high: High effort with context management."""
+
+ANTHROPIC_ADAPTIVE_CM_MEDIUM: dict[str, Any] = _anthropic_adaptive_settings(
+    effort="medium",
+    max_tokens=21 * K_TOKENS,
+    use_context_management=True,
+)
+"""Anthropic adaptive CM medium: Moderate thinking with context management."""
+
+ANTHROPIC_ADAPTIVE_CM_LOW: dict[str, Any] = _anthropic_adaptive_settings(
+    effort="low",
+    max_tokens=16 * K_TOKENS,
+    use_context_management=True,
+)
+"""Anthropic adaptive CM low: Minimal thinking with context management."""
+
+# -----------------------------------------------------------------------------
+# Anthropic adaptive + 1M context + context management presets
+# -----------------------------------------------------------------------------
+
+ANTHROPIC_ADAPTIVE_1M_CM_DEFAULT: dict[str, Any] = _anthropic_adaptive_settings(
+    effort="high",
+    max_tokens=32 * K_TOKENS,
+    use_1m_context=True,
+    use_context_management=True,
+)
+"""Anthropic adaptive 1M CM default: High effort with 1M context + context management."""
+
+ANTHROPIC_ADAPTIVE_1M_CM_HIGH: dict[str, Any] = _anthropic_adaptive_settings(
+    effort="high",
+    max_tokens=32 * K_TOKENS,
+    use_1m_context=True,
+    use_context_management=True,
+)
+"""Anthropic adaptive 1M CM high: High effort with 1M context + context management."""
+
+ANTHROPIC_ADAPTIVE_1M_CM_MEDIUM: dict[str, Any] = _anthropic_adaptive_settings(
+    effort="medium",
+    max_tokens=21 * K_TOKENS,
+    use_1m_context=True,
+    use_context_management=True,
+)
+"""Anthropic adaptive 1M CM medium: Moderate thinking with 1M context + context management."""
+
+ANTHROPIC_ADAPTIVE_1M_CM_LOW: dict[str, Any] = _anthropic_adaptive_settings(
+    effort="low",
+    max_tokens=16 * K_TOKENS,
+    use_1m_context=True,
+    use_context_management=True,
+)
+"""Anthropic adaptive 1M CM low: Minimal thinking with 1M context + context management."""
 
 # -----------------------------------------------------------------------------
 # Anthropic interleaved thinking presets (with beta headers)
@@ -936,6 +1146,26 @@ _PRESET_REGISTRY: dict[str, dict[str, Any]] = {
     ModelSettingsPreset.ANTHROPIC_MEDIUM.value: ANTHROPIC_MEDIUM,
     ModelSettingsPreset.ANTHROPIC_LOW.value: ANTHROPIC_LOW,
     ModelSettingsPreset.ANTHROPIC_OFF.value: ANTHROPIC_OFF,
+    # Anthropic adaptive thinking (Opus 4.6 / Sonnet 4.6)
+    ModelSettingsPreset.ANTHROPIC_ADAPTIVE_DEFAULT.value: ANTHROPIC_ADAPTIVE_DEFAULT,
+    ModelSettingsPreset.ANTHROPIC_ADAPTIVE_HIGH.value: ANTHROPIC_ADAPTIVE_HIGH,
+    ModelSettingsPreset.ANTHROPIC_ADAPTIVE_MEDIUM.value: ANTHROPIC_ADAPTIVE_MEDIUM,
+    ModelSettingsPreset.ANTHROPIC_ADAPTIVE_LOW.value: ANTHROPIC_ADAPTIVE_LOW,
+    # Anthropic adaptive + 1M context
+    ModelSettingsPreset.ANTHROPIC_ADAPTIVE_1M_DEFAULT.value: ANTHROPIC_ADAPTIVE_1M_DEFAULT,
+    ModelSettingsPreset.ANTHROPIC_ADAPTIVE_1M_HIGH.value: ANTHROPIC_ADAPTIVE_1M_HIGH,
+    ModelSettingsPreset.ANTHROPIC_ADAPTIVE_1M_MEDIUM.value: ANTHROPIC_ADAPTIVE_1M_MEDIUM,
+    ModelSettingsPreset.ANTHROPIC_ADAPTIVE_1M_LOW.value: ANTHROPIC_ADAPTIVE_1M_LOW,
+    # Anthropic adaptive + context management
+    ModelSettingsPreset.ANTHROPIC_ADAPTIVE_CM_DEFAULT.value: ANTHROPIC_ADAPTIVE_CM_DEFAULT,
+    ModelSettingsPreset.ANTHROPIC_ADAPTIVE_CM_HIGH.value: ANTHROPIC_ADAPTIVE_CM_HIGH,
+    ModelSettingsPreset.ANTHROPIC_ADAPTIVE_CM_MEDIUM.value: ANTHROPIC_ADAPTIVE_CM_MEDIUM,
+    ModelSettingsPreset.ANTHROPIC_ADAPTIVE_CM_LOW.value: ANTHROPIC_ADAPTIVE_CM_LOW,
+    # Anthropic adaptive + 1M context + context management
+    ModelSettingsPreset.ANTHROPIC_ADAPTIVE_1M_CM_DEFAULT.value: ANTHROPIC_ADAPTIVE_1M_CM_DEFAULT,
+    ModelSettingsPreset.ANTHROPIC_ADAPTIVE_1M_CM_HIGH.value: ANTHROPIC_ADAPTIVE_1M_CM_HIGH,
+    ModelSettingsPreset.ANTHROPIC_ADAPTIVE_1M_CM_MEDIUM.value: ANTHROPIC_ADAPTIVE_1M_CM_MEDIUM,
+    ModelSettingsPreset.ANTHROPIC_ADAPTIVE_1M_CM_LOW.value: ANTHROPIC_ADAPTIVE_1M_CM_LOW,
     # Anthropic interleaved thinking (with beta headers)
     ModelSettingsPreset.ANTHROPIC_DEFAULT_INTERLEAVED_THINKING.value: ANTHROPIC_DEFAULT_INTERLEAVED_THINKING,
     ModelSettingsPreset.ANTHROPIC_HIGH_INTERLEAVED_THINKING.value: ANTHROPIC_HIGH_INTERLEAVED_THINKING,
@@ -1005,6 +1235,10 @@ _PRESET_REGISTRY: dict[str, dict[str, Any]] = {
 _PRESET_ALIASES: dict[str, str] = {
     # Provider defaults (default preset)
     "anthropic": ModelSettingsPreset.ANTHROPIC_DEFAULT.value,
+    "anthropic_adaptive": ModelSettingsPreset.ANTHROPIC_ADAPTIVE_DEFAULT.value,
+    "anthropic_adaptive_1m": ModelSettingsPreset.ANTHROPIC_ADAPTIVE_1M_DEFAULT.value,
+    "anthropic_adaptive_cm": ModelSettingsPreset.ANTHROPIC_ADAPTIVE_CM_DEFAULT.value,
+    "anthropic_adaptive_1m_cm": ModelSettingsPreset.ANTHROPIC_ADAPTIVE_1M_CM_DEFAULT.value,
     "anthropic_interleaved": ModelSettingsPreset.ANTHROPIC_DEFAULT_INTERLEAVED_THINKING.value,
     "anthropic_1m": ModelSettingsPreset.ANTHROPIC_1M_DEFAULT.value,
     "anthropic_1m_interleaved": ModelSettingsPreset.ANTHROPIC_1M_DEFAULT_INTERLEAVED_THINKING.value,

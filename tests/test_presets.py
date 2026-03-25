@@ -26,6 +26,22 @@ from ya_agent_sdk.presets import (
     ANTHROPIC_1M_MEDIUM_INTERLEAVED_THINKING,
     ANTHROPIC_1M_OFF,
     ANTHROPIC_1M_OFF_INTERLEAVED_THINKING,
+    ANTHROPIC_ADAPTIVE_1M_CM_DEFAULT,
+    ANTHROPIC_ADAPTIVE_1M_CM_HIGH,
+    ANTHROPIC_ADAPTIVE_1M_CM_LOW,
+    ANTHROPIC_ADAPTIVE_1M_CM_MEDIUM,
+    ANTHROPIC_ADAPTIVE_1M_DEFAULT,
+    ANTHROPIC_ADAPTIVE_1M_HIGH,
+    ANTHROPIC_ADAPTIVE_1M_LOW,
+    ANTHROPIC_ADAPTIVE_1M_MEDIUM,
+    ANTHROPIC_ADAPTIVE_CM_DEFAULT,
+    ANTHROPIC_ADAPTIVE_CM_HIGH,
+    ANTHROPIC_ADAPTIVE_CM_LOW,
+    ANTHROPIC_ADAPTIVE_CM_MEDIUM,
+    ANTHROPIC_ADAPTIVE_DEFAULT,
+    ANTHROPIC_ADAPTIVE_HIGH,
+    ANTHROPIC_ADAPTIVE_LOW,
+    ANTHROPIC_ADAPTIVE_MEDIUM,
     ANTHROPIC_CM_DEFAULT,
     ANTHROPIC_CM_DEFAULT_INTERLEAVED_THINKING,
     ANTHROPIC_CM_HIGH,
@@ -299,6 +315,95 @@ def test_anthropic_thinking_budgets() -> None:
     assert low_budget == low_budget_1m
 
 
+def test_anthropic_adaptive_presets_structure() -> None:
+    """Test that Anthropic adaptive presets have expected structure."""
+    for preset in [
+        ANTHROPIC_ADAPTIVE_DEFAULT,
+        ANTHROPIC_ADAPTIVE_HIGH,
+        ANTHROPIC_ADAPTIVE_MEDIUM,
+        ANTHROPIC_ADAPTIVE_LOW,
+    ]:
+        # Adaptive thinking config
+        assert preset["anthropic_thinking"]["type"] == "adaptive"
+        assert "budget_tokens" not in preset["anthropic_thinking"]
+        # Effort level
+        assert "anthropic_effort" in preset
+        assert preset["anthropic_effort"] in ("low", "medium", "high", "max")
+        # Caching enabled
+        assert preset["anthropic_cache_instructions"] is True
+        assert preset["anthropic_cache_messages"] is True
+        # No beta headers needed (adaptive auto-enables interleaved)
+        assert "extra_headers" not in preset
+        # No extra_body (no context management)
+        assert "extra_body" not in preset
+
+    # Verify effort levels
+    assert ANTHROPIC_ADAPTIVE_HIGH["anthropic_effort"] == "high"
+    assert ANTHROPIC_ADAPTIVE_MEDIUM["anthropic_effort"] == "medium"
+    assert ANTHROPIC_ADAPTIVE_LOW["anthropic_effort"] == "low"
+    assert ANTHROPIC_ADAPTIVE_DEFAULT["anthropic_effort"] == "high"  # API default
+
+
+def test_anthropic_adaptive_1m_presets_structure() -> None:
+    """Test that Anthropic adaptive + 1M presets have 1M beta but no interleaved beta."""
+    for preset in [
+        ANTHROPIC_ADAPTIVE_1M_DEFAULT,
+        ANTHROPIC_ADAPTIVE_1M_HIGH,
+        ANTHROPIC_ADAPTIVE_1M_MEDIUM,
+        ANTHROPIC_ADAPTIVE_1M_LOW,
+    ]:
+        assert preset["anthropic_thinking"]["type"] == "adaptive"
+        assert "anthropic_effort" in preset
+        assert "extra_headers" in preset
+        assert "context-1m" in preset["extra_headers"]["anthropic-beta"]
+        # Should NOT have interleaved thinking beta (adaptive auto-enables it)
+        assert "interleaved-thinking" not in preset["extra_headers"]["anthropic-beta"]
+        assert "extra_body" not in preset
+
+
+def test_anthropic_adaptive_cm_presets_structure() -> None:
+    """Test that Anthropic adaptive + CM presets have CM beta and extra_body."""
+    for preset in [
+        ANTHROPIC_ADAPTIVE_CM_DEFAULT,
+        ANTHROPIC_ADAPTIVE_CM_HIGH,
+        ANTHROPIC_ADAPTIVE_CM_MEDIUM,
+        ANTHROPIC_ADAPTIVE_CM_LOW,
+    ]:
+        assert preset["anthropic_thinking"]["type"] == "adaptive"
+        assert "anthropic_effort" in preset
+        assert "extra_headers" in preset
+        assert "context-management" in preset["extra_headers"]["anthropic-beta"]
+        assert "interleaved-thinking" not in preset["extra_headers"]["anthropic-beta"]
+        assert "extra_body" in preset
+        assert "context_management" in preset["extra_body"]
+
+
+def test_anthropic_adaptive_1m_cm_presets_structure() -> None:
+    """Test that Anthropic adaptive + 1M + CM presets have both betas and extra_body."""
+    for preset in [
+        ANTHROPIC_ADAPTIVE_1M_CM_DEFAULT,
+        ANTHROPIC_ADAPTIVE_1M_CM_HIGH,
+        ANTHROPIC_ADAPTIVE_1M_CM_MEDIUM,
+        ANTHROPIC_ADAPTIVE_1M_CM_LOW,
+    ]:
+        assert preset["anthropic_thinking"]["type"] == "adaptive"
+        assert "anthropic_effort" in preset
+        beta_header = preset["extra_headers"]["anthropic-beta"]
+        assert "context-1m" in beta_header
+        assert "context-management" in beta_header
+        assert "interleaved-thinking" not in beta_header
+        assert "extra_body" in preset
+        assert "context_management" in preset["extra_body"]
+
+
+def test_anthropic_adaptive_max_tokens_ordering() -> None:
+    """Test that adaptive preset max_tokens decrease with lower effort."""
+    high_tokens = ANTHROPIC_ADAPTIVE_HIGH["max_tokens"]
+    medium_tokens = ANTHROPIC_ADAPTIVE_MEDIUM["max_tokens"]
+    low_tokens = ANTHROPIC_ADAPTIVE_LOW["max_tokens"]
+    assert high_tokens > medium_tokens > low_tokens
+
+
 def test_openai_chat_presets_structure() -> None:
     """Test that OpenAI Chat presets have expected structure."""
     for preset in [OPENAI_DEFAULT, OPENAI_HIGH, OPENAI_MEDIUM, OPENAI_LOW]:
@@ -371,6 +476,18 @@ def test_get_model_settings_by_alias() -> None:
     settings_1m_cm_interleaved = get_model_settings("anthropic_1m_cm_interleaved")
     assert settings_1m_cm_interleaved == ANTHROPIC_1M_CM_DEFAULT_INTERLEAVED_THINKING
 
+    settings_adaptive = get_model_settings("anthropic_adaptive")
+    assert settings_adaptive == ANTHROPIC_ADAPTIVE_DEFAULT
+
+    settings_adaptive_1m = get_model_settings("anthropic_adaptive_1m")
+    assert settings_adaptive_1m == ANTHROPIC_ADAPTIVE_1M_DEFAULT
+
+    settings_adaptive_cm = get_model_settings("anthropic_adaptive_cm")
+    assert settings_adaptive_cm == ANTHROPIC_ADAPTIVE_CM_DEFAULT
+
+    settings_adaptive_1m_cm = get_model_settings("anthropic_adaptive_1m_cm")
+    assert settings_adaptive_1m_cm == ANTHROPIC_ADAPTIVE_1M_CM_DEFAULT
+
     settings = get_model_settings("openai")
     assert settings == OPENAI_DEFAULT
 
@@ -434,6 +551,26 @@ def test_list_presets() -> None:
         "anthropic_1m_medium_interleaved_thinking",
         "anthropic_1m_off",
         "anthropic_1m_off_interleaved_thinking",
+        "anthropic_adaptive",
+        "anthropic_adaptive_1m",
+        "anthropic_adaptive_1m_cm",
+        "anthropic_adaptive_1m_cm_default",
+        "anthropic_adaptive_1m_cm_high",
+        "anthropic_adaptive_1m_cm_low",
+        "anthropic_adaptive_1m_cm_medium",
+        "anthropic_adaptive_1m_default",
+        "anthropic_adaptive_1m_high",
+        "anthropic_adaptive_1m_low",
+        "anthropic_adaptive_1m_medium",
+        "anthropic_adaptive_cm",
+        "anthropic_adaptive_cm_default",
+        "anthropic_adaptive_cm_high",
+        "anthropic_adaptive_cm_low",
+        "anthropic_adaptive_cm_medium",
+        "anthropic_adaptive_default",
+        "anthropic_adaptive_high",
+        "anthropic_adaptive_low",
+        "anthropic_adaptive_medium",
         "anthropic_cm",
         "anthropic_cm_default",
         "anthropic_cm_default_interleaved_thinking",
