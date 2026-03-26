@@ -143,22 +143,6 @@ class ViewTool(BaseTool):
 
     # --- File reading methods (async, using FileOperator) ---
 
-    async def _read_image(self, file_operator: FileOperator, file_path: str) -> BinaryContent:
-        """Read image file and return BinaryContent."""
-        content = await file_operator.read_bytes(file_path)
-
-        # Detect actual media type from content bytes to avoid mismatch
-        # between declared media_type and real payload (Anthropic API rejects mismatches)
-        media_type = detect_image_media_type(content)
-        if media_type is None:
-            # Fallback to extension-based detection
-            media_type = self._get_media_type(file_path)
-            # Normalize unsupported media types
-            if media_type not in SUPPORTED_IMAGE_MEDIA_TYPES:
-                media_type = "image/png"
-
-        return BinaryContent(data=content, media_type=media_type)
-
     @staticmethod
     def _format_size(size_bytes: int) -> str:
         """Format byte size into a human-readable string."""
@@ -315,9 +299,12 @@ class ViewTool(BaseTool):
             return error
 
         image_data = await file_operator.read_bytes(file_path)
-        media_type = self._get_media_type(file_path)
+        # Detect media type from content first to handle extension/content mismatches
+        # (e.g. a JPEG file named .png, or an image with no extension)
+        media_type = detect_image_media_type(image_data) or self._get_media_type(file_path)
         if media_type not in SUPPORTED_IMAGE_MEDIA_TYPES:
-            media_type = "image/png"
+            supported = ", ".join(sorted(SUPPORTED_IMAGE_MEDIA_TYPES))
+            return f"Error: unsupported image format '{media_type}' for {file_path}. Supported formats: {supported}."
 
         image_url: str | None = None
         if ctx.deps.tool_config and ctx.deps.tool_config.image_to_url_hook:
