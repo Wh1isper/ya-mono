@@ -36,7 +36,6 @@ from ya_agent_sdk.context import (
     ModelConfig,
     ModelWrapper,
     ResumableState,
-    RunContextMetadata,
     StreamEvent,
     SubagentWrapper,
     ToolConfig,
@@ -268,7 +267,6 @@ def create_agent(
     output_retries: int = 3,
     defer_model_check: bool = False,
     end_strategy: str = "exhaustive",
-    metadata: RunContextMetadata | None = None,
 ) -> AgentRuntime[AgentDepsT, OutputT, EnvT]:
     """Create and configure an agent runtime.
 
@@ -327,8 +325,6 @@ def create_agent(
         output_retries: Number of retries for output parsing. Defaults to 3.
         defer_model_check: Defer model validation. Defaults to False.
         end_strategy: Strategy for ending agent run. Defaults to "exhaustive".
-        metadata: Optional RunContextMetadata for context management.
-
     Returns:
         AgentRuntime containing env, ctx, and agent. Use as async context manager.
 
@@ -449,6 +445,9 @@ def create_agent(
                 inherit_hooks=inherit_hooks,
             )
 
+    # Auto-detect context management tools from registered tools
+    ctx.context_manage_tool_names = [t.name for t in tools if t.is_context_manage_tool]
+
     all_toolsets.append(core_toolset)
 
     # Add user-provided toolsets
@@ -493,7 +492,6 @@ def create_agent(
             output_retries=output_retries,
             defer_model_check=defer_model_check,
             end_strategy=end_strategy,  # type: ignore[arg-type]
-            metadata=cast(dict[str, Any], metadata) if metadata else None,
             name=agent_name,
         ),
         all_toolsets,
@@ -737,7 +735,6 @@ async def stream_agent(  # noqa: C901
     post_node_hook: NodeHook[AgentDepsT, OutputT] | None = None,
     pre_event_hook: EventHook[AgentDepsT, OutputT] | None = None,
     post_event_hook: EventHook[AgentDepsT, OutputT] | None = None,
-    metadata: RunContextMetadata | None = None,
     # Error handling
     raise_on_error: bool = True,
     # Lifecycle events
@@ -782,7 +779,6 @@ async def stream_agent(  # noqa: C901
         post_node_hook: Called after node.stream() completes.
         pre_event_hook: Called before each event is yielded.
         post_event_hook: Called after each event is yielded.
-        metadata: Optional RunContextMetadata for context management.
         raise_on_error: If True (default), exceptions during streaming are re-raised
             immediately. If False, exceptions are captured in streamer.exception
             and can be checked after iteration via raise_if_exception().
@@ -980,7 +976,6 @@ async def stream_agent(  # noqa: C901
             usage_limits=usage_limits,
             message_history=message_history,
             deferred_tool_results=effective_deferred_tool_results,
-            metadata=cast(dict[str, Any], metadata) if metadata else None,
         ) as run:
             streamer.run = run
 

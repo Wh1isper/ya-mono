@@ -42,6 +42,12 @@ class MyCustomTool(BaseTool):
     async def call(self, ctx: RunContext[AgentContext], path: str) -> str:
         return await ctx.deps.file_operator.read_file(path)
 
+    # Optional class attributes:
+    # tags: frozenset[str] = frozenset()           # Capability tags
+    # superseded_by_tags: frozenset[str] = frozenset()  # Auto-hide when tag active
+    # auto_inherit: bool = False                    # Include in subagent toolsets
+    # is_context_manage_tool: bool = False          # Context management (e.g., summarize)
+
     # Optional overrides:
     # def is_available(self, ctx) -> bool: ...
     # def get_instruction(self, ctx) -> str | Instruction | None: ...

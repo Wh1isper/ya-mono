@@ -484,10 +484,11 @@ async def test_get_context_instructions_with_handoff_warning(tmp_path: Path) -> 
                 proactive_context_management_threshold=0.5,  # 50% = 100000 tokens
             ),
         ) as ctx:
+            # Set context manage tool (normally done by create_agent auto-detection)
+            ctx.context_manage_tool_names = ["summarize"]
             # Create mock run_context with high token usage
             mock_run_context = MagicMock()
             mock_run_context.deps = ctx
-            mock_run_context.metadata = {"context_manage_tool": "summarize"}
             mock_run_context.messages = [
                 ModelRequest(parts=[UserPromptPart(content="Hello")]),
                 ModelResponse(
@@ -533,9 +534,9 @@ async def test_get_context_instructions_no_handoff_warning_below_threshold(tmp_p
                 proactive_context_management_threshold=0.5,
             ),
         ) as ctx:
+            ctx.context_manage_tool_names = ["summarize"]
             mock_run_context = MagicMock()
             mock_run_context.deps = ctx
-            mock_run_context.metadata = {"context_manage_tool": "summarize"}
             mock_run_context.messages = [
                 ModelRequest(parts=[UserPromptPart(content="Hello")]),
                 ModelResponse(
@@ -555,7 +556,7 @@ async def test_get_context_instructions_no_handoff_warning_below_threshold(tmp_p
 
 
 async def test_get_context_instructions_no_handoff_warning_when_disabled(tmp_path: Path) -> None:
-    """Should not include reminder when context_manage_tool is False."""
+    """Should not include reminder when context_manage_tool_names is empty."""
     from unittest.mock import MagicMock
 
     from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
@@ -575,9 +576,9 @@ async def test_get_context_instructions_no_handoff_warning_when_disabled(tmp_pat
                 proactive_context_management_threshold=0.5,
             ),
         ) as ctx:
+            # context_manage_tool_names defaults to empty list (disabled)
             mock_run_context = MagicMock()
             mock_run_context.deps = ctx
-            mock_run_context.metadata = {"context_manage_tool": False}  # Disabled
             mock_run_context.messages = [
                 ModelRequest(parts=[UserPromptPart(content="Hello")]),
                 ModelResponse(

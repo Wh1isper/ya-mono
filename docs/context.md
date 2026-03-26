@@ -285,13 +285,14 @@ config.model_extra["my_custom_key"]  # Also works
 
 ## ResumableState Fields
 
-| Field                     | Type                     | Description                                  |
-| ------------------------- | ------------------------ | -------------------------------------------- |
-| `subagent_history`        | `dict[str, list[dict]]`  | Serialized conversation history per subagent |
-| `extra_usages`            | `list[ExtraUsageRecord]` | Token usage records from tools/filters       |
-| `user_prompts`            | `list[str]`              | Collected user prompts                       |
-| `handoff_message`         | `str \| None`            | Context handoff message                      |
-| `need_user_approve_tools` | `list[str]`              | Tool names requiring user approval           |
+| Field                       | Type                     | Description                                  |
+| --------------------------- | ------------------------ | -------------------------------------------- |
+| `subagent_history`          | `dict[str, list[dict]]`  | Serialized conversation history per subagent |
+| `extra_usages`              | `list[ExtraUsageRecord]` | Token usage records from tools/filters       |
+| `user_prompts`              | `list[str]`              | Collected user prompts                       |
+| `handoff_message`           | `str \| None`            | Context handoff message                      |
+| `context_manage_tool_names` | `list[str]`              | Active context management tool names         |
+| `need_user_approve_tools`   | `list[str]`              | Tool names requiring user approval           |
 
 ### ExtraUsageRecord Fields
 
