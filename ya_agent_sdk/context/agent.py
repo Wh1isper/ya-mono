@@ -71,7 +71,7 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 from xml.dom.minidom import parseString
 from xml.etree.ElementTree import Element, SubElement, tostring
@@ -100,7 +100,6 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models import Model
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing_extensions import TypedDict
 from y_agent_environment import Environment, FileOperator, ResourceRegistry, Shell
 
 from ya_agent_sdk.events import AgentEvent
@@ -664,57 +663,6 @@ class ModelConfig(BaseModel):
 
 
 # =============================================================================
-# Run Context Metadata
-# =============================================================================
-
-
-class RunContextMetadata(TypedDict, total=False):
-    """Metadata for RunContext passed to get_context_instructions.
-
-    This TypedDict defines the expected structure of metadata passed via
-    pydantic-ai's Agent metadata parameter. It enables context management
-    reminders when the context window usage exceeds the configured threshold.
-
-    Example:
-        Using with Agent and HandoffTool for automatic context management::
-
-            from contextlib import AsyncExitStack
-            from pydantic_ai import Agent
-
-            from ya_agent_sdk.context import AgentContext, ModelConfig, RunContextMetadata
-            from ya_agent_sdk.environment.local import LocalEnvironment
-            from ya_agent_sdk.filters.handoff import process_handoff_message
-            from ya_agent_sdk.toolsets.core.base import Toolset
-            from ya_agent_sdk.toolsets.core.context.handoff import HandoffTool
-
-            async with AsyncExitStack() as stack:
-                env = await stack.enter_async_context(LocalEnvironment())
-                ctx = await stack.enter_async_context(
-                    AgentContext(
-                        env=env,
-                        model_cfg=ModelConfig(
-                            context_window=200000,
-                            proactive_context_management_threshold=0.5,
-                        ),
-                    )
-                )
-                toolset = Toolset(tools=[HandoffTool])
-                agent = Agent(
-                    'openai:gpt-4',
-                    deps_type=AgentContext,
-                    toolsets=[toolset],
-                    history_processors=[process_handoff_message],
-                    # Set context management tool name - triggers threshold reminder
-                    metadata=lambda _: {'context_manage_tool': 'summarize'},
-                )
-                result = await agent.run('Your prompt here', deps=ctx)
-    """
-
-    context_manage_tool: str
-    """Name of the context management tool to use (e.g., 'summarize')."""
-
-
-# =============================================================================
 # Resumable State
 # =============================================================================
 
@@ -1011,6 +959,14 @@ class AgentContext(BaseModel):
 
     tool_search_loaded_namespaces: list[str] = Field(default_factory=list)
     """Namespace IDs loaded via tool_search during the session. Used for session restore."""
+
+    context_manage_tool_names: list[str] = Field(default_factory=list)
+    """Names of active context management tools (e.g., ['summarize']).
+
+    Automatically populated by create_agent() from tools with
+    is_context_manage_tool=True. Enables proactive context management
+    reminders when context window usage exceeds threshold.
+    """
 
     tool_tags: set[str] = Field(default_factory=set)
     """Active capability tags from available tools.
@@ -1360,16 +1316,9 @@ class AgentContext(BaseModel):
         # Build system-reminder element (sibling to runtime-context)
         reminders: list[str] = []
 
-        # Cast metadata to typed dict for type safety
-        metadata = cast(
-            RunContextMetadata,
-            run_context.metadata if run_context and run_context.metadata else {},
-        )
-
         # Handoff threshold warning
-        # (internal name kept for compatibility; user-facing text says 'summarize')
         if (
-            (context_manage_tool := metadata.get("context_manage_tool"))
+            self.context_manage_tool_names
             and self.model_cfg.context_window is not None
             and self.model_cfg.proactive_context_management_threshold is not None
             and run_context
@@ -1382,10 +1331,11 @@ class AgentContext(BaseModel):
             if request_usage.total_tokens >= threshold_tokens:
                 usage_pct = int(request_usage.total_tokens / self.model_cfg.context_window * 100)
                 compact_pct = int(self.model_cfg.compact_threshold * 100)
+                tool_names = ", ".join(f"`{n}`" for n in self.context_manage_tool_names)
                 reminders.append(
                     f"Context usage is at {usage_pct}% ({request_usage.total_tokens:,} / {self.model_cfg.context_window:,} tokens). "
                     f"Auto-compaction will trigger at {compact_pct}%. "
-                    f"Please use the `{context_manage_tool}` tool to summarize progress and continue when appropriate."
+                    f"Please use the {tool_names} tool to summarize progress and continue when appropriate."
                 )
 
         if reminders:

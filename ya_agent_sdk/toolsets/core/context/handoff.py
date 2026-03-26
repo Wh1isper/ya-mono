@@ -17,6 +17,8 @@ Example::
 
     async with AgentContext() as ctx:
         toolset = Toolset(tools=[HandoffTool])
+        # HandoffTool.is_context_manage_tool = True, so create_agent()
+        # will automatically set ctx.context_manage_tool_name = 'summarize'
         agent = Agent(
             'openai:gpt-4',
             deps_type=AgentContext,
@@ -88,6 +90,7 @@ before resetting, or when switching focus to a different topic or task.
 The summary will be injected into the new context automatically.
 """
     auto_inherit = True
+    is_context_manage_tool = True
 
     async def get_instruction(self, ctx: RunContext[AgentContext]) -> str:
         """Load instruction from prompts/handoff.md."""

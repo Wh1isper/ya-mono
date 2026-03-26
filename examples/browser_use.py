@@ -56,7 +56,6 @@ from ya_agent_sdk.context import (
     ModelCapability,
     ModelConfig,
     ResumableState,
-    RunContextMetadata,
     StreamEvent,
     ToolConfig,
 )
@@ -256,7 +255,6 @@ async def main():
                     ),
                     max_retries=3,
                 ),
-                metadata=RunContextMetadata(context_manage_tool="handoff"),
             )
 
             async with stream_agent(

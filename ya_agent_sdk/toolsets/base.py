@@ -128,6 +128,16 @@ class BaseTool(ABC):
     Useful for management/utility tools like task_*, summarize, etc.
     """
 
+    is_context_manage_tool: bool = False
+    """Whether this tool is a context management tool (e.g., summarize/handoff).
+
+    When True, create_agent() will automatically detect this tool and set
+    ctx.context_manage_tool_name, enabling proactive context management
+    reminders when the context window usage exceeds the configured threshold.
+
+    Only one context management tool should be active at a time.
+    """
+
     def is_available(self, ctx: RunContext[AgentContext]) -> bool:
         """Check if tool is available in current context.
 

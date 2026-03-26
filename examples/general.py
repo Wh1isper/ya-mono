@@ -57,7 +57,7 @@ from pydantic_ai.messages import (
 )
 
 from ya_agent_sdk.agents.main import create_agent, stream_agent
-from ya_agent_sdk.context import ModelCapability, ModelConfig, ResumableState, RunContextMetadata, StreamEvent
+from ya_agent_sdk.context import ModelCapability, ModelConfig, ResumableState, StreamEvent
 from ya_agent_sdk.presets import ANTHROPIC_DEFAULT
 from ya_agent_sdk.toolsets.core.base import UserInteraction
 from ya_agent_sdk.toolsets.core.content import tools as content_tools
@@ -325,7 +325,6 @@ async def main():
         state=state,
         output_type=[str, DeferredToolRequests],
         include_builtin_subagents=True,
-        metadata=RunContextMetadata(context_manage_tool="handoff"),
     )
 
     # Process pending HITL interactions if any
