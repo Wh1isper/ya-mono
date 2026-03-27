@@ -1034,10 +1034,17 @@ async def stream_agent(  # noqa: C901
                 logger.debug("Main agent task cancelled")
             else:
                 logger.exception("Error in main agent task")
+                # Use repr() as fallback: some exceptions (e.g., ModelAPIError with
+                # message=None from upstream) have __str__ that returns None,
+                # causing str() to raise TypeError.
+                try:
+                    error_str = str(e)
+                except Exception:
+                    error_str = repr(e)
                 await emit_lifecycle_event(
                     AgentExecutionFailedEvent(
                         event_id=ctx.run_id,
-                        error=str(e),
+                        error=error_str or repr(e),
                         error_type=type(e).__name__,
                         total_loops=tracker.loop_index,
                         total_duration_seconds=time.perf_counter() - execution_start_time,

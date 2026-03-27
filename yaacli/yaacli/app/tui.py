@@ -25,6 +25,7 @@ import json
 import shutil
 import sys
 import time
+import traceback
 import uuid
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
@@ -100,6 +101,37 @@ if TYPE_CHECKING:
     from prompt_toolkit.key_binding import KeyPressEvent
 
 logger = get_logger(__name__)
+
+
+# =============================================================================
+# Utilities
+# =============================================================================
+
+
+def _safe_exception_str(e: BaseException) -> str:
+    """Safely convert an exception to a string.
+
+    Some exceptions (e.g., pydantic-ai's ModelAPIError with message=None)
+    have __str__ that returns None instead of a string, causing str() to
+    raise TypeError. This helper falls back to repr() in such cases.
+
+    Args:
+        e: The exception to convert.
+
+    Returns:
+        A string representation of the exception.
+    """
+    try:
+        result = str(e)
+    except Exception:
+        result = repr(e)
+
+    # Guard against __str__ returning "None" for exceptions created with None arg
+    # e.g., Exception(None), RuntimeError(None), anthropic.APIConnectionError(message=None)
+    if not result or result == "None":
+        result = repr(e)
+
+    return result
 
 
 # =============================================================================
@@ -642,12 +674,12 @@ class TUIApp:
         self._append_output(rendered)
 
     def _append_error_output(self, e: BaseException) -> None:
-        """Render error message with proper word wrapping to fit terminal width."""
+        """Render error message with traceback to fit terminal width."""
         width = self._get_terminal_width()
         from rich.text import Text as RichText
 
         error_type = type(e).__name__
-        error_msg = str(e)
+        error_msg = _safe_exception_str(e)
 
         self._append_output("")
 
@@ -663,12 +695,14 @@ class TUIApp:
         msg_text.append(error_msg)
         self._append_output(self._renderer.render(msg_text, width=width).rstrip("\n"))
 
-        # Cause if available
-        if e.__cause__:
-            cause_text = RichText()
-            cause_text.append("  Caused by: ", style="dim red")
-            cause_text.append(f"{type(e.__cause__).__name__}: {e.__cause__}")
-            self._append_output(self._renderer.render(cause_text, width=width).rstrip("\n"))
+        # Traceback (formatted, dimmed)
+        tb_lines = traceback.format_exception(e)
+        if tb_lines:
+            tb_str = "".join(tb_lines).rstrip()
+            for line in tb_str.splitlines():
+                tb_text = RichText()
+                tb_text.append(line, style="dim")
+                self._append_output(self._renderer.render(tb_text, width=width).rstrip("\n"))
 
         self._append_output("")
 
@@ -982,7 +1016,7 @@ class TUIApp:
         exc = task.exception()
         if exc is not None:
             # Exception was not caught in _run_agent - display it
-            logger.error("Uncaught exception in agent task: %s: %s", type(exc).__name__, str(exc))
+            logger.error("Uncaught exception in agent task: %s: %s", type(exc).__name__, _safe_exception_str(exc))
             self._append_error_output(exc)
             self._agent_phase = "idle"
             self._state = TUIState.IDLE
@@ -1895,6 +1929,18 @@ class TUIApp:
 
     async def _handle_command(self, command: str) -> None:
         """Handle slash commands."""
+        try:
+            await self._handle_command_inner(command)
+        except Exception as e:
+            logger.exception("Command failed: %s", command)
+            self._append_error_output(e)
+        finally:
+            self._scroll_to_bottom()
+            if self._app:
+                self._app.invalidate()
+
+    async def _handle_command_inner(self, command: str) -> None:
+        """Inner command dispatch (exceptions caught by _handle_command)."""
         parts = command.split(maxsplit=1)
         cmd = parts[0].lower()
         args = parts[1] if len(parts) > 1 else ""
@@ -1985,10 +2031,6 @@ class TUIApp:
                     self._append_user_input(command)
                     self._agent_task = asyncio.create_task(self._run_agent(command))
                     self._agent_task.add_done_callback(self._on_agent_task_done)
-
-        self._scroll_to_bottom()
-        if self._app:
-            self._app.invalidate()
 
     async def _execute_shell_command(self, command_str: str) -> None:
         """Execute a shell command directly and display output."""
