@@ -32,5 +32,11 @@ class AgentSettings(BaseSettings):
     video_understanding_model_settings: str | None = None
     """Model settings preset name for video understanding (e.g. 'anthropic_off'). Resolved via resolve_model_settings."""
 
+    audio_understanding_model: str | None = None
+    """Model to use for audio understanding when native capability is unavailable."""
+
+    audio_understanding_model_settings: str | None = None
+    """Model settings preset name for audio understanding (e.g. 'gemini_thinking_level_low'). Resolved via resolve_model_settings."""
+
     compact_model: str | None = None
     """Model to use for compact when native capability is unavailable."""

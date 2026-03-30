@@ -69,26 +69,80 @@ class LoadMediaUrlTool(BaseTool):
 
         has_vision = model_cfg.has_capability(ModelCapability.vision)
         has_video = model_cfg.has_capability(ModelCapability.video_understanding)
+        has_audio = model_cfg.has_capability(ModelCapability.audio_understanding)
         has_document = model_cfg.has_capability(ModelCapability.document_understanding)
         enable_load_document = ctx.deps.tool_config.enable_load_document
 
         # Available if any capability is present
-        return has_vision or has_video or (has_document and enable_load_document)
+        return has_vision or has_video or has_audio or (has_document and enable_load_document)
 
     async def get_instruction(self, ctx: RunContext[AgentContext]) -> str:
         """Generate dynamic instruction based on model capabilities."""
         model_cfg = ctx.deps.model_cfg
         has_vision = model_cfg is not None and model_cfg.has_capability(ModelCapability.vision)
         has_video = model_cfg is not None and model_cfg.has_capability(ModelCapability.video_understanding)
+        has_audio = model_cfg is not None and model_cfg.has_capability(ModelCapability.audio_understanding)
         has_document = model_cfg is not None and model_cfg.has_capability(ModelCapability.document_understanding)
         enable_load_document = ctx.deps.tool_config.enable_load_document
 
         return _INSTRUCTION_TEMPLATE.render(
             has_vision=has_vision,
             has_video=has_video,
+            has_audio=has_audio,
             has_document=has_document,
             enable_load_document=enable_load_document,
         )
+
+    def _resolve_content(
+        self,
+        url: str,
+        category: ContentCategory,
+        *,
+        has_vision: bool,
+        has_video: bool,
+        has_audio: bool,
+        has_document: bool,
+        enable_load_document: bool,
+    ) -> str | ImageUrl | VideoUrl | AudioUrl | DocumentUrl:
+        """Resolve URL to appropriate content type based on category and capabilities."""
+        if category == ContentCategory.image:
+            if not has_vision:
+                return (
+                    f"The URL '{url}' points to an image, but the current model does not support vision capability. "
+                    "Use the `read_image` tool instead to analyze this image."
+                )
+            return ImageUrl(url=url)
+
+        if category == ContentCategory.video:
+            if not has_video:
+                return (
+                    f"The URL '{url}' points to a video, but the current model does not support video understanding. "
+                    "Use the `read_video` tool instead to analyze this video."
+                )
+            return VideoUrl(url=url)
+
+        if category == ContentCategory.audio:
+            if not has_audio:
+                return (
+                    f"The URL '{url}' points to audio, but the current model does not support audio understanding. "
+                    "Use the `read_audio` tool instead to analyze this audio."
+                )
+            return AudioUrl(url=url)
+
+        if category == ContentCategory.document:
+            if not enable_load_document:
+                return (
+                    f"Document parsing disabled for URL '{url}'. "
+                    "Use download tool to save locally, then use pdf_convert."
+                )
+            if not has_document:
+                return (
+                    f"The URL '{url}' points to a document, but the current model does not support "
+                    "document understanding. Cannot display document content."
+                )
+            return DocumentUrl(url=url)
+
+        return f"Unknown content category: {category}, try again with a different URL or use `fetch` tool to download."
 
     async def call(
         self,
@@ -121,41 +175,16 @@ class LoadMediaUrlTool(BaseTool):
         model_cfg = ctx.deps.model_cfg
         has_vision = model_cfg is not None and model_cfg.has_capability(ModelCapability.vision)
         has_video = model_cfg is not None and model_cfg.has_capability(ModelCapability.video_understanding)
+        has_audio = model_cfg is not None and model_cfg.has_capability(ModelCapability.audio_understanding)
         has_document = model_cfg is not None and model_cfg.has_capability(ModelCapability.document_understanding)
         enable_load_document = ctx.deps.tool_config.enable_load_document
 
-        # Return appropriate content type based on category and capabilities
-        if category == ContentCategory.image:
-            if not has_vision:
-                return (
-                    f"The URL '{url}' points to an image, but the current model does not support vision capability. "
-                    "Use the `read_image` tool instead to analyze this image."
-                )
-            return ImageUrl(url=url)
-
-        if category == ContentCategory.video:
-            if not has_video:
-                return (
-                    f"The URL '{url}' points to a video, but the current model does not support video understanding. "
-                    "Use the `read_video` tool instead to analyze this video."
-                )
-            return VideoUrl(url=url)
-
-        if category == ContentCategory.audio:
-            # Audio doesn't require special capability check for now
-            return AudioUrl(url=url)
-
-        if category == ContentCategory.document:
-            if not enable_load_document:
-                return (
-                    f"Document parsing disabled for URL '{url}'. "
-                    "Use download tool to save locally, then use pdf_convert."
-                )
-            if not has_document:
-                return (
-                    f"The URL '{url}' points to a document, but the current model does not support "
-                    "document understanding. Cannot display document content."
-                )
-            return DocumentUrl(url=url)
-
-        return f"Unknown content category: {category}, try again with a different URL or use `fetch` tool to download."
+        return self._resolve_content(
+            url,
+            category,
+            has_vision=has_vision,
+            has_video=has_video,
+            has_audio=has_audio,
+            has_document=has_document,
+            enable_load_document=enable_load_document,
+        )

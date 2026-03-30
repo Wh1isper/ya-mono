@@ -11,6 +11,7 @@ from typing import Annotated, Any, Literal, cast
 
 from pydantic import Field
 from pydantic_ai import BinaryContent, ImageUrl, RunContext, ToolReturn, VideoUrl
+from pydantic_ai.messages import AudioUrl
 from y_agent_environment import FileOperator
 
 from ya_agent_sdk._logger import get_logger
@@ -51,6 +52,20 @@ VIDEO_EXTENSIONS = frozenset({
     ".ogv",
 })
 
+# Audio file extensions
+AUDIO_EXTENSIONS = frozenset({
+    ".mp3",
+    ".wav",
+    ".ogg",
+    ".flac",
+    ".m4a",
+    ".aac",
+    ".wma",
+    ".opus",
+    ".aiff",
+    ".aif",
+})
+
 # Media type mapping for common extensions
 MEDIA_TYPE_MAP = {
     ".png": "image/png",
@@ -78,6 +93,20 @@ VIDEO_MEDIA_TYPE_MAP = {
     ".ogv": "video/ogg",
 }
 
+# Audio media type mapping
+AUDIO_MEDIA_TYPE_MAP = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".ogg": "audio/ogg",
+    ".flac": "audio/flac",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".wma": "audio/x-ms-wma",
+    ".opus": "audio/opus",
+    ".aiff": "audio/aiff",
+    ".aif": "audio/aiff",
+}
+
 
 @cache
 def _load_instruction() -> str:
@@ -89,14 +118,14 @@ def _load_instruction() -> str:
 class ViewTool(BaseTool):
     """Tool for reading files from the filesystem.
 
-    Supports text files, images, and videos.
+    Supports text files, images, videos, and audio files.
     All operations use FileOperator abstraction for remote filesystem support.
     """
 
     name = "view"
     description = (
-        "Read files from local filesystem. Supports text, images (PNG/JPEG/WebP), and videos (MP4/WebM/MOV). "
-        "For PDF files, use `pdf_convert` tool instead."
+        "Read files from local filesystem. Supports text, images (PNG/JPEG/WebP), videos (MP4/WebM/MOV), "
+        "and audio (MP3/WAV/OGG). For PDF files, use `pdf_convert` tool instead."
     )
 
     def is_available(self, ctx: RunContext[AgentContext]) -> bool:
@@ -131,6 +160,10 @@ class ViewTool(BaseTool):
         """Check if a file is a video based on extension."""
         return self._get_extension(file_path) in VIDEO_EXTENSIONS
 
+    def _is_audio_file(self, file_path: str) -> bool:
+        """Check if a file is an audio file based on extension."""
+        return self._get_extension(file_path) in AUDIO_EXTENSIONS
+
     def _get_media_type(self, file_path: str) -> str:
         """Get media type from file extension."""
         ext = self._get_extension(file_path)
@@ -140,6 +173,11 @@ class ViewTool(BaseTool):
         """Get video media type from file extension."""
         ext = self._get_extension(file_path)
         return VIDEO_MEDIA_TYPE_MAP.get(ext, "video/mp4")
+
+    def _get_audio_media_type(self, file_path: str) -> str:
+        """Get audio media type from file extension."""
+        ext = self._get_extension(file_path)
+        return AUDIO_MEDIA_TYPE_MAP.get(ext, "audio/mpeg")
 
     # --- File reading methods (async, using FileOperator) ---
 
@@ -267,10 +305,49 @@ class ViewTool(BaseTool):
             logger.warning(f"Failed to analyze video with video understanding: {e}")
             return f"Video file: {file_path}. Model does not support video understanding and fallback analysis failed."
 
+    async def _describe_audio(
+        self,
+        ctx: RunContext[AgentContext],
+        file_path: str,
+        audio_data: bytes,
+        media_type: str,
+        audio_url: str | None,
+    ) -> str:
+        """Describe audio via the fallback audio-understanding agent."""
+        try:
+            from ya_agent_sdk.agents.audio_understanding import get_audio_description
+
+            model = None
+            model_settings = None
+            if ctx.deps.tool_config:
+                tool_config = ctx.deps.tool_config
+                model = tool_config.audio_understanding_model
+                model_settings = tool_config.audio_understanding_model_settings
+
+            description, internal_usage = await get_audio_description(
+                audio_url=audio_url,
+                audio_data=None if audio_url else audio_data,
+                media_type=media_type,
+                model=model,
+                model_settings=model_settings,
+                model_wrapper=ctx.deps.model_wrapper,
+                wrapper_metadata=ctx.deps.get_wrapper_metadata(),
+            )
+
+            if ctx.tool_call_id:
+                ctx.deps.add_extra_usage(
+                    agent="audio_understanding", internal_usage=internal_usage, uuid=ctx.tool_call_id
+                )
+
+            return f"Audio description (via audio understanding agent):\n{description}"
+        except Exception as e:
+            logger.warning(f"Failed to analyze audio with audio understanding: {e}")
+            return f"Audio file: {file_path}. Model does not support audio understanding and fallback analysis failed."
+
     def _build_inline_media_return(
         self,
         *,
-        kind: Literal["image", "video"],
+        kind: Literal["image", "video", "audio"],
         media_url: str | None,
         data: bytes,
         media_type: str,
@@ -279,6 +356,10 @@ class ViewTool(BaseTool):
         if kind == "image":
             content = [ImageUrl(url=media_url)] if media_url else [BinaryContent(data=data, media_type=media_type)]
             return ToolReturn(return_value="The image is attached in the user message.", content=content)
+
+        if kind == "audio":
+            content = [AudioUrl(url=media_url)] if media_url else [BinaryContent(data=data, media_type=media_type)]
+            return ToolReturn(return_value="The audio is attached in the user message.", content=content)
 
         content = [VideoUrl(url=media_url)] if media_url else [BinaryContent(data=data, media_type=media_type)]
         return ToolReturn(return_value="The video is attached in the user message.", content=content)
@@ -363,6 +444,44 @@ class ViewTool(BaseTool):
             )
 
         return await self._describe_video(ctx, file_path, video_data, media_type, video_url)
+
+    async def _read_audio_with_fallback(
+        self,
+        file_operator: FileOperator,
+        file_path: str,
+        ctx: RunContext[AgentContext],
+    ) -> str | ToolReturn:
+        """Read audio file, falling back to audio understanding agent if not supported."""
+        if error := await self._check_inline_size(
+            file_operator,
+            file_path,
+            max_bytes=ctx.deps.tool_config.view_max_inline_audio_bytes,
+            kind="Audio",
+        ):
+            return error
+
+        audio_data = await file_operator.read_bytes(file_path)
+        media_type = self._get_audio_media_type(file_path)
+
+        audio_url: str | None = None
+        if ctx.deps.tool_config and ctx.deps.tool_config.audio_to_url_hook:
+            audio_url = await self._maybe_convert_media_to_url(
+                ctx.deps.tool_config.audio_to_url_hook,
+                ctx,
+                audio_data,
+                media_type,
+                log_name="audio_to_url_hook",
+            )
+
+        if ctx.deps.model_cfg.has_audio_understanding:
+            return self._build_inline_media_return(
+                kind="audio",
+                media_url=audio_url,
+                data=audio_data,
+                media_type=media_type,
+            )
+
+        return await self._describe_audio(ctx, file_path, audio_data, media_type, audio_url)
 
     def _build_text_metadata_response(
         self,
@@ -532,6 +651,9 @@ class ViewTool(BaseTool):
 
         if self._is_video_file(file_path):
             return await self._read_video_with_fallback(file_operator, file_path, ctx)
+
+        if self._is_audio_file(file_path):
+            return await self._read_audio_with_fallback(file_operator, file_path, ctx)
 
         return await self._read_text_file(ctx, file_operator, file_path, line_offset, line_limit, max_line_length)
 
