@@ -249,7 +249,7 @@ async def test_read_only_mount_blocks_mkdir(readonly_composite_op: CompositeFile
 
 @pytest.mark.anyio
 async def test_cross_mount_copy(composite_op: CompositeFileOperator):
-    """Copying between mounts uses streaming."""
+    """Copying files between mounts uses streaming."""
     await composite_op.write_file("/mnt/pc/source.txt", "cross-mount data")
     await composite_op.copy("/mnt/pc/source.txt", "/workspace/copied.txt")
 
@@ -263,7 +263,7 @@ async def test_cross_mount_copy(composite_op: CompositeFileOperator):
 
 @pytest.mark.anyio
 async def test_cross_mount_move(composite_op: CompositeFileOperator):
-    """Moving between mounts streams then deletes source."""
+    """Moving files between mounts streams then deletes source."""
     await composite_op.write_file("/mnt/pc/moveme.txt", "moving data")
     await composite_op.move("/mnt/pc/moveme.txt", "/workspace/moved.txt")
 
@@ -273,6 +273,30 @@ async def test_cross_mount_move(composite_op: CompositeFileOperator):
     # Destination has correct content
     content = await composite_op.read_file("/workspace/moved.txt")
     assert content == "moving data"
+
+
+@pytest.mark.anyio
+async def test_cross_mount_directory_copy_raises(composite_op: CompositeFileOperator):
+    """Copying directories across mounts raises a clear error."""
+    from y_agent_environment import FileOperationError
+
+    await composite_op.mkdir("/mnt/pc/mydir")
+    await composite_op.write_file("/mnt/pc/mydir/file.txt", "content")
+
+    with pytest.raises(FileOperationError, match="cross-mount directory copy is not supported"):
+        await composite_op.copy("/mnt/pc/mydir", "/workspace/mydir")
+
+
+@pytest.mark.anyio
+async def test_cross_mount_directory_move_raises(composite_op: CompositeFileOperator):
+    """Moving directories across mounts raises a clear error."""
+    from y_agent_environment import FileOperationError
+
+    await composite_op.mkdir("/mnt/pc/movedir")
+    await composite_op.write_file("/mnt/pc/movedir/file.txt", "content")
+
+    with pytest.raises(FileOperationError, match="cross-mount directory move is not supported"):
+        await composite_op.move("/mnt/pc/movedir", "/workspace/movedir")
 
 
 @pytest.mark.anyio

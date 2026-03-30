@@ -395,7 +395,11 @@ class CompositeFileOperator(FileOperator):
             # Same mount: delegate directly (efficient)
             await src_mount.file_operator.move(src_rel, dst_rel)
         else:
-            # Cross-mount: stream then delete source
+            # Cross-mount: only files supported (streaming doesn't work for directories)
+            if await src_mount.file_operator.is_dir(src_rel):
+                raise FileOperationError(
+                    "move", src, "cross-mount directory move is not supported; copy files individually"
+                )
             stream = await src_mount.file_operator.read_bytes_stream(src_rel, chunk_size=self._default_chunk_size)
             await dst_mount.file_operator.write_bytes_stream(dst_rel, stream)
             await src_mount.file_operator.delete(src_rel)
@@ -410,7 +414,11 @@ class CompositeFileOperator(FileOperator):
             # Same mount: delegate directly (efficient)
             await src_mount.file_operator.copy(src_rel, dst_rel)
         else:
-            # Cross-mount: stream from src backend to dst backend
+            # Cross-mount: only files supported (streaming doesn't work for directories)
+            if await src_mount.file_operator.is_dir(src_rel):
+                raise FileOperationError(
+                    "copy", src, "cross-mount directory copy is not supported; copy files individually"
+                )
             stream = await src_mount.file_operator.read_bytes_stream(src_rel, chunk_size=self._default_chunk_size)
             await dst_mount.file_operator.write_bytes_stream(dst_rel, stream)
 
