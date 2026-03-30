@@ -175,3 +175,57 @@ async def test_streamer_events_before_stop() -> None:
     # Second call should stop
     with pytest.raises(StopAsyncIteration):
         await streamer.__anext__()
+
+
+async def test_streamer_stops_when_all_tasks_done_without_poll_done() -> None:
+    """Critical #2 fix: __anext__ terminates when all tasks are done and queue is empty,
+    even if _poll_done was never set (e.g. tasks cancelled before finally block ran)."""
+    streamer = _make_streamer(poll_done_immediately=False)
+
+    # Simulate both tasks cancelled before poll_done was set
+    for task in streamer._tasks:
+        task.done.return_value = True
+        task.cancelled.return_value = True
+        task.exception.return_value = None
+
+    # Should NOT hang -- must raise StopAsyncIteration
+    with pytest.raises(StopAsyncIteration):
+        await streamer.__anext__()
+
+
+async def test_streamer_drains_queue_before_stopping_on_all_tasks_done() -> None:
+    """Fallback exit still drains remaining events before stopping."""
+    events = [_make_event("x"), _make_event("y")]
+    streamer = _make_streamer(events=events, poll_done_immediately=False)
+
+    # All tasks done (cancelled), but poll_done NOT set
+    for task in streamer._tasks:
+        task.done.return_value = True
+        task.cancelled.return_value = True
+        task.exception.return_value = None
+
+    # Should yield the two queued events first
+    e1 = await streamer.__anext__()
+    assert e1.agent_name == "x"
+    e2 = await streamer.__anext__()
+    assert e2.agent_name == "y"
+
+    # Then stop
+    with pytest.raises(StopAsyncIteration):
+        await streamer.__anext__()
+
+
+async def test_streamer_all_tasks_done_propagates_exception() -> None:
+    """Fallback exit path still propagates task exceptions."""
+    streamer = _make_streamer(poll_done_immediately=False)
+
+    # main_task failed, poll_task cancelled, poll_done never set
+    streamer._tasks[0].done.return_value = True
+    streamer._tasks[0].cancelled.return_value = False
+    streamer._tasks[0].exception.return_value = RuntimeError("boom")
+    streamer._tasks[1].done.return_value = True
+    streamer._tasks[1].cancelled.return_value = True
+    streamer._tasks[1].exception.return_value = None
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await streamer.__anext__()
