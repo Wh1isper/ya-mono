@@ -127,6 +127,7 @@ hook = create_s3_media_hook(config)
 tool_config = ToolConfig(
     image_to_url_hook=hook,  # Convert images to URLs
     video_to_url_hook=hook,  # Convert videos to URLs
+    audio_to_url_hook=hook,  # Convert audio to URLs
 )
 ```
 
@@ -179,6 +180,7 @@ The filter checks model capabilities before uploading:
 
 - `ModelCapability.image_url` - Required to upload images
 - `ModelCapability.video_url` - Required to upload videos
+- `ModelCapability.audio_understanding` - Model can process audio content natively
 
 Configure capabilities in `ModelConfig`:
 
@@ -190,6 +192,7 @@ model_cfg = ModelConfig(
         ModelCapability.vision,
         ModelCapability.image_url,  # Model accepts image URLs
         ModelCapability.video_url,  # Model accepts video URLs
+        ModelCapability.audio_understanding,  # Model can process audio
     }
 )
 ```
@@ -241,12 +244,12 @@ assert isinstance(uploader, MediaUploader)  # Protocol check
 
 ## Provider Compatibility
 
-| Provider           | Image URL | Video URL | Notes        |
-| ------------------ | --------- | --------- | ------------ |
-| OpenAI             | Yes       | Yes       | Full support |
-| Anthropic (direct) | Yes       | Yes       | Full support |
-| AWS Bedrock        | No        | No        | Base64 only  |
-| Google Gemini      | Yes       | Yes       | Full support |
-| Azure OpenAI       | Yes       | Yes       | Full support |
+| Provider           | Image URL | Video URL | Audio URL | Notes               |
+| ------------------ | --------- | --------- | --------- | ------------------- |
+| OpenAI             | Yes       | Yes       | No        | No native audio URL |
+| Anthropic (direct) | Yes       | Yes       | No        | No native audio URL |
+| AWS Bedrock        | No        | No        | No        | Base64 only         |
+| Google Gemini      | Yes       | Yes       | Yes       | Full support        |
+| Azure OpenAI       | Yes       | Yes       | No        | No native audio URL |
 
 For providers that don't support URLs, the filter will skip upload and keep binary content.

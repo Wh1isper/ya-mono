@@ -27,12 +27,14 @@ ya_agent_sdk/
 │   ├── compact.py         # Compact agent variant
 │   ├── image_understanding.py  # Image understanding agent
 │   ├── video_understanding.py  # Video understanding agent
+│   ├── audio_understanding.py  # Audio understanding agent
 │   └── models/            # Model configuration and inference
 │
 ├── context.py             # AgentContext, ModelConfig, ToolConfig, ResumableState
 │
 ├── environment/           # Environment management
 │   ├── base.py            # Environment ABC, FileOperator, Shell, ResourceRegistry, BaseResource
+│   ├── composite.py       # CompositeFileOperator for multi-backend VFS routing
 │   ├── local.py           # LocalEnvironment, LocalFileOperator, VirtualLocalFileOperator
 │   └── sandbox.py         # SandboxEnvironment, DockerShell
 │
@@ -44,7 +46,7 @@ ya_agent_sdk/
 │   │   ├── document/      # Document processing tools
 │   │   ├── enhance/       # Enhancement tools (todo, thinking)
 │   │   ├── filesystem/    # File system operation tools
-│   │   ├── multimodal/    # Multimodal tools (read_image, read_video)
+│   │   ├── multimodal/    # Multimodal tools (read_image, read_video, read_audio)
 │   │   ├── shell/         # Shell command execution tools
 │   │   ├── subagent/      # Subagent delegation tools
 │   │   └── web/           # Web interaction tools
