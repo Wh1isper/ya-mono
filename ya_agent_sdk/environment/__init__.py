@@ -5,6 +5,7 @@ environment operations, allowing different backends (local, remote, S3, SSH, etc
 to be used interchangeably.
 """
 
+from ya_agent_sdk.environment.composite import CompositeFileOperator, LocalMountBackend, Mount, MountBackend
 from ya_agent_sdk.environment.local import (
     LocalEnvironment,
     LocalFileOperator,
@@ -25,9 +26,13 @@ except ModuleNotFoundError:
     _DOCKER_AVAILABLE = False
 
 __all__ = [
+    "CompositeFileOperator",
     "LocalEnvironment",
     "LocalFileOperator",
+    "LocalMountBackend",
     "LocalShell",
+    "Mount",
+    "MountBackend",
     "VirtualLocalFileOperator",
     "VirtualMount",
 ]
