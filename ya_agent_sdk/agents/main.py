@@ -713,26 +713,28 @@ class AgentStreamer(Generic[AgentDepsT, OutputT]):
     def __aiter__(self) -> AgentStreamer[AgentDepsT, OutputT]:
         return self
 
-    async def __anext__(self) -> StreamEvent:
-        """Get next event from the output queue.
-
-        Monitors main_task for exceptions and propagates them immediately.
-        Returns StopAsyncIteration when all producers are done and queue is empty.
-        """
-        while True:
-            # Check if main_task failed - propagate exception immediately
-            if self._main_task.done() and not self._main_task.cancelled():
-                exc = self._main_task.exception()
+    def _check_task_exceptions(self) -> None:
+        """Check all tasks for exceptions and raise the first one found."""
+        for task in self._tasks:
+            if task.done() and not task.cancelled():
+                exc = task.exception()
                 if exc is not None:
                     raise exc
 
+    async def __anext__(self) -> StreamEvent:
+        """Get next event from the output queue.
+
+        Monitors all tasks for exceptions and propagates them immediately.
+        Returns StopAsyncIteration when all producers are done and queue is empty.
+        """
+        while True:
+            # Check if any task failed - propagate exception immediately
+            self._check_task_exceptions()
+
             # Check exit condition: poll done and output queue empty
             if self._poll_done.is_set() and self._output_queue.empty():
-                # Final check for main_task exception before stopping
-                if self._main_task.done() and not self._main_task.cancelled():
-                    exc = self._main_task.exception()
-                    if exc is not None:
-                        raise exc
+                # Final check for task exceptions before stopping
+                self._check_task_exceptions()
                 raise StopAsyncIteration
 
             try:
@@ -1149,7 +1151,9 @@ async def stream_agent(  # noqa: C901
         try:
             results = await asyncio.gather(main_task, poll_task, return_exceptions=True)
         except BaseException:
-            # gather was interrupted; collect what we can from finished tasks
+            # gather was interrupted (e.g. parent task cancelled by Ctrl+C);
+            # collect what we can from finished tasks
+            logger.debug("gather interrupted during cleanup, collecting task results manually")
             results = []
             for task in [main_task, poll_task]:
                 if task.done():
