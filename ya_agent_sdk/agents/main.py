@@ -642,8 +642,10 @@ UserPromptFactory = Callable[[AgentRuntime[AgentDepsT, OutputT, EnvT]], Awaitabl
 class AgentStreamer(Generic[AgentDepsT, OutputT]):
     """Async iterator for streaming agent events with interrupt capability.
 
-    This class wraps the merged event stream and provides control methods
-    for interrupting the stream.
+    This is a class-based async iterator (not an async generator) to avoid
+    the "asynchronous generator is already running" error that occurs when
+    Python's GC finalizer tries to aclose() an async generator that was
+    interrupted by CancelledError during iteration.
 
     Attributes:
         run: The AgentRun instance. None until agent.iter() starts, available during
@@ -667,7 +669,9 @@ class AgentStreamer(Generic[AgentDepsT, OutputT]):
                 print(f"Usage: {streamer.run.usage()}")
     """
 
-    _event_generator: AsyncIterator[StreamEvent]
+    _output_queue: asyncio.Queue[StreamEvent]
+    _main_task: asyncio.Task[None]
+    _poll_done: asyncio.Event
     _tasks: list[asyncio.Task[None]] = field(default_factory=list)
     run: AgentRun[AgentDepsT, OutputT] | None = None
     exception: BaseException | None = None
@@ -706,11 +710,38 @@ class AgentStreamer(Generic[AgentDepsT, OutputT]):
                 if exc is not None:
                     raise exc
 
-    def __aiter__(self) -> AsyncIterator[StreamEvent]:
-        return self._event_generator
+    def __aiter__(self) -> AgentStreamer[AgentDepsT, OutputT]:
+        return self
+
+    def _check_task_exceptions(self) -> None:
+        """Check all tasks for exceptions and raise the first one found."""
+        for task in self._tasks:
+            if task.done() and not task.cancelled():
+                exc = task.exception()
+                if exc is not None:
+                    raise exc
 
     async def __anext__(self) -> StreamEvent:
-        return await self._event_generator.__anext__()
+        """Get next event from the output queue.
+
+        Monitors all tasks for exceptions and propagates them immediately.
+        Returns StopAsyncIteration when all producers are done and queue is empty.
+        """
+        while True:
+            # Check if any task failed - propagate exception immediately
+            self._check_task_exceptions()
+
+            # Check exit condition: poll done and output queue empty
+            if self._poll_done.is_set() and self._output_queue.empty():
+                # Final check for task exceptions before stopping
+                self._check_task_exceptions()
+                raise StopAsyncIteration
+
+            try:
+                event = await asyncio.wait_for(self._output_queue.get(), timeout=0.1)
+                return event
+            except TimeoutError:
+                continue
 
 
 # =============================================================================
@@ -1086,39 +1117,14 @@ async def stream_agent(  # noqa: C901
             logger.debug("Subagent polling task finished")
             poll_done.set()
 
-    async def generate_events() -> AsyncIterator[StreamEvent]:
-        """Consume from output_queue and yield events.
-
-        Also monitors main_task for exceptions and propagates them immediately.
-        """
-        while True:
-            # Check if main_task failed - propagate exception immediately
-            if main_task.done() and not main_task.cancelled():
-                exc = main_task.exception()
-                if exc is not None:
-                    raise exc
-
-            # Check exit condition: poll done and output queue empty
-            if poll_done.is_set() and output_queue.empty():
-                # Final check for main_task exception before returning
-                if main_task.done() and not main_task.cancelled():
-                    exc = main_task.exception()
-                    if exc is not None:
-                        raise exc
-                return
-
-            try:
-                event = await asyncio.wait_for(output_queue.get(), timeout=0.1)
-                yield event
-            except TimeoutError:
-                continue
-
     # Start producer tasks
     main_task = asyncio.create_task(run_main())
     poll_task = asyncio.create_task(poll_subagents())
 
     streamer: AgentStreamer[AgentDepsT, OutputT] = AgentStreamer(
-        _event_generator=generate_events(),
+        _output_queue=output_queue,
+        _main_task=main_task,
+        _poll_done=poll_done,
         _tasks=[main_task, poll_task],
     )
 
@@ -1139,8 +1145,26 @@ async def stream_agent(  # noqa: C901
             if not task.done():
                 task.cancel()
 
-        # Wait for tasks to complete and capture any exception
-        results = await asyncio.gather(main_task, poll_task, return_exceptions=True)
+        # Wait for tasks to complete and capture any exception.
+        # Protect against CancelledError interrupting the gather itself
+        # (can happen when our parent task is being cancelled, e.g., Ctrl+C).
+        cancelled_by_parent = False
+        try:
+            results = await asyncio.gather(main_task, poll_task, return_exceptions=True)
+        except BaseException as gather_exc:
+            # gather was interrupted (e.g. parent task cancelled by Ctrl+C);
+            # collect what we can from finished tasks
+            logger.debug("gather interrupted during cleanup, collecting task results manually")
+            cancelled_by_parent = isinstance(gather_exc, (asyncio.CancelledError, KeyboardInterrupt))
+            results = []
+            for task in [main_task, poll_task]:
+                if task.done():
+                    if task.cancelled():
+                        results.append(asyncio.CancelledError())
+                    else:
+                        results.append(task.exception())
+                else:
+                    results.append(asyncio.CancelledError())
 
         # Find first real exception (non-CancelledError)
         exceptions = [r for r in results if isinstance(r, BaseException) and not isinstance(r, asyncio.CancelledError)]
@@ -1149,3 +1173,7 @@ async def stream_agent(  # noqa: C901
             streamer.exception = AgentInterrupted("Agent execution was interrupted")
         elif exceptions:
             streamer.exception = exceptions[0]
+
+        # Re-raise cancellation so parent shutdown logic is not skipped
+        if cancelled_by_parent:
+            raise asyncio.CancelledError()
