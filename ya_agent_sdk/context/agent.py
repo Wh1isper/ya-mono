@@ -222,6 +222,9 @@ class ModelCapability(StrEnum):
     document_understanding = "document_understanding"
     """Model can process and understand documents (PDF, etc.)."""
 
+    audio_understanding = "audio_understanding"
+    """Model can process and understand audio content."""
+
     image_url = "image_url"
     """Model supports receiving images via URL (not just base64)."""
 
@@ -491,6 +494,12 @@ class ToolConfig(BaseModel):
     video_understanding_model_settings: ModelSettings | None = None
     """Model settings for video understanding agent."""
 
+    audio_understanding_model: str | None = None
+    """Model to use for audio understanding. Falls back to AgentSettings.audio_understanding_model."""
+
+    audio_understanding_model_settings: ModelSettings | None = None
+    """Model settings for audio understanding agent."""
+
     # Web search API keys
     google_search_api_key: str | None = Field(default_factory=lambda: _get_tool_settings().google_search_api_key)
     """Google Custom Search API key."""
@@ -529,6 +538,9 @@ class ToolConfig(BaseModel):
 
     view_max_inline_video_bytes: int = 50 * 1024 * 1024
     """Maximum video size in bytes that the view tool will inline into context."""
+
+    view_max_inline_audio_bytes: int = 50 * 1024 * 1024
+    """Maximum audio size in bytes that the view tool will inline into context."""
 
     fetch_stream_chunk_size: int = 64 * 1024
     """Chunk size in bytes for streamed HTTP reads in fetch/download tools."""
@@ -574,6 +586,23 @@ class ToolConfig(BaseModel):
         ctx: RunContext with AgentContext
         video_data: Raw video bytes
         media_type: MIME type (e.g., 'video/mp4')
+
+    Returns:
+        Publicly accessible URL string, or None to use default BinaryContent behavior.
+        Can be sync or async function.
+
+    Note:
+        The returned URL must be publicly accessible by the LLM provider.
+        Empty strings are treated as None (fallback to default behavior).
+    """
+
+    audio_to_url_hook: MediaToUrlHook | None = None
+    """Hook to convert audio data to URL.
+
+    Args:
+        ctx: RunContext with AgentContext
+        audio_data: Raw audio bytes
+        media_type: MIME type (e.g., 'audio/mpeg')
 
     Returns:
         Publicly accessible URL string, or None to use default BinaryContent behavior.
@@ -655,6 +684,11 @@ class ModelConfig(BaseModel):
     def has_video_understanding(self) -> bool:
         """Check if the model supports video understanding."""
         return ModelCapability.video_understanding in self.capabilities
+
+    @property
+    def has_audio_understanding(self) -> bool:
+        """Check if the model supports audio understanding."""
+        return ModelCapability.audio_understanding in self.capabilities
 
     @property
     def has_document_understanding(self) -> bool:

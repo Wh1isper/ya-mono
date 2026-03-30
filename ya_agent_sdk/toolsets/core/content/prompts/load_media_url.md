@@ -9,6 +9,9 @@
 {% if has_video %}
 - **Videos**: `https://example.com/video.mp4`, `https://youtube.com/watch?v=xxx`
 {% endif %}
+{% if has_audio %}
+- **Audio**: `https://example.com/audio.mp3`, `https://example.com/recording.wav`
+{% endif %}
 {% if has_document and enable_load_document %}
 - **Documents**: `https://example.com/file.pdf`
 {% endif %}
@@ -19,6 +22,9 @@
 {% endif %}
 {% if not has_video %}
 <note>Video/YouTube loading not supported. Use `read_video` tool instead.</note>
+{% endif %}
+{% if not has_audio %}
+<note>Audio loading not supported. Use `read_audio` tool instead.</note>
 {% endif %}
 
 </load-media-url-tool>
