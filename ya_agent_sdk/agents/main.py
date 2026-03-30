@@ -1148,12 +1148,14 @@ async def stream_agent(  # noqa: C901
         # Wait for tasks to complete and capture any exception.
         # Protect against CancelledError interrupting the gather itself
         # (can happen when our parent task is being cancelled, e.g., Ctrl+C).
+        cancelled_by_parent = False
         try:
             results = await asyncio.gather(main_task, poll_task, return_exceptions=True)
-        except BaseException:
+        except BaseException as gather_exc:
             # gather was interrupted (e.g. parent task cancelled by Ctrl+C);
             # collect what we can from finished tasks
             logger.debug("gather interrupted during cleanup, collecting task results manually")
+            cancelled_by_parent = isinstance(gather_exc, (asyncio.CancelledError, KeyboardInterrupt))
             results = []
             for task in [main_task, poll_task]:
                 if task.done():
@@ -1171,3 +1173,7 @@ async def stream_agent(  # noqa: C901
             streamer.exception = AgentInterrupted("Agent execution was interrupted")
         elif exceptions:
             streamer.exception = exceptions[0]
+
+        # Re-raise cancellation so parent shutdown logic is not skipped
+        if cancelled_by_parent:
+            raise asyncio.CancelledError()
