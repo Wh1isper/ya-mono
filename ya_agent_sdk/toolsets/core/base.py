@@ -590,7 +590,7 @@ class Toolset(BaseToolset[AgentDepsT]):
         logger.debug(f"call_tool: {name!r} completed successfully")
         return result
 
-    async def get_instructions(self, ctx: RunContext[AgentDepsT]) -> str | None:
+    async def get_instructions(self, ctx: RunContext[AgentDepsT]) -> str | list[str] | None:
         """Collect instructions from all tools with group-based deduplication.
 
         When multiple tools return Instructions with the same group,

@@ -57,14 +57,14 @@ class Instruction(BaseModel):
 
 
 @runtime_checkable
-class InstructableToolset(Protocol[AgentDepsT]):
+class InstructableToolset(Protocol):
     """Protocol for toolsets that provide instructions.
 
     This enables duck typing for any toolset that has a get_instructions method,
     allowing add_toolset_instructions() to work with both Toolset and BrowserUseToolset.
     """
 
-    async def get_instructions(self, ctx: RunContext[AgentDepsT]) -> str | None:
+    async def get_instructions(self, ctx: RunContext[Any]) -> str | list[str] | None:
         """Get instructions to inject into the system prompt."""
         ...
 
@@ -233,7 +233,7 @@ class BaseToolset(AbstractToolset[AgentDepsT], ABC):
 
     Example:
         class MyToolset(BaseToolset):
-            async def get_instructions(self, ctx: RunContext[AgentContext]) -> str | None:
+            async def get_instructions(self, ctx: RunContext[AgentContext]) -> str | list[str] | None:
                 content = await self._load_instructions(ctx)
                 return content
     """
@@ -250,7 +250,7 @@ class BaseToolset(AbstractToolset[AgentDepsT], ABC):
         """
         return None
 
-    async def get_instructions(self, ctx: RunContext[AgentDepsT]) -> str | None:
+    async def get_instructions(self, ctx: RunContext[AgentDepsT]) -> str | list[str] | None:
         """Get instructions to inject into the system prompt.
 
         Override this method to provide tool-specific instructions.
@@ -259,6 +259,6 @@ class BaseToolset(AbstractToolset[AgentDepsT], ABC):
             ctx: The run context containing runtime information.
 
         Returns:
-            Instruction string or None.
+            Instruction string, list of strings, or None.
         """
         return None

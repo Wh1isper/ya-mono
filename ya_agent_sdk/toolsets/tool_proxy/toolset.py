@@ -276,7 +276,7 @@ class ToolProxyToolset(BaseToolset[AgentContext]):
             return await self._execute_call(ctx, tool_args)
         return f"<error>Unknown proxy tool: {xml_escape(name)}</error>"
 
-    async def get_instructions(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instructions(self, ctx: RunContext[AgentContext]) -> str | list[str] | None:
         """Get instructions for proxy tools and delegate to loaded toolsets.
 
         Only collects instructions from toolsets whose tools have been
@@ -302,7 +302,10 @@ class ToolProxyToolset(BaseToolset[AgentContext]):
                     continue
             instructions = await ts.get_instructions(ctx)
             if instructions:
-                parts.append(instructions)
+                if isinstance(instructions, list):
+                    parts.extend(instructions)
+                else:
+                    parts.append(instructions)
 
         # Add tool-proxy instruction
         proxy_instruction = self._build_proxy_instruction(ctx)
