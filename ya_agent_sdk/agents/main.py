@@ -1203,29 +1203,47 @@ async def stream_agent(  # noqa: C901
                 task.cancel()
 
         # Wait for tasks to complete and capture any exception.
-        # Protect against CancelledError interrupting the gather itself
-        # (can happen when our parent task is being cancelled, e.g., Ctrl+C).
+        # Use an unbounded retry loop to handle repeated cancellation from any source
+        # (double Ctrl+C, pubsub cancel channels, etc.). Each CancelledError from the
+        # parent is consumed by the except clause, allowing the next attempt to proceed.
+        # This ensures child tasks are fully awaited and their cleanup (including
+        # pydantic-ai's ContextVar restoration) completes properly, preventing
+        # "was created in a different Context" errors on subsequent runs.
+        # A monotonic deadline (5s) guards against pathological cases where cancel
+        # events arrive faster than the loop can consume them.
         gather_interrupt: BaseException | None = None
-        try:
-            results = await asyncio.gather(main_task, poll_task, return_exceptions=True)
-        except BaseException as gather_exc:
-            # gather was interrupted (e.g. parent task cancelled by Ctrl+C);
-            # collect what we can from finished tasks
-            logger.debug("gather interrupted during cleanup, collecting task results manually")
-            if isinstance(gather_exc, (asyncio.CancelledError, KeyboardInterrupt)):
+        cleanup_deadline = time.perf_counter() + 5.0
+        while any(not t.done() for t in [main_task, poll_task]):
+            if time.perf_counter() > cleanup_deadline:
+                logger.warning("Cleanup deadline exceeded (5s), abandoning remaining tasks")
+                break
+            not_done = [t for t in [main_task, poll_task] if not t.done()]
+            try:
+                await asyncio.gather(*not_done, return_exceptions=True)
+            except BaseException as gather_exc:
+                logger.debug("gather interrupted during cleanup: %s", type(gather_exc).__name__)
                 gather_interrupt = gather_exc
-            else:
-                # Unexpected exception - re-raise after recording task results
-                gather_interrupt = gather_exc
-            results = []
-            for task in [main_task, poll_task]:
-                if task.done():
-                    if task.cancelled():
-                        results.append(asyncio.CancelledError())
-                    else:
-                        results.append(task.exception())
-                else:
+                # Ensure tasks are still cancelled for the retry
+                for task in not_done:
+                    if not task.done():
+                        task.cancel()
+
+        # Collect results from completed tasks.
+        # Tasks still running after the deadline are already cancelled and will
+        # self-cleanup in the event loop. For server usage (one context per request),
+        # this is safe since the context won't be reused. For TUI usage (shared
+        # context), the retry loop above handles the common cases, and the TUI's
+        # cancelling() guard prevents repeated cancel() calls.
+        results: list[BaseException | None] = []
+        for task in [main_task, poll_task]:
+            if task.done():
+                if task.cancelled():
                     results.append(asyncio.CancelledError())
+                else:
+                    results.append(task.exception())
+            else:
+                logger.warning("Task %s still running after cleanup deadline, will self-cleanup", task)
+                results.append(asyncio.CancelledError())
 
         # Find first real exception (non-CancelledError)
         exceptions = [r for r in results if isinstance(r, BaseException) and not isinstance(r, asyncio.CancelledError)]
@@ -1235,7 +1253,11 @@ async def stream_agent(  # noqa: C901
         elif exceptions:
             streamer.exception = exceptions[0]
 
-        # Re-raise the original exception so parent shutdown logic is not skipped
-        # and the exception type is preserved (e.g. KeyboardInterrupt stays KeyboardInterrupt)
+        # Re-raise gather interrupt only if cleanup failed (tasks still running)
+        # or if the interrupt was not a simple CancelledError (e.g., KeyboardInterrupt).
+        # When cleanup succeeds, let the original exception (from the with-block exit)
+        # propagate naturally through the @asynccontextmanager machinery.
         if gather_interrupt is not None:
-            raise gather_interrupt
+            still_running = any(not t.done() for t in [main_task, poll_task])
+            if still_running or not isinstance(gather_interrupt, asyncio.CancelledError):
+                raise gather_interrupt
