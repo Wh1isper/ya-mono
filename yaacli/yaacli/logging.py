@@ -168,6 +168,38 @@ def _configure_logger(
     logger.propagate = False
 
 
+def _redirect_root_logger(verbose: bool = False) -> None:
+    """Redirect root logger away from stderr.
+
+    The root logger may have a StreamHandler to stderr (set up by basicConfig
+    in __init__.py). Third-party libraries (httpx, anthropic, pydantic_ai, etc.)
+    propagate through the root logger. When prompt_toolkit is in full_screen mode,
+    any stderr output corrupts the TUI display, causing error flashes that require
+    pressing Enter to redraw.
+
+    This function replaces the root logger's stderr handler with either:
+    - A NullHandler (non-verbose): silently discard third-party logs
+    - A FileHandler (verbose): redirect third-party logs to yaacli.log
+
+    Args:
+        verbose: If True, redirect to file instead of discarding.
+    """
+    root = logging.getLogger()
+    root.handlers.clear()
+
+    if verbose:
+        log_file = Path.cwd() / LOG_FILE_NAME
+        file_handler = logging.FileHandler(log_file)
+        file_formatter = logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
+        file_handler.setFormatter(file_formatter)
+        root.addHandler(file_handler)
+    else:
+        root.addHandler(logging.NullHandler())
+
+    # Keep root at WARNING to avoid flooding with DEBUG/INFO from third-party libs
+    root.setLevel(logging.WARNING)
+
+
 def configure_tui_logging(
     queue: Queue,
     level: int = logging.INFO,
@@ -206,6 +238,12 @@ def configure_tui_logging(
     # Configure both loggers
     _configure_logger(TUI_LOGGER_NAME, queue, effective_level, add_file_handler=verbose)
     _configure_logger(SDK_LOGGER_NAME, queue, effective_level, add_file_handler=verbose)
+
+    # Redirect root logger to prevent third-party libraries (httpx, anthropic,
+    # pydantic_ai, etc.) from writing to stderr and corrupting the TUI display.
+    # These libraries propagate through the root logger, which has a default
+    # StreamHandler to stderr set up by basicConfig in __init__.py.
+    _redirect_root_logger(verbose=verbose)
 
     _initialized = True
 

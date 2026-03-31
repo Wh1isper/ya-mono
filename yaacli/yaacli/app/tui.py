@@ -2741,6 +2741,31 @@ class TUIApp:
             mouse_support=True,
         )
 
+        # Override prompt_toolkit's exception handler to prevent "Press ENTER to
+        # continue..." messages that flash on screen and corrupt the TUI display.
+        #
+        # prompt_toolkit's Application._handle_exception is registered as the asyncio
+        # event loop exception handler during run_async(). When unhandled asyncio
+        # exceptions occur (e.g., from httpx, third-party callbacks, GC'd tasks),
+        # it exits full-screen, prints the traceback, waits for Enter, then redraws.
+        #
+        # We replace this with a handler that logs the error silently and triggers
+        # a TUI redraw, so the user experience is uninterrupted.
+        original_handle_exception = self._app._handle_exception
+
+        def _quiet_exception_handler(loop: asyncio.AbstractEventLoop, context: dict[str, object]) -> None:
+            message = context.get("message", "Unhandled asyncio exception")
+            exception = context.get("exception")
+            if isinstance(exception, BaseException):
+                logger.error("asyncio: %s: %s", message, exception, exc_info=exception)
+            else:
+                logger.error("asyncio: %s", message)
+            # Trigger TUI redraw instead of "Press ENTER to continue..."
+            if self._app:
+                self._app.invalidate()
+
+        self._app._handle_exception = _quiet_exception_handler  # type: ignore[assignment]
+
         # Run with error handling
         try:
             await self._app.run_async()
@@ -2748,6 +2773,8 @@ class TUIApp:
             # Re-raise to be caught by cli.py with proper error display
             raise RuntimeError(f"TUI crashed: {e}") from e
         finally:
+            # Restore original prompt_toolkit exception handler
+            self._app._handle_exception = original_handle_exception  # type: ignore[assignment]
             # Log performance report on shutdown
             perf_log_report()
             # Ensure agent task is fully cancelled and awaited before __aexit__
