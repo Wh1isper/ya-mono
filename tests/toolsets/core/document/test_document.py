@@ -157,7 +157,7 @@ async def test_pdf_convert_page_range(tmp_path: Path, pdf_file: Path) -> None:
         assert export_dir.exists()
         assert (tmp_path / result["markdown_path"]).exists()
         assert (tmp_path / result["markdown_path"]).read_text() == snapshot("""\
-**Dummy PDF file** \n\
+# **Dummy PDF file** \n\
 
 """)
 

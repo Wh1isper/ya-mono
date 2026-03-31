@@ -95,6 +95,26 @@ def get_latest_request_usage(message_history: list[ModelMessage]) -> RequestUsag
     return None
 
 
+def _pydantic_ai_has_native_toolset_instructions() -> bool:
+    """Check if pydantic-ai natively supports AbstractToolset.get_instructions().
+
+    This was added in pydantic-ai v1.74.0 via https://github.com/pydantic/pydantic-ai/pull/4123.
+    When available, the agent graph automatically collects toolset instructions,
+    so we don't need to inject them manually via @agent.instructions.
+    """
+    from importlib.metadata import version
+
+    try:
+        v = version("pydantic-ai-slim")
+        major, minor = (int(x) for x in v.split(".")[:2])
+        return (major, minor) >= (1, 74)
+    except Exception:
+        return False
+
+
+_HAS_NATIVE_TOOLSET_INSTRUCTIONS = _pydantic_ai_has_native_toolset_instructions()
+
+
 def add_toolset_instructions(
     agent: Agent[AgentDepsT, OutputDataT], toolsets: list[AbstractToolset]
 ) -> Agent[AgentDepsT, OutputDataT]:
@@ -103,8 +123,13 @@ def add_toolset_instructions(
     Works with any toolset that implements InstructableToolset protocol
     (has get_instructions method), including Toolset and BrowserUseToolset.
 
-    TODO: Drop this when https://github.com/pydantic/pydantic-ai/pull/4123 merged
+    Since pydantic-ai v1.74.0, AbstractToolset.get_instructions() is natively
+    supported and the agent graph collects toolset instructions automatically.
+    In that case, this function is a no-op to avoid duplicate injection.
     """
+    if _HAS_NATIVE_TOOLSET_INSTRUCTIONS:
+        return agent
+
     from ya_agent_sdk.toolsets.base import InstructableToolset
 
     @agent.instructions
@@ -112,9 +137,12 @@ def add_toolset_instructions(
         parts: list[str] = []
         for toolset in toolsets:
             if isinstance(toolset, InstructableToolset):
-                instructions = await toolset.get_instructions(ctx)
+                instructions = await toolset.get_instructions(ctx)  # type: ignore[arg-type]
                 if instructions:
-                    parts.append(instructions)
+                    if isinstance(instructions, list):
+                        parts.extend(instructions)
+                    else:
+                        parts.append(instructions)
         if not parts:
             return None
         return "\n".join(parts)

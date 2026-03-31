@@ -323,7 +323,7 @@ class SkillToolset(BaseToolset[AgentContext]):
 
         return "\n".join(lines)
 
-    async def get_instructions(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instructions(self, ctx: RunContext[AgentContext]) -> str | list[str] | None:
         """Get skill instructions to inject into system prompt.
 
         This method is called at the start of each request, providing the

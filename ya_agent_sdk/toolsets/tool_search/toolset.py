@@ -286,7 +286,7 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
         ts, original_tool = self._toolset_tools_cache[name]
         return await ts.call_tool(name, tool_args, ctx, original_tool)
 
-    async def get_instructions(self, ctx: RunContext[AgentContext]) -> str | None:
+    async def get_instructions(self, ctx: RunContext[AgentContext]) -> str | list[str] | None:
         """Get instructions for tool_search and delegate to loaded toolsets.
 
         Only collects instructions from toolsets whose tools are currently
@@ -312,7 +312,10 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
                     continue
             instructions = await ts.get_instructions(ctx)
             if instructions:
-                parts.append(instructions)
+                if isinstance(instructions, list):
+                    parts.extend(instructions)
+                else:
+                    parts.append(instructions)
 
         # Add tool_search instruction
         search_instruction = self._build_search_instruction()
