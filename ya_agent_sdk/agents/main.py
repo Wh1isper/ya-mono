@@ -144,6 +144,7 @@ class AgentRuntime(Generic[AgentDepsT, OutputT, EnvT]):
     core_toolset: Toolset[AgentDepsT] | None
     _exit_stack: AsyncExitStack | None = field(default=None, repr=False)
     _enter_count: int = field(default=0, init=False, repr=False)
+    _enter_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
 
     async def __aenter__(self) -> AgentRuntime[AgentDepsT, OutputT, EnvT]:
         """Enter the runtime, managing env/ctx/agent lifecycles.
@@ -160,35 +161,40 @@ class AgentRuntime(Generic[AgentDepsT, OutputT, EnvT]):
 
         Only enters components that are not already entered (checked via _entered flag).
         Uses AsyncExitStack to track what was entered, ensuring proper cleanup.
+
+        A lock ensures that if two tasks concurrently enter the runtime, the
+        second one waits until the first has fully initialized resources before
+        returning.
         """
-        self._enter_count += 1
-        if self._enter_count > 1:
-            # Already entered - just increment the counter.
-            # Resources (env, ctx, agent) are already managed by the first entry.
+        async with self._enter_lock:
+            self._enter_count += 1
+            if self._enter_count > 1:
+                # Already entered - just increment the counter.
+                # Resources (env, ctx, agent) are already managed by the first entry.
+                return self
+
+            # Build exit stack locally first, then commit on success.
+            # If any step fails, we rollback the count and close the partial stack.
+            stack = AsyncExitStack()
+            await stack.__aenter__()
+            try:
+                # Enter in order: env -> ctx -> agent
+                # Only enter if not already entered
+                if not self.env._entered:
+                    await stack.enter_async_context(self.env)
+                if not self.ctx._entered:
+                    await stack.enter_async_context(self.ctx)
+                # Agent uses reference counting, safe to enter multiple times
+                await stack.enter_async_context(self.agent)
+            except BaseException:
+                # Rollback: close whatever was partially entered and reset count
+                self._enter_count -= 1
+                await stack.__aexit__(*sys.exc_info())
+                raise
+
+            # Commit - all resources entered successfully
+            self._exit_stack = stack
             return self
-
-        # Build exit stack locally first, then commit on success.
-        # If any step fails, we rollback the count and close the partial stack.
-        stack = AsyncExitStack()
-        await stack.__aenter__()
-        try:
-            # Enter in order: env -> ctx -> agent
-            # Only enter if not already entered
-            if not self.env._entered:
-                await stack.enter_async_context(self.env)
-            if not self.ctx._entered:
-                await stack.enter_async_context(self.ctx)
-            # Agent uses reference counting, safe to enter multiple times
-            await stack.enter_async_context(self.agent)
-        except BaseException:
-            # Rollback: close whatever was partially entered and reset count
-            self._enter_count -= 1
-            await stack.__aexit__(*sys.exc_info())
-            raise
-
-        # Commit - all resources entered successfully
-        self._exit_stack = stack
-        return self
 
     async def __aexit__(
         self,
