@@ -208,19 +208,23 @@ class AgentRuntime(Generic[AgentDepsT, OutputT, EnvT]):
         This ensures that the outermost context manager (which entered the
         runtime first) performs cleanup in the same asyncio task where
         resources were created, preventing cross-task cancel scope errors.
+
+        The lock serializes exit with entry so a concurrent __aenter__
+        cannot start re-initializing resources while teardown is in progress.
         """
-        if self._enter_count <= 0:
-            logger.warning("AgentRuntime.__aexit__ called with enter_count=%d (unbalanced)", self._enter_count)
+        async with self._enter_lock:
+            if self._enter_count <= 0:
+                logger.warning("AgentRuntime.__aexit__ called with enter_count=%d (unbalanced)", self._enter_count)
+                return None
+            self._enter_count -= 1
+            if self._enter_count > 0:
+                # Not the last exit - keep resources alive.
+                return None
+            if self._exit_stack:
+                result = await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
+                self._exit_stack = None
+                return result
             return None
-        self._enter_count -= 1
-        if self._enter_count > 0:
-            # Not the last exit - keep resources alive.
-            return None
-        if self._exit_stack:
-            result = await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
-            self._exit_stack = None
-            return result
-        return None
 
 
 # =============================================================================
