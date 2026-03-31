@@ -14,7 +14,7 @@ from ya_agent_sdk.events import (
     FileChange,
     FileChangeAction,
     FileChangeEvent,
-    MemoryEvent,
+    NoteEvent,
     TaskEvent,
     TaskInfo,
 )
@@ -411,11 +411,11 @@ class EventRenderer:
 
         return parts
 
-    def render_memory_event(self, event: MemoryEvent) -> str:
-        """Render memory event as a memory panel with full snapshot."""
+    def render_note_event(self, event: NoteEvent) -> str:
+        """Render note event as a note panel with full snapshot."""
         if not event.entries:
             content = Text("No entries", style="dim")
-            panel = Panel(content, border_style="magenta", title="[magenta]Memory[/magenta]", title_align="left")
+            panel = Panel(content, border_style="magenta", title="[magenta]Notes[/magenta]", title_align="left")
             return self._renderer.render(panel)
 
         parts: list[RenderableType] = []
@@ -431,7 +431,7 @@ class EventRenderer:
         panel = Panel(
             Group(*parts),
             border_style="magenta",
-            title=f"[magenta]Memory ({len(event.entries)} entries)[/magenta]",
+            title=f"[magenta]Notes ({len(event.entries)} entries)[/magenta]",
             title_align="left",
         )
         return self._renderer.render(panel)

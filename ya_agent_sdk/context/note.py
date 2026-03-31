@@ -1,7 +1,7 @@
-"""Memory management for agent sessions.
+"""Note management for agent sessions.
 
-This module provides a simple key-value memory store that persists
-across turns and sessions. Memory entries are injected into runtime
+This module provides a simple key-value note store that persists
+across turns and sessions. Note entries are injected into runtime
 instructions so the agent always has access to stored context.
 """
 
@@ -12,18 +12,18 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
-class MemoryManager(BaseModel):
-    """Manager for session-persistent memory entries.
+class NoteManager(BaseModel):
+    """Manager for session-persistent note entries.
 
     Provides a simple key-value store that the agent can read/write.
     Entries are injected into runtime instructions on every user prompt,
     giving the agent persistent recall across turns.
 
-    MemoryManager is shared between parent and subagent contexts (shallow copy),
-    providing a unified memory view across the agent hierarchy.
+    NoteManager is shared between parent and subagent contexts (shallow copy),
+    providing a unified note view across the agent hierarchy.
 
     Example:
-        manager = MemoryManager()
+        manager = NoteManager()
         manager.set("language", "User prefers Chinese communication")
         manager.set("os", "macOS")
         manager.delete("os")
@@ -31,19 +31,19 @@ class MemoryManager(BaseModel):
     """
 
     entries: dict[str, str] = Field(default_factory=dict)
-    """All memory entries keyed by entry key."""
+    """All note entries keyed by entry key."""
 
     def set(self, key: str, value: str) -> None:
-        """Set or update a memory entry.
+        """Set or update a note entry.
 
         Args:
-            key: Unique key for the memory entry.
+            key: Unique key for the note entry.
             value: Content to store.
         """
         self.entries[key] = value
 
     def get(self, key: str) -> str | None:
-        """Get a memory entry by key.
+        """Get a note entry by key.
 
         Args:
             key: The key to look up.
@@ -54,7 +54,7 @@ class MemoryManager(BaseModel):
         return self.entries.get(key)
 
     def delete(self, key: str) -> bool:
-        """Delete a memory entry by key.
+        """Delete a note entry by key.
 
         Args:
             key: The key to delete.
@@ -75,7 +75,7 @@ class MemoryManager(BaseModel):
         """
         return sorted(self.entries.items())
 
-    def export_memory(self) -> dict[str, str]:
+    def export_notes(self) -> dict[str, str]:
         """Export entries for serialization.
 
         Returns:
@@ -84,13 +84,13 @@ class MemoryManager(BaseModel):
         return dict(self.entries)
 
     @classmethod
-    def from_exported(cls, data: dict[str, Any]) -> MemoryManager:
-        """Restore MemoryManager from exported data.
+    def from_exported(cls, data: dict[str, Any]) -> NoteManager:
+        """Restore NoteManager from exported data.
 
         Args:
-            data: Exported memory data from export_memory().
+            data: Exported note data from export_notes().
 
         Returns:
-            Restored MemoryManager instance.
+            Restored NoteManager instance.
         """
         return cls(entries={str(k): str(v) for k, v in data.items()})

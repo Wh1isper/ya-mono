@@ -307,4 +307,4 @@ def test_enhance_module_exports() -> None:
     assert hasattr(enhance, "TaskGetTool")
     assert hasattr(enhance, "TaskUpdateTool")
     assert hasattr(enhance, "TaskListTool")
-    assert hasattr(enhance, "MemoryUpdateTool")
+    assert hasattr(enhance, "NoteTool")

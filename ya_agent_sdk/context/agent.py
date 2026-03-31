@@ -107,7 +107,7 @@ from ya_agent_sdk.usage import ExtraUsageRecord, InternalUsage
 from ya_agent_sdk.utils import get_latest_request_usage
 
 from .bus import BusMessage, MessageBus
-from .memory import MemoryManager
+from .note import NoteManager
 from .tasks import TaskManager, TaskStatus
 
 if TYPE_CHECKING:
@@ -758,8 +758,8 @@ class ResumableState(BaseModel):
     tasks: dict[str, dict[str, Any]] = Field(default_factory=dict)
     """Serialized tasks from TaskManager, keyed by task ID."""
 
-    memory: dict[str, str] = Field(default_factory=dict)
-    """Serialized memory entries from MemoryManager, keyed by entry key."""
+    notes: dict[str, str] = Field(default_factory=dict)
+    """Serialized note entries from NoteManager, keyed by entry key."""
 
     tool_search_loaded_tools: list[str] = Field(default_factory=list)
     """Tool names loaded via tool_search during the session."""
@@ -809,7 +809,7 @@ class ResumableState(BaseModel):
         ctx.auto_load_files = list(self.auto_load_files)
         # Restore task_manager from serialized tasks (always reset to avoid stale state)
         ctx.task_manager = TaskManager.from_exported(self.tasks) if self.tasks else TaskManager()
-        ctx.memory_manager = MemoryManager.from_exported(self.memory) if self.memory else MemoryManager()
+        ctx.note_manager = NoteManager.from_exported(self.notes) if self.notes else NoteManager()
         ctx.tool_search_loaded_tools = list(self.tool_search_loaded_tools)
         ctx.tool_search_loaded_namespaces = list(self.tool_search_loaded_namespaces)
 
@@ -985,8 +985,8 @@ class AgentContext(BaseModel):
     task_manager: TaskManager = Field(default_factory=TaskManager)
     """Task manager for tracking tasks and dependencies within the session."""
 
-    memory_manager: MemoryManager = Field(default_factory=MemoryManager)
-    """Memory manager for persistent key-value storage within the session."""
+    note_manager: NoteManager = Field(default_factory=NoteManager)
+    """Note manager for persistent key-value storage within the session."""
 
     tool_search_loaded_tools: list[str] = Field(default_factory=list)
     """Tool names loaded via tool_search during the session. Used for session restore."""
@@ -1342,8 +1342,8 @@ class AgentContext(BaseModel):
         # Active tasks (pending + in_progress)
         self._build_active_tasks_element(root, detailed=is_user_prompt)
 
-        # Memory entries (only on user prompts to reduce noise)
-        self._build_memory_element(root, is_user_prompt=is_user_prompt)
+        # Note entries (only on user prompts to reduce noise)
+        self._build_notes_element(root, is_user_prompt=is_user_prompt)
 
         parts.append(_xml_to_string(root))
 
@@ -1381,23 +1381,23 @@ class AgentContext(BaseModel):
 
         return "\n\n".join(parts)
 
-    def _build_memory_element(self, parent: Element, *, is_user_prompt: bool = True) -> None:
-        """Build memory XML element and append to parent if entries exist.
+    def _build_notes_element(self, parent: Element, *, is_user_prompt: bool = True) -> None:
+        """Build notes XML element and append to parent if entries exist.
 
         Args:
             parent: Parent XML element to append to.
-            is_user_prompt: Only include memory on user prompts to reduce noise.
+            is_user_prompt: Only include notes on user prompts to reduce noise.
         """
         if not is_user_prompt:
             return
 
-        entries = self.memory_manager.list_all()
+        entries = self.note_manager.list_all()
         if not entries:
             return
 
-        memory_elem = SubElement(parent, "memory")
+        notes_elem = SubElement(parent, "notes")
         for key, value in entries:
-            entry_elem = SubElement(memory_elem, "entry")
+            entry_elem = SubElement(notes_elem, "entry")
             entry_elem.set("key", key)
             entry_elem.text = value
 
@@ -1717,7 +1717,7 @@ class AgentContext(BaseModel):
             need_user_approve_mcps=list(self.need_user_approve_mcps),
             auto_load_files=list(self.auto_load_files),
             tasks=self.task_manager.export_tasks(),
-            memory=self.memory_manager.export_memory(),
+            notes=self.note_manager.export_notes(),
             tool_search_loaded_tools=list(self.tool_search_loaded_tools),
             tool_search_loaded_namespaces=list(self.tool_search_loaded_namespaces),
         )
