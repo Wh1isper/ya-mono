@@ -1065,6 +1065,7 @@ class TUIApp:
         self._printed_tool_calls.clear()
         self._subagent_states.clear()
         self._event_renderer.clear()
+        cancelled = False
 
         try:
             # Initial agent execution
@@ -1086,6 +1087,7 @@ class TUIApp:
             # Agent completed successfully
 
         except asyncio.CancelledError:
+            cancelled = True
             self._finalize_streaming_text()
             self._finalize_streaming_thinking()
             self._append_output("[Cancelled]")
@@ -1122,8 +1124,11 @@ class TUIApp:
             if self._app:
                 self._app.invalidate()
             # Check if we need to trigger a new turn for pending bus messages
-            # (e.g., background task completed while we were running)
-            self._check_pending_bus_messages()
+            # (e.g., background task completed while we were running).
+            # Skip this if the user explicitly cancelled (Ctrl+C) -- they
+            # intended to stop execution, not restart it immediately.
+            if not cancelled:
+                self._check_pending_bus_messages()
 
     def _reset_hitl_state(self) -> None:
         """Reset all HITL-related state variables.
@@ -1730,7 +1735,9 @@ class TUIApp:
 
             if self._state == TUIState.RUNNING:
                 # Running: request cancellation (state change handled by _run_agent finally)
-                if self._agent_task and not self._agent_task.done():
+                # Only cancel once - repeated cancellation can orphan internal tasks
+                # and cause ContextVar errors (pydantic-ai wrap_task cleanup interrupted)
+                if self._agent_task and not self._agent_task.done() and not self._agent_task.cancelling():
                     self._agent_task.cancel()
                     self._append_output("[Cancelling...]")
             else:
