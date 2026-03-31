@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import sys
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -142,25 +143,51 @@ class AgentRuntime(Generic[AgentDepsT, OutputT, EnvT]):
     agent: Agent[AgentDepsT, OutputT]
     core_toolset: Toolset[AgentDepsT] | None
     _exit_stack: AsyncExitStack | None = field(default=None, repr=False)
+    _enter_count: int = field(default=0, init=False, repr=False)
 
     async def __aenter__(self) -> AgentRuntime[AgentDepsT, OutputT, EnvT]:
         """Enter the runtime, managing env/ctx/agent lifecycles.
 
+        Uses reference counting to support re-entrant usage. Only the first
+        entry actually sets up resources; subsequent entries just increment
+        the counter. This is critical when the runtime is entered by an
+        outer lifecycle manager (e.g. TUI app) and re-entered by an inner
+        caller (e.g. stream_agent's run_main) potentially in a different
+        asyncio task. Without reference counting, the inner entry would
+        overwrite the exit stack, orphaning the original resources and
+        causing anyio cancel scope errors on cleanup (since MCP sessions
+        create anyio task groups bound to the entering task).
+
         Only enters components that are not already entered (checked via _entered flag).
         Uses AsyncExitStack to track what was entered, ensuring proper cleanup.
         """
-        self._exit_stack = AsyncExitStack()
-        await self._exit_stack.__aenter__()
+        self._enter_count += 1
+        if self._enter_count > 1:
+            # Already entered - just increment the counter.
+            # Resources (env, ctx, agent) are already managed by the first entry.
+            return self
 
-        # Enter in order: env -> ctx -> agent
-        # Only enter if not already entered
-        if not self.env._entered:
-            await self._exit_stack.enter_async_context(self.env)
-        if not self.ctx._entered:
-            await self._exit_stack.enter_async_context(self.ctx)
-        # Agent uses reference counting, safe to enter multiple times
-        await self._exit_stack.enter_async_context(self.agent)
+        # Build exit stack locally first, then commit on success.
+        # If any step fails, we rollback the count and close the partial stack.
+        stack = AsyncExitStack()
+        await stack.__aenter__()
+        try:
+            # Enter in order: env -> ctx -> agent
+            # Only enter if not already entered
+            if not self.env._entered:
+                await stack.enter_async_context(self.env)
+            if not self.ctx._entered:
+                await stack.enter_async_context(self.ctx)
+            # Agent uses reference counting, safe to enter multiple times
+            await stack.enter_async_context(self.agent)
+        except BaseException:
+            # Rollback: close whatever was partially entered and reset count
+            self._enter_count -= 1
+            await stack.__aexit__(*sys.exc_info())
+            raise
 
+        # Commit - all resources entered successfully
+        self._exit_stack = stack
         return self
 
     async def __aexit__(
@@ -171,9 +198,18 @@ class AgentRuntime(Generic[AgentDepsT, OutputT, EnvT]):
     ) -> bool | None:
         """Exit the runtime, cleaning up only what we entered.
 
-        AsyncExitStack automatically exits in reverse order, and only
-        exits contexts that were entered via enter_async_context().
+        Only the last exit (counter reaches 0) actually tears down resources.
+        This ensures that the outermost context manager (which entered the
+        runtime first) performs cleanup in the same asyncio task where
+        resources were created, preventing cross-task cancel scope errors.
         """
+        if self._enter_count <= 0:
+            logger.warning("AgentRuntime.__aexit__ called with enter_count=%d (unbalanced)", self._enter_count)
+            return None
+        self._enter_count -= 1
+        if self._enter_count > 0:
+            # Not the last exit - keep resources alive.
+            return None
         if self._exit_stack:
             result = await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
             self._exit_stack = None
