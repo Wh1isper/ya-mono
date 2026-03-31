@@ -71,9 +71,9 @@ from ya_agent_sdk.events import (
     HandoffCompleteEvent,
     HandoffFailedEvent,
     HandoffStartEvent,
-    MemoryEvent,
     MessageReceivedEvent,
     ModelRequestStartEvent,
+    NoteEvent,
     SubagentCompleteEvent,
     SubagentStartEvent,
     TaskEvent,
@@ -1647,8 +1647,8 @@ class TUIApp:
             rendered = self._event_renderer.render_task_event(message_event)
             self._append_output(rendered.rstrip())
 
-        elif isinstance(message_event, MemoryEvent):
-            rendered = self._event_renderer.render_memory_event(message_event)
+        elif isinstance(message_event, NoteEvent):
+            rendered = self._event_renderer.render_note_event(message_event)
             self._append_output(rendered.rstrip())
 
         elif isinstance(message_event, FileChangeEvent):

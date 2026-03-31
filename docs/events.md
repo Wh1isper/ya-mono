@@ -258,20 +258,20 @@ if isinstance(event, TaskEvent):
         print(f"#{task.id} [{task.status}] {task.subject}")
 ```
 
-### Memory Events
+### Note Events
 
-Emitted when memory state changes (set, delete). Each event contains a **full snapshot** of all memory entries for stateless rendering:
+Emitted when note state changes (set, delete). Each event contains a **full snapshot** of all note entries for stateless rendering:
 
-| Event         | Description                 | Key Fields |
-| ------------- | --------------------------- | ---------- |
-| `MemoryEvent` | Memory entry set or deleted | `entries`  |
+| Event       | Description               | Key Fields |
+| ----------- | ------------------------- | ---------- |
+| `NoteEvent` | Note entry set or deleted | `entries`  |
 
 The `entries` field is a `dict[str, str]` mapping keys to values.
 
 ```python
-from ya_agent_sdk.events import MemoryEvent
+from ya_agent_sdk.events import NoteEvent
 
-if isinstance(event, MemoryEvent):
+if isinstance(event, NoteEvent):
     for key, value in event.entries.items():
         print(f"{key}: {value}")
 ```

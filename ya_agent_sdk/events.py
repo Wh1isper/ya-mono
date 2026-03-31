@@ -510,20 +510,20 @@ class TaskEvent(AgentEvent):
 
 
 # =============================================================================
-# Memory Events
+# Note Events
 # =============================================================================
 
 
 @dataclass
-class MemoryEvent(AgentEvent):
-    """Emitted when memory state changes (set, delete).
+class NoteEvent(AgentEvent):
+    """Emitted when note state changes (set, delete).
 
-    Contains a full snapshot of all memory entries for stateless rendering.
-    Consumers can render the complete memory view from this event
+    Contains a full snapshot of all note entries for stateless rendering.
+    Consumers can render the complete note view from this event
     without tracking incremental changes.
 
     Attributes:
-        entries: Full dict of all memory entries (key -> value).
+        entries: Full dict of all note entries (key -> value).
     """
 
     entries: dict[str, str] = field(default_factory=dict)
