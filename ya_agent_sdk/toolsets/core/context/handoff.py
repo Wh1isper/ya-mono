@@ -63,6 +63,7 @@ class HandoffMessage(BaseModel):
 3. Key technical decisions
 4. Pending tasks
 5. Next step (if any)
+6. Past Interactions: A concise bullet list of key interactions (both sides) that already occurred, to prevent repetition. Include your actions/proposals and user's responses, approaches tried and outcomes, explanations already given.
 """,
     )
 
@@ -108,6 +109,7 @@ The summary will be injected into the new context automatically.
 3. Key technical decisions
 4. Pending tasks
 5. Next step (if any)
+6. Past Interactions: A concise bullet list of key interactions (both sides) that already occurred, to prevent repetition. Include your actions/proposals and user's responses, approaches tried and outcomes, explanations already given.
 """
             ),
         ],

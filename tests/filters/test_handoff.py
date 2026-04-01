@@ -78,10 +78,10 @@ async def test_process_handoff_with_handoff_message(tmp_path: Path) -> None:
             assert len(tool_return_parts) == 1
             assert tool_return_parts[0].tool_name == "summarize"
             assert "Previous context summary here" in tool_return_parts[0].content
-            # summary-complete marker
+            # context-restored marker
             user_parts = [p for p in third_msg.parts if isinstance(p, UserPromptPart)]
             assert len(user_parts) == 1
-            assert "summary-complete" in user_parts[0].content
+            assert "context-restored" in user_parts[0].content
 
             # Tool call IDs should match
             assert second_msg.parts[0].tool_call_id == tool_return_parts[0].tool_call_id
@@ -116,8 +116,9 @@ async def test_process_handoff_with_user_prompts(tmp_path: Path) -> None:
             assert isinstance(first_msg, ModelRequest)
             assert any(isinstance(p, SystemPromptPart) for p in first_msg.parts)
             user_parts = [p for p in first_msg.parts if isinstance(p, UserPromptPart)]
-            assert len(user_parts) == 1
-            assert user_parts[0].content == "Build me a web app with React"
+            assert len(user_parts) == 2  # original-request label + prompt
+            assert "original-request" in user_parts[0].content
+            assert user_parts[1].content == "Build me a web app with React"
 
 
 async def test_process_handoff_with_steering_messages(tmp_path: Path) -> None:
@@ -146,11 +147,12 @@ async def test_process_handoff_with_steering_messages(tmp_path: Path) -> None:
             third_msg = result[2]
             assert isinstance(third_msg, ModelRequest)
             user_parts = [p for p in third_msg.parts if isinstance(p, UserPromptPart)]
-            # 2 steering + summary-complete
-            assert len(user_parts) == 3
-            assert "[User Steering] Focus on tests" in user_parts[0].content
-            assert "[User Steering] Skip docs" in user_parts[1].content
-            assert "summary-complete" in user_parts[2].content
+            # user-steering label + 2 steering + context-restored
+            assert len(user_parts) == 4
+            assert "user-steering" in user_parts[0].content
+            assert "[User Steering] Focus on tests" in user_parts[1].content
+            assert "[User Steering] Skip docs" in user_parts[2].content
+            assert "context-restored" in user_parts[3].content
 
             # Steering messages should be cleared
             assert ctx.steering_messages == []
@@ -319,7 +321,7 @@ def test_build_handoff_messages_basic() -> None:
     assert len(tool_returns) == 1
     assert tool_returns[0].content == "Test summary"
     assert tool_returns[0].tool_call_id == "test-id"
-    assert any(isinstance(p, UserPromptPart) and "summary-complete" in p.content for p in result[2].parts)
+    assert any(isinstance(p, UserPromptPart) and "context-restored" in p.content for p in result[2].parts)
 
 
 def test_build_handoff_messages_with_prompt_and_steering() -> None:
@@ -334,12 +336,14 @@ def test_build_handoff_messages_with_prompt_and_steering() -> None:
     first_msg = result[0]
     assert isinstance(first_msg, ModelRequest)
     user_parts = [p for p in first_msg.parts if isinstance(p, UserPromptPart)]
-    assert len(user_parts) == 1
-    assert user_parts[0].content == "Build a CLI tool"
+    assert len(user_parts) == 2  # original-request label + prompt
+    assert "original-request" in user_parts[0].content
+    assert user_parts[1].content == "Build a CLI tool"
 
     # Steering in last message
     third_msg = result[2]
     assert isinstance(third_msg, ModelRequest)
     user_parts = [p for p in third_msg.parts if isinstance(p, UserPromptPart)]
-    assert len(user_parts) == 2  # steering + summary-complete
-    assert "[User Steering] Use click library" in user_parts[0].content
+    assert len(user_parts) == 3  # user-steering label + steering + context-restored
+    assert "user-steering" in user_parts[0].content
+    assert "[User Steering] Use click library" in user_parts[1].content
