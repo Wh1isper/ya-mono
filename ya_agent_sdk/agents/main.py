@@ -7,6 +7,7 @@ with proper environment and context lifecycle management.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import inspect
 import sys
 import time
@@ -1174,8 +1175,15 @@ async def stream_agent(  # noqa: C901
             logger.debug("Subagent polling task finished")
             poll_done.set()
 
-    # Start producer tasks
-    main_task = asyncio.create_task(run_main())
+    # Start producer tasks.
+    # Use a fresh contextvars.Context copy for main_task to isolate each run
+    # from stale ContextVar state left by previous cancelled runs.  When a
+    # streaming run is cancelled, pydantic-ai's internal wrap_task may not
+    # complete its ContextVar cleanup (e.g. _CURRENT_RUN_CONTEXT.reset(token)
+    # in set_current_run_context).  If that orphaned cleanup later runs via
+    # GC in a different context, it raises "was created in a different Context".
+    # A fresh context copy ensures each run starts clean.
+    main_task = asyncio.create_task(run_main(), context=contextvars.copy_context())
     poll_task = asyncio.create_task(poll_subagents())
 
     streamer: AgentStreamer[AgentDepsT, OutputT] = AgentStreamer(
@@ -1196,21 +1204,17 @@ async def stream_agent(  # noqa: C901
         if (run := streamer.run) and (result := run.result) and isinstance(result.output, DeferredToolRequests):
             result.output = ctx.tool_id_wrapper.wrap_deferred_tool_requests(result.output)
     finally:
-        # Cancel all running tasks first to ensure clean shutdown
-        # This handles both explicit interrupt() calls and external cancellation (e.g., Ctrl+C)
+        # Cancel all running tasks to initiate clean shutdown.
+        # This handles both explicit interrupt() calls and external cancellation (e.g., Ctrl+C).
         for task in streamer._tasks:
             if not task.done():
                 task.cancel()
 
         # Wait for tasks to complete and capture any exception.
-        # Use an unbounded retry loop to handle repeated cancellation from any source
-        # (double Ctrl+C, pubsub cancel channels, etc.). Each CancelledError from the
-        # parent is consumed by the except clause, allowing the next attempt to proceed.
-        # This ensures child tasks are fully awaited and their cleanup (including
-        # pydantic-ai's ContextVar restoration) completes properly, preventing
-        # "was created in a different Context" errors on subsequent runs.
-        # A monotonic deadline (5s) guards against pathological cases where cancel
-        # events arrive faster than the loop can consume them.
+        # We do NOT re-cancel tasks during this wait: doing so would interrupt
+        # pydantic-ai's internal ContextVar cleanup (set_current_run_context's
+        # finally block), causing "was created in a different Context" errors.
+        # A single cancel() is sufficient; the deadline guards against hangs.
         gather_interrupt: BaseException | None = None
         cleanup_deadline = time.perf_counter() + 5.0
         while any(not t.done() for t in [main_task, poll_task]):
@@ -1223,17 +1227,11 @@ async def stream_agent(  # noqa: C901
             except BaseException as gather_exc:
                 logger.debug("gather interrupted during cleanup: %s", type(gather_exc).__name__)
                 gather_interrupt = gather_exc
-                # Ensure tasks are still cancelled for the retry
-                for task in not_done:
-                    if not task.done():
-                        task.cancel()
+                # Do NOT re-cancel tasks here.  The initial cancel() is already
+                # in flight; re-cancelling would interrupt the internal cleanup
+                # of pydantic-ai's wrap_task (ContextVar token reset).
 
         # Collect results from completed tasks.
-        # Tasks still running after the deadline are already cancelled and will
-        # self-cleanup in the event loop. For server usage (one context per request),
-        # this is safe since the context won't be reused. For TUI usage (shared
-        # context), the retry loop above handles the common cases, and the TUI's
-        # cancelling() guard prevents repeated cancel() calls.
         results: list[BaseException | None] = []
         for task in [main_task, poll_task]:
             if task.done():
@@ -1255,8 +1253,6 @@ async def stream_agent(  # noqa: C901
 
         # Re-raise gather interrupt only if cleanup failed (tasks still running)
         # or if the interrupt was not a simple CancelledError (e.g., KeyboardInterrupt).
-        # When cleanup succeeds, let the original exception (from the with-block exit)
-        # propagate naturally through the @asynccontextmanager machinery.
         if gather_interrupt is not None:
             still_running = any(not t.done() for t in [main_task, poll_task])
             if still_running or not isinstance(gather_interrupt, asyncio.CancelledError):
