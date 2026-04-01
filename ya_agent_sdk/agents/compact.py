@@ -253,6 +253,7 @@ class CondenseResult(BaseModel):
 6. Current Work: Describe in detail precisely what was being worked on immediately before this summary request, paying special attention to the most recent messages from both user and assistant. Include file names and code snippets where applicable.
 7. Optional Next Step: List the next step that you will take that is related to the most recent work you were doing. IMPORTANT: ensure that this step is DIRECTLY in line with the user's explicit requests, and the task you were working on immediately before this summary request. If your last task was concluded, then only list next steps if they are explicitly in line with the users request. Do not start on tangential requests without confirming with the user first.
 8. If there is a next step, include direct quotes from the most recent conversation showing exactly what task you were working on and where you left off. This should be verbatim to ensure there's no drift in task interpretation.
+9. Past Interactions: A concise bullet list of key interactions (both sides) that already occurred, to prevent repetition. Include your actions/proposals and user's responses, approaches tried and outcomes, explanations already given.
 """,
     )
     original_prompt: str = Field(
@@ -412,15 +413,37 @@ def _build_compacted_messages(
         ),
     ]
 
-    # Build final request parts with original prompt and steering messages
-    final_parts: list[UserPromptPart] = [UserPromptPart(content=original_prompt)]
+    # Build final request parts with labeled original prompt and steering messages
+    final_parts: list[UserPromptPart] = [
+        UserPromptPart(
+            content="<original-request>Below is the user's original request from the start of the conversation:</original-request>"
+        ),
+        UserPromptPart(content=original_prompt),
+    ]
 
-    # Append steering messages if any
+    # Append steering messages with label if any
     if steering_messages:
+        final_parts.append(
+            UserPromptPart(
+                content="<user-steering>Below are messages the user sent during your previous work session:</user-steering>"
+            )
+        )
         for steering in steering_messages:
             final_parts.append(UserPromptPart(content=f"[User Steering] {steering}"))
 
-    final_parts.append(UserPromptPart(content="<compact-complete>Context compacted. Resume task.</compact-complete>"))
+    final_parts.append(
+        UserPromptPart(
+            content=(
+                "<context-restored>"
+                "Context was compacted from a long conversation. "
+                "The summary above is the most authoritative source for current state. "
+                "Synthesize the summary, original request, and any user steering messages to resume work. "
+                "Do NOT repeat questions, confirmations, or actions documented in the summary. "
+                "If the summary records a user decision, respect it without re-asking."
+                "</context-restored>"
+            )
+        )
+    )
 
     return [
         ModelRequest(parts=request_parts),

@@ -62,12 +62,17 @@ def _build_handoff_messages(
     Returns:
         List of ModelMessage representing the compacted history.
     """
-    # Message 1: system + original user prompt
+    # Message 1: system + labeled original user prompt
     # Placeholder will be replaced by create_system_prompt_filter downstream
     request_parts: list[SystemPromptPart | UserPromptPart] = [
         SystemPromptPart(content="Placeholder system prompt"),
     ]
     if original_prompt is not None:
+        request_parts.append(
+            UserPromptPart(
+                content="<original-request>Below is the user's original request from the start of the conversation:</original-request>"
+            )
+        )
         request_parts.append(UserPromptPart(content=original_prompt))
 
     # Message 2: virtual handoff tool call
@@ -87,11 +92,26 @@ def _build_handoff_messages(
     ]
 
     if steering_messages:
+        final_parts.append(
+            UserPromptPart(
+                content="<user-steering>Below are messages the user sent during your previous work session:</user-steering>"
+            )
+        )
         for steering in steering_messages:
             final_parts.append(UserPromptPart(content=f"[User Steering] {steering}"))
 
     final_parts.append(
-        UserPromptPart(content="<summary-complete>Summary done. Context restored. Resume task.</summary-complete>")
+        UserPromptPart(
+            content=(
+                "<context-restored>"
+                "Context was compacted from a long conversation. "
+                "The summary above is the most authoritative source for current state. "
+                "Synthesize the summary, original request, and any user steering messages to resume work. "
+                "Do NOT repeat questions, confirmations, or actions documented in the summary. "
+                "If the summary records a user decision, respect it without re-asking."
+                "</context-restored>"
+            )
+        )
     )
 
     return [

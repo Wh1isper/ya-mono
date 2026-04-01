@@ -20,8 +20,15 @@ Your summary should include the following sections:
 6. Current Work: Describe in detail precisely what was being worked on immediately before this summary request, paying special attention to the most recent messages from both user and assistant. Include file names and code snippets where applicable.
 7. Optional Next Step: List the next step that you will take that is related to the most recent work you were doing. IMPORTANT: ensure that this step is DIRECTLY in line with the user's explicit requests, and the task you were working on immediately before this summary request. If your last task was concluded, then only list next steps if they are explicitly in line with the users request. Do not start on tangential requests without confirming with the user first.
 8. If there is a next step, include direct quotes from the most recent conversation showing exactly what task you were working on and where you left off. This should be verbatim to ensure there's no drift in task interpretation.
-9. Skills Documentation: If any Skills were accessed during the conversation (files in /skills/ directory such as SKILL.md or skill resources), include a reminder to re-read the relevant skill documentation when resuming work. List the specific skills that were referenced.
-10. Auto-load Files: If there are specific files that should be automatically loaded when resuming (e.g., files being actively edited, key configuration files, important references), list their paths. These files will be read and injected into the context automatically on the next request. Only include truly necessary files to avoid context bloat.
+9. Past Interactions: A concise log of key interactions that already occurred during this conversation, to prevent repetition after context reset. Include BOTH sides of each interaction:
+   - Questions you asked the user and their answers (especially preferences, choices, approvals, rejections)
+   - Actions you took and their outcomes (files read/edited, commands run, approaches tried -- especially failures and the reasons why)
+   - Proposals you made and user's response (e.g., "I proposed using Redis; user approved", "I suggested refactoring X; user rejected, prefers Y")
+   - Explanations or information you already provided to the user (so you don't repeat the same explanation)
+   - Important clarifications the user provided that should not be re-asked
+   Format as a bullet list of "I did X / User said Y" pairs. Focus on interactions that would be wasteful or annoying to repeat.
+10. Skills Documentation: If any Skills were accessed during the conversation (files in /skills/ directory such as SKILL.md or skill resources), include a reminder to re-read the relevant skill documentation when resuming work. List the specific skills that were referenced.
+11. Auto-load Files: If there are specific files that should be automatically loaded when resuming (e.g., files being actively edited, key configuration files, important references), list their paths. These files will be read and injected into the context automatically on the next request. Only include truly necessary files to avoid context bloat.
 
 Here's an example of how your output should be structured:
 
@@ -62,11 +69,17 @@ Here's an example of how your output should be structured:
 
 7. Optional Next Step:
    [Optional Next step to take]
+   [If applicable, include direct quotes from the most recent conversation showing exactly what task you were working on and where you left off]
 
-8. Skills Documentation:
+8. Past Interactions:
+   - [I asked user about X; user chose Y]
+   - [I edited file Z; build succeeded]
+   - [I proposed approach A; user rejected, prefers B]
+
+9. Skills Documentation:
    [If applicable: List specific skills accessed (e.g., /skills/ai-integration/SKILL.md) and reminder to re-read them]
 
-9. Auto-load Files:
+10. Auto-load Files:
    [If applicable: List file paths that should be auto-loaded when resuming, e.g., src/main.py, config.yaml]
 
 </context>

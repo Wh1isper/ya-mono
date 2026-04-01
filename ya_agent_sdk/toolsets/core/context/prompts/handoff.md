@@ -59,6 +59,14 @@ The `content` field should be concise but complete:
 - [Decision 1]: [Rationale]
 - [Decision 2]: [Rationale]
 
+## Past Interactions
+A concise log of key interactions that already occurred, to prevent repetition after context reset:
+- [I asked user about X; user chose Y]
+- [I edited file Z; build succeeded]
+- [I proposed approach A; user rejected, prefers B]
+- [I explained concept C to the user (do not repeat)]
+Focus on interactions that would be wasteful or annoying to repeat.
+
 ## Next Step
 [Immediate action to take after summary]
 ```
