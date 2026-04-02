@@ -1401,6 +1401,53 @@ class AgentContext(BaseModel):
             entry_elem.set("key", key)
             entry_elem.text = value
 
+    def prepare_new_run(self) -> Self:
+        """Create a fresh context copy for a new agent run.
+
+        Returns a shallow copy with per-run state reset while sharing
+        long-lived state (env, message_bus, task_manager, etc.) with the
+        original context.
+
+        This method is used by stream_agent() to create an isolated context
+        for each run, preventing stale per-run state from leaking between
+        consecutive runs. This is critical for avoiding ContextVar-related
+        errors (pydantic-ai issue #674) where async generator cleanup from a
+        previous cancelled run interferes with the current run.
+
+        Per-run state (fresh for each run):
+            - run_id, start_at, end_at
+            - tool_id_wrapper, agent_stream_queues
+            - extra_usages, deferred_tool_metadata
+            - force_inject_instructions
+
+        Shared state (same reference as original):
+            - env, model_cfg, tool_config
+            - message_bus, task_manager, note_manager
+            - subagent_history, agent_registry
+            - model_wrapper, subagent_wrapper
+            - need_user_approve_tools, need_user_approve_mcps
+            - All other fields not explicitly reset
+
+        Returns:
+            A new context instance ready for a fresh agent run.
+        """
+        update: dict[str, Any] = {
+            "run_id": _generate_run_id(),
+            "start_at": datetime.now(),
+            "end_at": None,
+            "tool_id_wrapper": ToolIdWrapper(),
+            "agent_stream_queues": _create_stream_queue_factory(),
+            "extra_usages": [],
+            "deferred_tool_metadata": {},
+            "force_inject_instructions": False,
+        }
+        new_ctx = self.model_copy(update=update)
+        # Reset private state for fresh lifecycle
+        object.__setattr__(new_ctx, "_entered", False)
+        object.__setattr__(new_ctx, "_enter_lock", asyncio.Lock())
+        object.__setattr__(new_ctx, "_stream_queue_enabled", False)
+        return new_ctx
+
     def create_subagent_context(
         self,
         agent_name: str,
