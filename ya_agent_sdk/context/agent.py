@@ -1677,7 +1677,10 @@ class AgentContext(BaseModel):
                     "AgentContext has already been entered. "
                     "Each AgentContext instance can only be entered once at a time."
                 )
-            self._entered = True
+            # Must use object.__setattr__ because Pydantic v2 silently ignores
+            # normal assignment on private attrs that were previously set via
+            # object.__setattr__ (e.g., in prepare_new_run / create_subagent_context).
+            object.__setattr__(self, "_entered", True)
         self.start_at = datetime.now()
         self.tool_id_wrapper.clear()
         # Subscribe to message bus for this agent
@@ -1694,7 +1697,7 @@ class AgentContext(BaseModel):
         else:
             self.message_bus.unsubscribe(self._agent_id)
         async with self._enter_lock:
-            self._entered = False
+            object.__setattr__(self, "_entered", False)
 
     def export_state(
         self,
