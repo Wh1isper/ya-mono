@@ -913,8 +913,10 @@ async def stream_agent(  # noqa: C901
     runtime.ctx = fresh_ctx
     ctx = fresh_ctx
 
-    # Enable streaming for emit_event
-    ctx._stream_queue_enabled = True
+    # Enable streaming for emit_event.
+    # Must use object.__setattr__ because Pydantic v2 silently ignores
+    # normal attribute assignment on private attrs of model_copy() instances.
+    object.__setattr__(ctx, "_stream_queue_enabled", True)
 
     output_queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
     main_done = asyncio.Event()
