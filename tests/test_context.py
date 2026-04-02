@@ -1512,3 +1512,68 @@ async def test_get_context_instructions_uses_custom_time_source(env: LocalEnviro
 
         # Should contain the fixed time in ISO format
         assert "<current-time>2025-06-15T12:30:00+00:00</current-time>" in instructions
+
+
+async def test_prepare_new_run_fresh_per_run_state(env: LocalEnvironment) -> None:
+    """prepare_new_run should return a fresh copy with isolated per-run state."""
+    async with AgentContext(env=env) as ctx:
+        from pydantic_ai.usage import RunUsage
+
+        from ya_agent_sdk.usage import ExtraUsageRecord
+
+        ctx.extra_usages.append(ExtraUsageRecord(uuid="old", agent="test", model_id="m", usage=RunUsage()))
+        ctx.deferred_tool_metadata["key"] = {"val": 1}
+
+        new = ctx.prepare_new_run()
+
+        # Per-run state is fresh
+        assert new.run_id != ctx.run_id
+        assert new.extra_usages == []
+        assert new.deferred_tool_metadata == {}
+        assert new.force_inject_instructions is False
+        assert new.end_at is None
+        assert new.start_at is not None  # set by prepare_new_run
+        assert new.tool_id_wrapper is not ctx.tool_id_wrapper
+        assert new.agent_stream_queues is not ctx.agent_stream_queues
+
+        # Private state is reset
+        assert new._entered is False
+        assert new._stream_queue_enabled is False
+
+
+async def test_prepare_new_run_shares_long_lived_state(env: LocalEnvironment) -> None:
+    """prepare_new_run should share long-lived state by reference."""
+    async with AgentContext(env=env) as ctx:
+        # Pre-populate some shared state
+        ctx.steering_messages.append("test msg")
+        ctx.need_user_approve_tools.append("shell")
+
+        new = ctx.prepare_new_run()
+
+        # Long-lived state is same object (shared reference)
+        assert new.env is ctx.env
+        assert new.message_bus is ctx.message_bus
+        assert new.task_manager is ctx.task_manager
+        assert new.note_manager is ctx.note_manager
+        assert new.model_cfg is ctx.model_cfg
+        assert new.tool_config is ctx.tool_config
+        assert new.subagent_history is ctx.subagent_history
+        assert new.agent_registry is ctx.agent_registry
+        assert new.steering_messages is ctx.steering_messages
+        assert new.need_user_approve_tools is ctx.need_user_approve_tools
+
+        # Mutations via new are visible from original (shared reference)
+        new.steering_messages.append("from new")
+        assert "from new" in ctx.steering_messages
+
+
+async def test_prepare_new_run_preserves_subclass() -> None:
+    """prepare_new_run should preserve the subclass type."""
+
+    class CustomContext(AgentContext):
+        custom_field: str = "hello"
+
+    ctx = CustomContext()
+    new = ctx.prepare_new_run()
+    assert isinstance(new, CustomContext)
+    assert new.custom_field == "hello"

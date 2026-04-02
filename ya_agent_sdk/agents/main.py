@@ -901,9 +901,17 @@ async def stream_agent(  # noqa: C901
         msg = "Cannot specify both 'user_prompt' and 'user_prompt_factory'. Use one or the other."
         raise UserError(msg)
 
-    # Extract agent and ctx from runtime
+    # Extract agent from runtime
     agent = runtime.agent
-    ctx = runtime.ctx
+
+    # Create a fresh context for this run to isolate per-run state.
+    # This prevents ContextVar tokens and other run-specific state from
+    # leaking between consecutive runs, which causes "was created in a
+    # different Context" errors when pydantic-ai's cleanup runs in the
+    # wrong contextvars.Context (see pydantic-ai issue #674).
+    fresh_ctx = runtime.ctx.prepare_new_run()
+    runtime.ctx = fresh_ctx
+    ctx = fresh_ctx
 
     # Enable streaming for emit_event
     ctx._stream_queue_enabled = True
@@ -1121,6 +1129,13 @@ async def stream_agent(  # noqa: C901
         except BaseException as e:
             if isinstance(e, asyncio.CancelledError):
                 logger.debug("Main agent task cancelled")
+            elif isinstance(e, ValueError) and "was created in a different" in str(e):
+                # Suppress ContextVar cleanup error from pydantic-ai.
+                # This occurs when async generator cleanup runs in a different
+                # contextvars.Context (see pydantic-ai issue #674).
+                # The error is benign - model responses were already received.
+                logger.warning("Suppressed ContextVar cleanup error: %s", e)
+                return
             else:
                 logger.exception("Error in main agent task")
                 # Use repr() as fallback: some exceptions (e.g., ModelAPIError with
