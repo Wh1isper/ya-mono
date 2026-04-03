@@ -9,10 +9,13 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 # Import the components we're testing
 from yaacli.app import TUIApp, TUIMode, TUIState
+from yaacli.app.tui import _is_benign_contextvar_cleanup_error
 
 
 @dataclass
@@ -57,6 +60,31 @@ class MockConfigManager:
 
     def load_custom_commands(self) -> dict:
         return {}
+
+
+def _make_contextvar_cleanup_error() -> ValueError:
+    return ValueError(
+        "<Token var=<ContextVar name='pydantic_ai.current_run_context' default=None at 0x0> "
+        "at 0x0> was created in a different Context"
+    )
+
+
+class _RaisingTask:
+    def __init__(self, exc: Exception) -> None:
+        self.exc = exc
+        self.cancel_called = False
+
+    def done(self) -> bool:
+        return False
+
+    def cancel(self) -> None:
+        self.cancel_called = True
+
+    def __await__(self):
+        async def _raise():
+            raise self.exc
+
+        return _raise().__await__()
 
 
 # =============================================================================
@@ -635,3 +663,62 @@ def test_tui_app_ctrl_c_handling():
 
     assert app._last_ctrl_c_time == 0.0
     assert app._ctrl_c_exit_timeout == 2.0
+
+
+def test_detects_benign_contextvar_cleanup_error():
+    """Known pydantic-ai cleanup errors should be recognized precisely."""
+    assert _is_benign_contextvar_cleanup_error(_make_contextvar_cleanup_error())
+    assert not _is_benign_contextvar_cleanup_error(ValueError("plain value error"))
+    assert not _is_benign_contextvar_cleanup_error(RuntimeError("wrong type"))
+
+
+def test_tui_app_task_done_suppresses_benign_contextvar_cleanup_error():
+    """Task completion callback should ignore benign cleanup errors."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+
+    app = TUIApp(config=config, config_manager=config_manager)
+    task = MagicMock()
+    task.cancelled.return_value = False
+    task.exception.return_value = _make_contextvar_cleanup_error()
+
+    app._on_agent_task_done(task)
+
+    assert app._output_lines == []
+    assert app.state == TUIState.IDLE
+
+
+@pytest.mark.asyncio
+async def test_tui_app_run_agent_suppresses_benign_contextvar_cleanup_error():
+    """Top-level agent loop should not surface benign cleanup errors to the UI."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+
+    app = TUIApp(config=config, config_manager=config_manager)
+    runtime = MagicMock()
+    runtime.ctx = MagicMock(loop_active=False)
+    runtime.ctx.steering_messages = []
+    app._runtime = runtime
+    app._execute_stream = AsyncMock(side_effect=_make_contextvar_cleanup_error())
+    app._check_pending_bus_messages = MagicMock()
+
+    await app._run_agent("hello")
+
+    assert app._output_lines == []
+    assert app.state == TUIState.IDLE
+
+
+@pytest.mark.asyncio
+async def test_tui_app_cancel_agent_task_suppresses_benign_contextvar_cleanup_error():
+    """Shutdown should absorb the known ContextVar cleanup race."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+
+    app = TUIApp(config=config, config_manager=config_manager)
+    task = _RaisingTask(_make_contextvar_cleanup_error())
+    app._agent_task = task
+
+    await app._cancel_agent_task()
+
+    assert task.cancel_called is True
+    assert app._agent_task is None
