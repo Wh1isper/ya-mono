@@ -315,6 +315,11 @@ class SkillToolset(BaseToolset[AgentContext]):
         lines.append("</available-skills>")
         lines.append("")
         lines.append("<skill-usage-instructions>")
+        lines.append("Before starting a task, check if any available skill matches the user's request.")
+        lines.append(
+            "Skills contain expert knowledge and proven workflows -- always prefer following a skill over improvising."
+        )
+        lines.append("")
         lines.append("When a user request matches a skill's description:")
         lines.append("1. Read the skill's SKILL.md file to get detailed instructions")
         lines.append("2. Follow the skill's guidelines to complete the task")
