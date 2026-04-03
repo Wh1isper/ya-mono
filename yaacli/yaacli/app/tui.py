@@ -20,7 +20,6 @@ Example:
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import shutil
 import sys
@@ -132,6 +131,15 @@ def _safe_exception_str(e: BaseException) -> str:
         result = repr(e)
 
     return result
+
+
+def _is_benign_contextvar_cleanup_error(e: BaseException | None) -> bool:
+    """Check if an exception matches pydantic-ai's known ContextVar cleanup race."""
+    if not isinstance(e, ValueError):
+        return False
+
+    message = _safe_exception_str(e)
+    return "was created in a different Context" in message and "ContextVar" in message
 
 
 # =============================================================================
@@ -293,6 +301,26 @@ class TUIApp:
             raise RuntimeError("TUIApp not entered. Use 'async with app:' first.")
         return self._runtime
 
+    async def _cancel_agent_task(self) -> None:
+        """Cancel and await the current agent task."""
+        task = self._agent_task
+        if task is None:
+            return
+
+        try:
+            if not task.done():
+                task.cancel()
+                await task
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            if _is_benign_contextvar_cleanup_error(e):
+                logger.debug("Suppressed ContextVar cleanup error during agent shutdown: %s", _safe_exception_str(e))
+            else:
+                raise
+        finally:
+            self._agent_task = None
+
     # =========================================================================
     # Lifecycle
     # =========================================================================
@@ -352,10 +380,7 @@ class TUIApp:
             bg_manager.set_completion_callback(None)
 
         # Cancel any running agent task
-        if self._agent_task and not self._agent_task.done():
-            self._agent_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._agent_task
+        await self._cancel_agent_task()
 
         # Give event loop a chance to process pending cleanups
         await asyncio.sleep(0)
@@ -1015,6 +1040,9 @@ class TUIApp:
             return
         exc = task.exception()
         if exc is not None:
+            if _is_benign_contextvar_cleanup_error(exc):
+                logger.debug("Suppressed benign ContextVar cleanup error from agent task: %s", _safe_exception_str(exc))
+                return
             # Exception was not caught in _run_agent - display it
             logger.error("Uncaught exception in agent task: %s: %s", type(exc).__name__, _safe_exception_str(exc))
             self._append_error_output(exc)
@@ -1093,12 +1121,15 @@ class TUIApp:
             self._append_output("[Cancelled]")
             # Don't update message history on cancel - allows retry
         except Exception as e:
-            self._finalize_streaming_text()
-            self._finalize_streaming_thinking()
-            # Display error - message_history is already saved in memory
-            # by _execute_stream, so user can continue with a new prompt
-            self._append_error_output(e)
-            logger.exception("Agent execution failed")
+            if _is_benign_contextvar_cleanup_error(e):
+                logger.debug("Suppressed benign ContextVar cleanup error in agent run: %s", _safe_exception_str(e))
+            else:
+                self._finalize_streaming_text()
+                self._finalize_streaming_thinking()
+                # Display error - message_history is already saved in memory
+                # by _execute_stream, so user can continue with a new prompt
+                self._append_error_output(e)
+                logger.exception("Agent execution failed")
         finally:
             # Finalize any remaining streaming text/thinking
             self._finalize_streaming_text()
@@ -2764,6 +2795,11 @@ class TUIApp:
             message = context.get("message", "Unhandled asyncio exception")
             exception = context.get("exception")
             if isinstance(exception, BaseException):
+                if _is_benign_contextvar_cleanup_error(exception):
+                    logger.debug("Suppressed asyncio cleanup error: %s", _safe_exception_str(exception))
+                    if self._app:
+                        self._app.invalidate()
+                    return
                 logger.error("asyncio: %s: %s", message, exception, exc_info=exception)
             else:
                 logger.error("asyncio: %s", message)
@@ -2786,8 +2822,4 @@ class TUIApp:
             perf_log_report()
             # Ensure agent task is fully cancelled and awaited before __aexit__
             # This prevents async generator cleanup issues with MCP servers
-            if self._agent_task and not self._agent_task.done():
-                self._agent_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await self._agent_task
-                self._agent_task = None
+            await self._cancel_agent_task()

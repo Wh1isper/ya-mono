@@ -942,31 +942,43 @@ async def stream_agent(  # noqa: C901
             await pre_node_hook(
                 NodeHookContext(agent_info=main_agent_info, node=node, run=run, output_queue=output_queue)
             )
-        async with node.stream(run.ctx) as request_stream:
-            async for event in request_stream:
-                # PRE EVENT HOOK
-                if pre_event_hook:
-                    await pre_event_hook(
-                        EventHookContext(
-                            agent_info=main_agent_info, event=event, node=node, run=run, output_queue=output_queue
+        try:
+            async with node.stream(run.ctx) as request_stream:
+                async for event in request_stream:
+                    # PRE EVENT HOOK
+                    if pre_event_hook:
+                        await pre_event_hook(
+                            EventHookContext(
+                                agent_info=main_agent_info, event=event, node=node, run=run, output_queue=output_queue
+                            )
+                        )
+
+                    await output_queue.put(
+                        StreamEvent(
+                            agent_id=main_agent_info.agent_id,
+                            agent_name=main_agent_info.agent_name,
+                            event=ctx.tool_id_wrapper.wrap_event(event),
                         )
                     )
 
-                await output_queue.put(
-                    StreamEvent(
-                        agent_id=main_agent_info.agent_id,
-                        agent_name=main_agent_info.agent_name,
-                        event=ctx.tool_id_wrapper.wrap_event(event),
-                    )
-                )
-
-                # POST EVENT HOOK
-                if post_event_hook:
-                    await post_event_hook(
-                        EventHookContext(
-                            agent_info=main_agent_info, event=event, node=node, run=run, output_queue=output_queue
+                    # POST EVENT HOOK
+                    if post_event_hook:
+                        await post_event_hook(
+                            EventHookContext(
+                                agent_info=main_agent_info, event=event, node=node, run=run, output_queue=output_queue
+                            )
                         )
-                    )
+        except ValueError as e:
+            # Suppress ContextVar cleanup errors from pydantic-ai's streaming internals.
+            # When pydantic-ai's _streaming_handler runs in a child task (wrap_task) with a copied
+            # context, set_current_run_context's __exit__ may call ContextVar.reset(token) in a
+            # Context object different from where the token was created.  This is harmless -- all
+            # stream events have already been emitted -- but the ValueError propagates through
+            # pydantic-ai's on_model_request_error (which re-raises by default).
+            if "was created in a different Context" in str(e):
+                logger.debug("Suppressed ContextVar cleanup error from pydantic-ai streaming: %s", e)
+            else:
+                raise
 
         # POST NODE HOOK
         logger.debug("Node completed: %s", type(node).__name__)
