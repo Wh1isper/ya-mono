@@ -50,7 +50,7 @@ from pydantic_ai.tools import RunContext
 
 from ya_agent_sdk._logger import logger
 from ya_agent_sdk.context import AgentContext
-from ya_agent_sdk.utils import ImageMediaType, split_image_data
+from ya_agent_sdk.utils import ImageMediaType, compress_image_data, split_image_data
 
 
 def _is_image_content(item: UserContent) -> bool:
@@ -323,6 +323,114 @@ def drop_gif_images(
                     new_content.append(item)
 
             part.content = new_content
+
+    return message_history
+
+
+async def _compress_content_list(
+    content_list: list[UserContent],
+    max_image_bytes: int,
+) -> bool:
+    """Compress oversized images in a content list in-place. Returns True if modified.
+
+    If compression cannot bring the image under the limit, the image is dropped
+    and replaced with a system reminder hinting the agent to compress first.
+    """
+    modified = False
+
+    for idx, item in enumerate(content_list):
+        if not isinstance(item, BinaryContent) or not item.media_type.startswith("image/"):
+            continue
+
+        if len(item.data) <= max_image_bytes:
+            continue
+
+        original_size = len(item.data)
+        original_media_type = cast(ImageMediaType, item.media_type)
+        try:
+            compressed_data, compressed_type = await compress_image_data(
+                image_bytes=item.data,
+                max_bytes=max_image_bytes,
+                media_type=original_media_type,
+            )
+        except Exception:
+            logger.exception("Failed to compress image; dropping it")
+            content_list[idx] = (
+                "<system-reminder>An image was removed because compression failed. "
+                "If the image is needed, try compressing it to a smaller size before viewing.</system-reminder>"
+            )
+            modified = True
+            continue
+
+        if len(compressed_data) > max_image_bytes:
+            logger.warning(
+                "Image compression could not reach target: %d bytes > %d bytes limit; dropping image",
+                len(compressed_data),
+                max_image_bytes,
+            )
+            content_list[idx] = (
+                f"<system-reminder>An image ({original_size} bytes) was removed because it could not be "
+                f"compressed below the {max_image_bytes} byte limit. "
+                "If you need this image, try resizing or converting it to a smaller format first, "
+                "then use the view tool again.</system-reminder>"
+            )
+            modified = True
+            continue
+
+        logger.info(
+            "Compressed image from %d bytes to %d bytes (%.0f%% reduction)",
+            original_size,
+            len(compressed_data),
+            (1 - len(compressed_data) / original_size) * 100,
+        )
+        content_list[idx] = BinaryContent(data=compressed_data, media_type=compressed_type)
+        modified = True
+
+    return modified
+
+
+async def compress_large_images(
+    ctx: RunContext[AgentContext],
+    message_history: list[ModelMessage],
+) -> list[ModelMessage]:
+    """Compress oversized binary image content in message history.
+
+    This is a pydantic-ai history_processor that compresses BinaryContent images
+    whose size exceeds ``max_image_bytes`` (configured in ModelConfig). Images are
+    converted to JPEG with progressively reduced quality and, if necessary, resized
+    until they fit within the limit.  If compression cannot meet the target,
+    the image is dropped and replaced with a system reminder.
+
+    Set ``max_image_bytes`` to 0 in ModelConfig to disable this filter.
+
+    Args:
+        ctx: Runtime context containing AgentContext with model configuration.
+        message_history: List of messages to process.
+
+    Returns:
+        The modified message history with oversized images compressed.
+    """
+    model_cfg = ctx.deps.model_cfg
+    max_image_bytes = model_cfg.max_image_bytes if model_cfg else 0
+
+    if max_image_bytes <= 0:
+        return message_history
+
+    for message in message_history:
+        if not isinstance(message, ModelRequest):
+            continue
+
+        for part in message.parts:
+            if not isinstance(part, UserPromptPart) or isinstance(part.content, str):
+                continue
+
+            content_list: list[UserContent] = (
+                list(part.content) if isinstance(part.content, Sequence) else [part.content]
+            )
+            modified = await _compress_content_list(content_list, max_image_bytes)
+
+            if modified:
+                part.content = content_list
 
     return message_history
 
