@@ -14,8 +14,12 @@ from pydantic_ai.output import OutputDataT
 from typing_extensions import TypeVar
 from y_agent_environment import Environment
 
+from ya_agent_sdk._logger import get_logger
+
 if TYPE_CHECKING:
     from ya_agent_sdk.context import AgentContext
+
+logger = get_logger(__name__)
 
 P = typing.ParamSpec("P")
 T = typing.TypeVar("T")
@@ -171,6 +175,86 @@ def get_tool_name_from_id(tool_id: str, message_history: list[ModelMessage]) -> 
                 if isinstance(p, ToolCallPart) and p.tool_call_id == tool_id:
                     return p.tool_name
     return None
+
+
+async def compress_image_data(
+    image_bytes: bytes,
+    max_bytes: int = 5 * 1024 * 1024,
+    media_type: ImageMediaType = "image/jpeg",
+) -> tuple[bytes, ImageMediaType]:
+    """Compress an image to fit within a maximum byte size.
+
+    Uses a multi-step strategy:
+    1. If already under the limit, return as-is.
+    2. Convert to JPEG and reduce quality progressively (95 -> 20).
+    3. If still too large, resize the image (halve dimensions) and repeat.
+
+    Args:
+        image_bytes: The raw image data as bytes.
+        max_bytes: Maximum allowed size in bytes. Defaults to 5 MB.
+        media_type: The original MIME type. Used to detect format when
+            the image is already small enough.
+
+    Returns:
+        A tuple of (compressed_bytes, media_type). The media_type will be
+        ``"image/jpeg"`` if compression was applied, or the detected/original
+        type if the image was already small enough.
+    """
+    return await run_in_threadpool(_compress_image_data_sync, image_bytes, max_bytes, media_type)
+
+
+def _compress_image_data_sync(
+    image_bytes: bytes,
+    max_bytes: int = 5 * 1024 * 1024,
+    media_type: ImageMediaType = "image/jpeg",
+) -> tuple[bytes, ImageMediaType]:
+    """Synchronous implementation of compress_image_data."""
+    if len(image_bytes) <= max_bytes:
+        detected = detect_image_media_type(image_bytes)
+        return image_bytes, detected or media_type
+
+    img = Image.open(io.BytesIO(image_bytes))
+
+    # Skip animated images (multi-frame GIF/WebP) -- JPEG cannot preserve animation.
+    # Return original data so the downstream filter can drop it with a clear hint.
+    n_frames = getattr(img, "n_frames", 1) or 1
+    if n_frames > 1:
+        return image_bytes, detect_image_media_type(image_bytes) or media_type
+
+    # Convert to RGB for JPEG output, compositing alpha onto white background
+    # to keep transparent content legible (avoids black-background artifacts).
+    if img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info):
+        rgba = img.convert("RGBA")
+        background = Image.new("RGB", img.size, (255, 255, 255))
+        background.paste(rgba, mask=rgba.split()[3])
+        img = background
+    elif img.mode != "RGB":
+        img = img.convert("RGB")
+
+    # Strategy: reduce JPEG quality, then resize if needed
+    for _resize_pass in range(5):  # At most 5 resize passes (1/32 of original)
+        for quality in (95, 85, 75, 60, 45, 30, 20):
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=quality, optimize=True)
+            result = buf.getvalue()
+            if len(result) <= max_bytes:
+                return result, "image/jpeg"
+
+        # Still too large -- halve dimensions and try again
+        w, h = img.size
+        img = img.resize((max(1, w // 2), max(1, h // 2)), Image.Resampling.LANCZOS)
+
+    # Final fallback: return the smallest we could produce
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=20, optimize=True)
+    result = buf.getvalue()
+    if len(result) > max_bytes:
+        logger.warning(
+            "Image compression could not reach target size: %d bytes > %d bytes limit",
+            len(result),
+            max_bytes,
+        )
+    return result, "image/jpeg"
 
 
 async def split_image_data(

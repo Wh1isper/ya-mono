@@ -659,6 +659,17 @@ class ModelConfig(BaseModel):
     support_gif: bool = True
     """Whether the model supports GIF images. If False, GIF images will be filtered out."""
 
+    max_image_bytes: int = 5 * 1024 * 1024
+    """Maximum allowed size in bytes for a single inline image.
+
+    When set to a positive value, binary images exceeding this size will be
+    compressed (converted to JPEG with reduced quality and/or resized) before
+    being sent to the model.  Set to 0 to disable compression.
+
+    Default is 5 MB (5_242_880 bytes), which fits within the limits of most
+    providers (e.g. GCP Vertex AI) and saves bandwidth.
+    """
+
     split_large_images: bool = True
     """Whether to split oversized binary images before sending to model."""
 
@@ -1535,7 +1546,13 @@ class AgentContext(BaseModel):
         from ya_agent_sdk.filters.bus_message import inject_bus_messages
         from ya_agent_sdk.filters.capability import filter_by_capability
         from ya_agent_sdk.filters.handoff import process_handoff_message
-        from ya_agent_sdk.filters.image import drop_extra_images, drop_extra_videos, drop_gif_images, split_large_images
+        from ya_agent_sdk.filters.image import (
+            compress_large_images,
+            drop_extra_images,
+            drop_extra_videos,
+            drop_gif_images,
+            split_large_images,
+        )
         from ya_agent_sdk.filters.runtime_instructions import inject_runtime_instructions
         from ya_agent_sdk.filters.tool_args import fix_truncated_tool_args
 
@@ -1546,6 +1563,7 @@ class AgentContext(BaseModel):
         return [
             # handle_model_switch, # Disabled as response.model_name is not the same as ctx.model.model_name
             split_large_images,
+            compress_large_images,
             drop_extra_images,
             drop_gif_images,
             drop_extra_videos,
