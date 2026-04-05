@@ -660,14 +660,21 @@ class ModelConfig(BaseModel):
     """Whether the model supports GIF images. If False, GIF images will be filtered out."""
 
     max_image_bytes: int = 5 * 1024 * 1024
-    """Maximum allowed size in bytes for a single inline image.
+    """Maximum allowed size in bytes for a single image as seen by the API.
 
-    When set to a positive value, binary images exceeding this size will be
-    compressed (converted to JPEG with reduced quality and/or resized) before
-    being sent to the model.  Set to 0 to disable compression.
+    Most model APIs transmit images as base64-encoded payloads, which are
+    roughly 4/3x larger than the raw bytes.  The compression filter
+    automatically accounts for this overhead: it targets a raw-byte budget
+    of ``max_image_bytes * 3 // 4`` so the encoded result stays within the
+    API limit.
 
-    Default is 5 MB (5_242_880 bytes), which fits within the limits of most
-    providers (e.g. GCP Vertex AI) and saves bandwidth.
+    When set to a positive value, binary images whose *encoded* size would
+    exceed this limit are compressed (converted to JPEG with reduced quality
+    and/or resized) before being sent to the model.  Set to 0 to disable
+    compression.
+
+    Default is 5 MB (5_242_880 bytes), matching the limit of most providers
+    (e.g. Anthropic, GCP Vertex AI).
     """
 
     split_large_images: bool = True
