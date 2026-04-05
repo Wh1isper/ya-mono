@@ -9,7 +9,7 @@ from PIL import Image
 from pydantic_ai.messages import BinaryContent, ModelRequest, UserPromptPart
 
 from ya_agent_sdk.context import AgentContext, ModelConfig
-from ya_agent_sdk.filters.image import compress_large_images
+from ya_agent_sdk.filters.image import _raw_bytes_limit_for_base64, compress_large_images
 from ya_agent_sdk.utils import compress_image_data
 
 
@@ -304,6 +304,8 @@ async def test_filter_drops_image_when_still_over_limit():
     # Set an impossibly small limit
     max_bytes = 10
     ctx = _make_ctx(max_image_bytes=max_bytes)
+    # Raw budget = 10 * 3 // 4 = 7 bytes
+    max_raw = _raw_bytes_limit_for_base64(max_bytes)
 
     messages = [
         ModelRequest(
@@ -313,11 +315,11 @@ async def test_filter_drops_image_when_still_over_limit():
         ),
     ]
 
-    # Mock compress_image_data to return data that's still over the limit
+    # Mock compress_image_data to return data that's still over the raw budget
     with patch(
         "ya_agent_sdk.filters.image.compress_image_data",
         new_callable=AsyncMock,
-        return_value=(b"x" * 100, "image/jpeg"),
+        return_value=(b"x" * (max_raw + 1), "image/jpeg"),
     ):
         result = await compress_large_images(ctx, messages)
 
@@ -366,3 +368,65 @@ async def test_compress_rgba_white_background():
     pixel = result_img.getpixel((w // 2, h // 2))
     # JPEG compression may shift values slightly, but should be near white
     assert all(v > 200 for v in pixel[:3]), f"Expected near-white pixel, got {pixel}"
+
+
+# ---------------------------------------------------------------------------
+# base64 budget tests
+# ---------------------------------------------------------------------------
+
+
+def test_raw_bytes_limit_for_base64():
+    """Verify the base64 budget calculation."""
+    # 5 MB API limit -> raw budget is 3/4 of that
+    assert _raw_bytes_limit_for_base64(5 * 1024 * 1024) == 5 * 1024 * 1024 * 3 // 4
+    # 0 -> 0
+    assert _raw_bytes_limit_for_base64(0) == 0
+    # Small values
+    assert _raw_bytes_limit_for_base64(4) == 3
+    assert _raw_bytes_limit_for_base64(100) == 75
+
+
+@pytest.mark.anyio
+async def test_filter_compresses_image_near_base64_boundary():
+    """An image between 3.75MB and 5MB raw should be compressed.
+
+    Even though the raw bytes are under 5MB, the base64-encoded payload
+    would exceed the 5MB API limit, so compression must kick in.
+    """
+    # Create an image whose raw size is ~4MB (under 5MB but over 3.75MB base64 budget)
+    api_limit = 5 * 1024 * 1024  # 5MB
+    raw_budget = _raw_bytes_limit_for_base64(api_limit)  # ~3.75MB
+
+    # Build a PNG that's larger than the raw budget but smaller than 5MB
+    width = 1400
+    height = 1400
+    raw = os.urandom(width * height * 3)
+    img = Image.frombytes("RGB", (width, height), raw)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", compress_level=1)
+    png_bytes = buf.getvalue()
+
+    # If the generated image happens to be too small, skip the test
+    if len(png_bytes) <= raw_budget:
+        pytest.skip(f"Generated PNG ({len(png_bytes)} bytes) is not large enough for this test")
+
+    ctx = _make_ctx(max_image_bytes=api_limit)
+
+    messages = [
+        ModelRequest(
+            parts=[
+                UserPromptPart(content=[BinaryContent(data=png_bytes, media_type="image/png")]),
+            ]
+        ),
+    ]
+
+    result = await compress_large_images(ctx, messages)
+    part = result[0].parts[0]
+    assert isinstance(part, UserPromptPart)
+    content = list(part.content)
+    assert isinstance(content[0], BinaryContent)
+    # Compressed result must be under the raw budget (not just under 5MB)
+    assert len(content[0].data) <= raw_budget, (
+        f"Compressed image ({len(content[0].data)} bytes) exceeds "
+        f"raw budget ({raw_budget} bytes) for {api_limit} byte API limit"
+    )

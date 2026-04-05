@@ -53,6 +53,16 @@ from ya_agent_sdk.context import AgentContext
 from ya_agent_sdk.utils import ImageMediaType, compress_image_data, split_image_data
 
 
+def _raw_bytes_limit_for_base64(max_encoded_bytes: int) -> int:
+    """Compute the maximum raw byte size that stays within a base64-encoded size limit.
+
+    Base64 encoding expands data by a factor of 4/3 (each 3 raw bytes become
+    4 encoded characters).  Given an API limit on the *encoded* size, the raw
+    payload must not exceed ``max_encoded_bytes * 3 // 4``.
+    """
+    return max_encoded_bytes * 3 // 4
+
+
 def _is_image_content(item: UserContent) -> bool:
     """Check if content item is an image."""
     if isinstance(item, ImageUrl):
@@ -333,16 +343,23 @@ async def _compress_content_list(
 ) -> bool:
     """Compress oversized images in a content list in-place. Returns True if modified.
 
+    ``max_image_bytes`` is the API limit on the *base64-encoded* image payload.
+    Internally we convert this to a raw-byte budget so that the encoded result
+    stays within the limit.
+
     If compression cannot bring the image under the limit, the image is dropped
     and replaced with a system reminder hinting the agent to compress first.
     """
+    # API limits apply to the base64-encoded payload which is ~4/3x the raw size.
+    # Compute the raw-byte budget so compressed images stay under the limit after encoding.
+    max_raw_bytes = _raw_bytes_limit_for_base64(max_image_bytes)
     modified = False
 
     for idx, item in enumerate(content_list):
         if not isinstance(item, BinaryContent) or not item.media_type.startswith("image/"):
             continue
 
-        if len(item.data) <= max_image_bytes:
+        if len(item.data) <= max_raw_bytes:
             continue
 
         original_size = len(item.data)
@@ -350,7 +367,7 @@ async def _compress_content_list(
         try:
             compressed_data, compressed_type = await compress_image_data(
                 image_bytes=item.data,
-                max_bytes=max_image_bytes,
+                max_bytes=max_raw_bytes,
                 media_type=original_media_type,
             )
         except Exception:
@@ -362,15 +379,17 @@ async def _compress_content_list(
             modified = True
             continue
 
-        if len(compressed_data) > max_image_bytes:
+        if len(compressed_data) > max_raw_bytes:
             logger.warning(
-                "Image compression could not reach target: %d bytes > %d bytes limit; dropping image",
+                "Image compression could not reach target: %d raw bytes > %d raw byte limit "
+                "(base64 limit: %d bytes); dropping image",
                 len(compressed_data),
+                max_raw_bytes,
                 max_image_bytes,
             )
             content_list[idx] = (
                 f"<system-reminder>An image ({original_size} bytes) was removed because it could not be "
-                f"compressed below the {max_image_bytes} byte limit. "
+                f"compressed below the {max_image_bytes} byte API limit (accounting for base64 encoding). "
                 "If you need this image, try resizing or converting it to a smaller format first, "
                 "then use the view tool again.</system-reminder>"
             )
