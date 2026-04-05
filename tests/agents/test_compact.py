@@ -13,11 +13,12 @@ from pydantic_ai.messages import (
 )
 
 from ya_agent_sdk.agents.compact import (
-    _ANTHROPIC_CACHE_KEYS,
+    _COMPACT_STRIP_KEYS,
+    _INCOMPATIBLE_BETAS,
     _MAX_TOOL_RETURN_CHARS,
     _is_media_content,
     _media_to_placeholder,
-    _strip_anthropic_cache_settings,
+    _strip_incompatible_settings,
     _trim_history_for_compact,
     _truncate_str,
 )
@@ -393,50 +394,175 @@ async def test_create_agent_runs_auto_load_files_after_compact(tmp_path: Path) -
 
 
 # =============================================================================
-# _strip_anthropic_cache_settings tests
+# _strip_incompatible_settings tests
 # =============================================================================
 
 
-def test_strip_anthropic_cache_settings_no_cache_keys() -> None:
-    """Settings without cache keys should be returned as-is (same object)."""
+def test_strip_incompatible_settings_no_incompatible_keys() -> None:
+    """Settings without incompatible keys should be preserved."""
     settings = {"max_tokens": 4096, "temperature": 0.5}
-    result = _strip_anthropic_cache_settings(settings)
-    assert result is settings
+    result = _strip_incompatible_settings(settings)
     assert result == {"max_tokens": 4096, "temperature": 0.5}
 
 
-def test_strip_anthropic_cache_settings_removes_cache_keys() -> None:
+def test_strip_incompatible_settings_removes_cache_keys() -> None:
     """Anthropic cache keys should be stripped, other keys preserved."""
     settings = {
         "max_tokens": 4096,
         "anthropic_cache_instructions": True,
         "anthropic_cache_messages": True,
         "anthropic_cache_tool_definitions": "5m",
-        "anthropic_thinking": {"type": "enabled", "budget_tokens": 10000},
     }
-    result = _strip_anthropic_cache_settings(settings)
-    assert result == {
-        "max_tokens": 4096,
-        "anthropic_thinking": {"type": "enabled", "budget_tokens": 10000},
-    }
+    result = _strip_incompatible_settings(settings)
+    assert result == {"max_tokens": 4096}
     # Original should not be modified
     assert "anthropic_cache_instructions" in settings
 
 
-def test_strip_anthropic_cache_settings_only_cache_keys() -> None:
-    """Settings with only cache keys should return empty dict."""
+def test_strip_incompatible_settings_removes_thinking_keys() -> None:
+    """Thinking-related keys should be stripped (incompatible with ToolOutput)."""
     settings = {
+        "max_tokens": 4096,
+        "thinking": "high",
+        "anthropic_thinking": {"type": "enabled", "budget_tokens": 10000},
+        "anthropic_effort": "high",
+    }
+    result = _strip_incompatible_settings(settings)
+    assert result == {"max_tokens": 4096}
+
+
+def test_strip_incompatible_settings_strips_interleaved_beta() -> None:
+    """Interleaved thinking beta header should be stripped from extra_headers."""
+    settings = {
+        "max_tokens": 4096,
+        "extra_headers": {
+            "anthropic-beta": "context-1m-2025-08-07,interleaved-thinking-2025-05-14",
+        },
+    }
+    result = _strip_incompatible_settings(settings)
+    assert result == {
+        "max_tokens": 4096,
+        "extra_headers": {"anthropic-beta": "context-1m-2025-08-07"},
+    }
+
+
+def test_strip_incompatible_settings_removes_empty_beta_header() -> None:
+    """If only incompatible betas exist, the entire header should be removed."""
+    settings = {
+        "max_tokens": 4096,
+        "extra_headers": {
+            "anthropic-beta": "interleaved-thinking-2025-05-14",
+        },
+    }
+    result = _strip_incompatible_settings(settings)
+    assert result == {"max_tokens": 4096}
+
+
+def test_strip_incompatible_settings_preserves_non_beta_headers() -> None:
+    """Non-beta extra headers should be preserved even when beta is removed."""
+    settings = {
+        "max_tokens": 4096,
+        "extra_headers": {
+            "anthropic-beta": "interleaved-thinking-2025-05-14",
+            "x-custom": "value",
+        },
+    }
+    result = _strip_incompatible_settings(settings)
+    assert result == {
+        "max_tokens": 4096,
+        "extra_headers": {"x-custom": "value"},
+    }
+
+
+def test_strip_incompatible_settings_full_preset() -> None:
+    """Should handle a full Anthropic preset with all settings."""
+    settings = {
+        "max_tokens": 32768,
+        "thinking": "high",
+        "anthropic_thinking": {"type": "adaptive"},
+        "anthropic_effort": "high",
         "anthropic_cache_instructions": True,
         "anthropic_cache_messages": True,
+        "extra_headers": {
+            "anthropic-beta": "context-1m-2025-08-07,interleaved-thinking-2025-05-14,context-management-2025-06-27",
+        },
+        "extra_body": {
+            "context_management": {
+                "edits": [
+                    {"type": "clear_thinking_20251015", "keep": "all"},
+                    {"type": "clear_tool_uses_20250919", "trigger": {"type": "input_tokens", "value": 100000}},
+                ]
+            }
+        },
     }
-    result = _strip_anthropic_cache_settings(settings)
-    assert result == {}
+    result = _strip_incompatible_settings(settings)
+    assert result == {
+        "max_tokens": 32768,
+        "extra_headers": {"anthropic-beta": "context-1m-2025-08-07,context-management-2025-06-27"},
+        "extra_body": {
+            "context_management": {
+                "edits": [
+                    {"type": "clear_tool_uses_20250919", "trigger": {"type": "input_tokens", "value": 100000}},
+                ]
+            }
+        },
+    }
 
 
-def test_strip_anthropic_cache_settings_all_known_keys() -> None:
-    """All known cache keys should be covered by _ANTHROPIC_CACHE_KEYS."""
-    assert {
-        "anthropic_cache_tool_definitions",
-        "anthropic_cache_instructions",
-        "anthropic_cache_messages",
-    } == _ANTHROPIC_CACHE_KEYS
+def test_strip_incompatible_settings_removes_clear_thinking_from_context_management() -> None:
+    """clear_thinking edit should be removed from context_management."""
+    settings = {
+        "max_tokens": 4096,
+        "extra_body": {
+            "context_management": {
+                "edits": [
+                    {"type": "clear_thinking_20251015", "keep": {"type": "thinking_turns", "value": 3}},
+                ]
+            }
+        },
+    }
+    result = _strip_incompatible_settings(settings)
+    # Only clear_thinking edit -> context_management and extra_body removed entirely
+    assert result == {"max_tokens": 4096}
+    assert "extra_body" not in result
+
+
+def test_strip_incompatible_settings_preserves_tool_use_clearing() -> None:
+    """clear_tool_uses edit should be preserved when clear_thinking is stripped."""
+    settings = {
+        "max_tokens": 4096,
+        "extra_body": {
+            "context_management": {
+                "edits": [
+                    {"type": "clear_thinking_20251015", "keep": "all"},
+                    {"type": "clear_tool_uses_20250919", "trigger": {"type": "input_tokens", "value": 50000}},
+                ]
+            }
+        },
+    }
+    result = _strip_incompatible_settings(settings)
+    assert result == {
+        "max_tokens": 4096,
+        "extra_body": {
+            "context_management": {
+                "edits": [
+                    {"type": "clear_tool_uses_20250919", "trigger": {"type": "input_tokens", "value": 50000}},
+                ]
+            }
+        },
+    }
+
+
+def test_strip_incompatible_settings_known_keys() -> None:
+    """All expected keys should be in _COMPACT_STRIP_KEYS."""
+    assert "anthropic_cache_tool_definitions" in _COMPACT_STRIP_KEYS
+    assert "anthropic_cache_instructions" in _COMPACT_STRIP_KEYS
+    assert "anthropic_cache_messages" in _COMPACT_STRIP_KEYS
+    assert "thinking" in _COMPACT_STRIP_KEYS
+    assert "anthropic_thinking" in _COMPACT_STRIP_KEYS
+    assert "anthropic_effort" in _COMPACT_STRIP_KEYS
+
+
+def test_strip_incompatible_settings_known_betas() -> None:
+    """All expected betas should be in _INCOMPATIBLE_BETAS."""
+    assert "interleaved-thinking-2025-05-14" in _INCOMPATIBLE_BETAS

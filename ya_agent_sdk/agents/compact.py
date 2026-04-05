@@ -11,11 +11,11 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
 from inspect import isawaitable
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, ModelSettings, UserContent
+from pydantic_ai import Agent, ModelSettings, ToolOutput, UserContent
 from pydantic_ai.messages import (
     BinaryContent,
     ImageUrl,
@@ -57,14 +57,25 @@ Keep this response CONCISE and wrap your analysis in `analysis` and `context` fi
 
 IMPORTANT: If the message history contains any access to Skills (files in /skills/ directory, such as reading SKILL.md or using skill resources), you MUST include a reminder in the context to re-read the relevant skill documentation when resuming work."""
 
-# Anthropic cache settings that should NOT be inherited by compact agent.
-# The compact agent has different system prompts, tools, and message history;
-# inheriting these would create separate cache entries that are rarely reused,
-# wasting cache write tokens.
-_ANTHROPIC_CACHE_KEYS = frozenset({
+# Settings keys that should NOT be inherited by compact agent.
+# Cache: compact has different prompts/tools/history; inheriting cache settings
+# would create separate entries that waste cache write tokens.
+# Thinking: compact uses ToolOutput for structured output, which is incompatible
+# with Anthropic thinking mode (thinking + output tools not supported).
+_COMPACT_STRIP_KEYS = frozenset({
+    # Cache keys
     "anthropic_cache_tool_definitions",
     "anthropic_cache_instructions",
     "anthropic_cache_messages",
+    # Thinking keys (incompatible with ToolOutput)
+    "thinking",
+    "anthropic_thinking",
+    "anthropic_effort",
+})
+
+# Anthropic beta headers that are incompatible with compact agent's ToolOutput mode.
+_INCOMPATIBLE_BETAS = frozenset({
+    "interleaved-thinking-2025-05-14",
 })
 
 # Maximum characters to keep in a single tool return content for compact
@@ -74,22 +85,66 @@ _TOOL_RETURN_KEEP_HEAD = 200
 _TOOL_RETURN_KEEP_TAIL = 200
 
 
-def _strip_anthropic_cache_settings(settings: ModelSettings) -> ModelSettings:
-    """Strip Anthropic cache settings from inherited model settings.
+def _strip_beta_headers(result: dict[str, Any]) -> None:
+    """Strip incompatible beta headers from extra_headers in-place."""
+    extra_headers = result.get("extra_headers")
+    if not extra_headers or not isinstance(extra_headers, dict):
+        return
+    beta_str = extra_headers.get("anthropic-beta", "")
+    if not beta_str:
+        return
+    filtered = [b.strip() for b in beta_str.split(",") if b.strip() not in _INCOMPATIBLE_BETAS]
+    if filtered:
+        result["extra_headers"] = {**extra_headers, "anthropic-beta": ",".join(filtered)}
+    else:
+        result["extra_headers"] = {k: v for k, v in extra_headers.items() if k != "anthropic-beta"}
+        if not result["extra_headers"]:
+            del result["extra_headers"]
 
-    The compact agent has different system prompts, tools, and message history
-    from the main agent. Inheriting cache settings would create separate cache
-    entries that are rarely reused, wasting cache write tokens.
+
+def _strip_clear_thinking_edits(result: dict[str, Any]) -> None:
+    """Strip clear_thinking edits from context_management in extra_body in-place."""
+    extra_body = result.get("extra_body")
+    if not extra_body or not isinstance(extra_body, dict):
+        return
+    cm = extra_body.get("context_management")
+    if not cm or not isinstance(cm, dict):
+        return
+    edits = cm.get("edits")
+    if not edits or not isinstance(edits, list):
+        return
+    filtered_edits = [e for e in edits if not (isinstance(e, dict) and "clear_thinking" in e.get("type", ""))]
+    if filtered_edits == edits:
+        return
+    if filtered_edits:
+        result["extra_body"] = {**extra_body, "context_management": {**cm, "edits": filtered_edits}}
+    else:
+        new_body = {k: v for k, v in extra_body.items() if k != "context_management"}
+        if new_body:
+            result["extra_body"] = new_body
+        else:
+            del result["extra_body"]
+
+
+def _strip_incompatible_settings(settings: ModelSettings) -> ModelSettings:
+    """Strip settings incompatible with the compact agent.
+
+    Removes:
+    - Anthropic cache settings (compact has different prompts/tools/history)
+    - Thinking settings (incompatible with ToolOutput-based structured output)
+    - Incompatible beta headers from extra_headers
+    - clear_thinking edits from context_management (requires thinking enabled)
 
     Args:
-        settings: Model settings potentially containing Anthropic cache keys.
+        settings: Model settings potentially containing incompatible keys.
 
     Returns:
-        A copy with cache keys removed, or the original if no cache keys present.
+        A copy with incompatible settings removed.
     """
-    if not any(k in settings for k in _ANTHROPIC_CACHE_KEYS):
-        return settings
-    return cast(ModelSettings, {k: v for k, v in settings.items() if k not in _ANTHROPIC_CACHE_KEYS})
+    result = {k: v for k, v in settings.items() if k not in _COMPACT_STRIP_KEYS}
+    _strip_beta_headers(result)
+    _strip_clear_thinking_edits(result)
+    return cast(ModelSettings, result)
 
 
 # =============================================================================
@@ -317,13 +372,13 @@ def get_compact_agent(
 
     # model_settings: model_settings > main_model_settings
     if effective_settings is None and main_model_settings is not None:
-        effective_settings = _strip_anthropic_cache_settings(main_model_settings)
+        effective_settings = _strip_incompatible_settings(main_model_settings)
 
     system_prompt = _load_system_prompt()
     return Agent[AgentContext, CondenseResult](
         model=infer_model(effective_model),
         model_settings=effective_settings,
-        output_type=CondenseResult,
+        output_type=ToolOutput(CondenseResult),
         deps_type=AgentContext,
         system_prompt=system_prompt,
         history_processors=[
