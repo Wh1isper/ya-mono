@@ -7,7 +7,7 @@ from ya_agent_sdk.toolsets.core.base import BaseTool
 from ya_agent_sdk.toolsets.core.content.load_media_url import LoadMediaUrlTool
 
 tools: list[type[BaseTool]] = [
-    LoadMediaUrlTool,
+    # LoadMediaUrlTool,  # Disabled by default since not all models support it
 ]
 
 __all__ = [
