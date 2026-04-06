@@ -30,6 +30,50 @@ def _configure_logging() -> None:
 
 _configure_logging()
 
+
+def _patch_pydantic_ai_contextvar() -> None:
+    """Patch pydantic-ai's set_current_run_context to suppress ContextVar cleanup errors.
+
+    When pydantic-ai creates async tasks for streaming model requests, the
+    ContextVar token from ``_CURRENT_RUN_CONTEXT.set()`` may belong to a
+    different ``contextvars.Context`` copy than the one active during
+    ``_CURRENT_RUN_CONTEXT.reset(token)`` in the finally block.  This raises
+    ``ValueError: ... was created in a different Context`` which is benign --
+    the model response has already been received -- but propagates through
+    ``on_model_request_error`` (default: re-raise) and can terminate the
+    agent run.
+
+    This patch replaces ``set_current_run_context`` in ``_agent_graph`` with a
+    version that catches the ValueError in the finally block, preventing the
+    error from propagating at all.
+    """
+    from collections.abc import Iterator
+    from contextlib import contextmanager, suppress
+
+    try:
+        import pydantic_ai._agent_graph as _agent_graph
+        from pydantic_ai._run_context import _CURRENT_RUN_CONTEXT
+    except ImportError:
+        return
+
+    @contextmanager
+    def _safe_set_current_run_context(run_context: object) -> Iterator[None]:
+        token = _CURRENT_RUN_CONTEXT.set(run_context)  # type: ignore[arg-type]
+        try:
+            yield
+        finally:
+            with suppress(ValueError):
+                # Benign: token was created in a different contextvars.Context
+                # copy (e.g. asyncio.create_task without explicit context=).
+                # The ContextVar will naturally be cleaned up when the Context
+                # object is garbage collected.
+                _CURRENT_RUN_CONTEXT.reset(token)
+
+    _agent_graph.set_current_run_context = _safe_set_current_run_context  # type: ignore[assignment]
+
+
+_patch_pydantic_ai_contextvar()
+
 try:
     __version__ = importlib.metadata.version(__name__)
 except importlib.metadata.PackageNotFoundError:
