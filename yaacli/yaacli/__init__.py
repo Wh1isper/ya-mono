@@ -74,6 +74,28 @@ def _patch_pydantic_ai_contextvar() -> None:
 
 _patch_pydantic_ai_contextvar()
 
+
+def _patch_sniffio_asyncio_detection() -> None:
+    """Explicitly set sniffio's async library ContextVar to 'asyncio'.
+
+    sniffio's fallback detection uses ``asyncio.current_task()`` which returns
+    ``None`` when code runs outside of an asyncio Task (e.g., during garbage
+    collection of httpcore connections, or in ``__del__`` finalizers).  This
+    causes ``AsyncLibraryNotFoundError`` in httpcore's ``AsyncShieldCancellation``.
+
+    Setting the ContextVar explicitly ensures sniffio always detects 'asyncio'
+    in all context copies and during GC cleanup.
+    """
+    try:
+        from sniffio import current_async_library_cvar
+    except ImportError:
+        return
+
+    current_async_library_cvar.set("asyncio")
+
+
+_patch_sniffio_asyncio_detection()
+
 try:
     __version__ = importlib.metadata.version(__name__)
 except importlib.metadata.PackageNotFoundError:
