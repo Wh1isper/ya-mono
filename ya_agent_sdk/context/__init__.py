@@ -26,6 +26,10 @@ Example:
 from ya_agent_sdk.usage import ExtraUsageRecord
 
 from .agent import (
+    ENVIRONMENT_CONTEXT_TAG,
+    PROJECT_GUIDANCE_TAG,
+    RUNTIME_CONTEXT_TAG,
+    USER_RULES_TAG,
     AgentContext,
     AgentInfo,
     AgentStreamEvent,
@@ -45,6 +49,10 @@ from .note import NoteManager
 from .tasks import Task, TaskManager, TaskStatus
 
 __all__ = [
+    "ENVIRONMENT_CONTEXT_TAG",
+    "PROJECT_GUIDANCE_TAG",
+    "RUNTIME_CONTEXT_TAG",
+    "USER_RULES_TAG",
     "AgentContext",
     "AgentInfo",
     "AgentStreamEvent",

@@ -61,7 +61,7 @@ from rich.table import Table
 from rich.text import Text
 
 from ya_agent_sdk.agents.main import AgentRuntime, stream_agent
-from ya_agent_sdk.context import BusMessage, ResumableState, StreamEvent
+from ya_agent_sdk.context import PROJECT_GUIDANCE_TAG, USER_RULES_TAG, BusMessage, ResumableState, StreamEvent
 from ya_agent_sdk.events import (
     CompactCompleteEvent,
     CompactFailedEvent,
@@ -348,6 +348,13 @@ class TUIApp:
             working_dir=self.working_dir,
         )
         await self._exit_stack.enter_async_context(self._runtime)
+
+        # Register application-level injected context tags for compact stripping
+        self._runtime.ctx.injected_context_tags = (
+            *self._runtime.ctx.injected_context_tags,
+            PROJECT_GUIDANCE_TAG,
+            USER_RULES_TAG,
+        )
 
         # Initialize context window size from model config
         if self._runtime.ctx.model_cfg.context_window:
@@ -923,7 +930,9 @@ class TUIApp:
             try:
                 content = agents_path.read_text(encoding="utf-8")
                 if content.strip():
-                    project_guidance = f"<project-guidance name={agents_path.name}>\n{content}\n</project-guidance>"
+                    project_guidance = (
+                        f"<{PROJECT_GUIDANCE_TAG} name={agents_path.name}>\n{content}\n</{PROJECT_GUIDANCE_TAG}>"
+                    )
                     logger.debug(f"Loaded project guidance from {agents_path}")
             except Exception as e:
                 logger.warning(f"Failed to read {agents_path}: {e}")
@@ -934,7 +943,7 @@ class TUIApp:
             try:
                 content = rules_path.read_text(encoding="utf-8")
                 if content.strip():
-                    user_rules = f"<user-rules location={rules_path.absolute().as_posix()}>\n{content}\n</user-rules>"
+                    user_rules = f"<{USER_RULES_TAG} location={rules_path.absolute().as_posix()}>\n{content}\n</{USER_RULES_TAG}>"
                     logger.debug(f"Loaded user rules from {rules_path}")
             except Exception as e:
                 logger.warning(f"Failed to read {rules_path}: {e}")

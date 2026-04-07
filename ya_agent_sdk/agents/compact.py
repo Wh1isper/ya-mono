@@ -7,6 +7,7 @@ the conversation.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
 from inspect import isawaitable
@@ -15,13 +16,14 @@ from typing import Any, cast
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, ModelSettings, ToolOutput, UserContent
+from pydantic_ai import Agent, ModelSettings, ThinkingPart, ToolOutput, UserContent
 from pydantic_ai.messages import (
     BinaryContent,
     ImageUrl,
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    RetryPromptPart,
     SystemPromptPart,
     TextPart,
     ToolReturnPart,
@@ -35,6 +37,7 @@ from ya_agent_sdk._config import AgentSettings
 from ya_agent_sdk._logger import logger
 from ya_agent_sdk.agents.models import infer_model
 from ya_agent_sdk.context import AgentContext, ModelConfig
+from ya_agent_sdk.context.agent import ENVIRONMENT_CONTEXT_TAG, RUNTIME_CONTEXT_TAG
 from ya_agent_sdk.events import CompactCompleteEvent, CompactFailedEvent, CompactStartEvent
 from ya_agent_sdk.filters import (
     create_system_prompt_filter,
@@ -83,6 +86,9 @@ _MAX_TOOL_RETURN_CHARS = 500
 # Characters to keep from the beginning and end when truncating
 _TOOL_RETURN_KEEP_HEAD = 200
 _TOOL_RETURN_KEEP_TAIL = 200
+
+# Default injected context tags used when no AgentContext is available.
+_DEFAULT_INJECTED_TAGS = (RUNTIME_CONTEXT_TAG, ENVIRONMENT_CONTEXT_TAG)
 
 
 def _strip_beta_headers(result: dict[str, Any]) -> None:
@@ -226,49 +232,178 @@ def _strip_media_from_user_prompt(part: UserPromptPart) -> tuple[UserPromptPart,
     return replace(part, content=replaced), True
 
 
+def _build_tag_regex(tags: tuple[str, ...]) -> re.Pattern[str] | None:
+    """Build a combined regex pattern to match XML blocks for the given tag names.
+
+    Handles tags with or without attributes (e.g., ``<tag>`` and ``<tag attr=val>``).
+
+    Args:
+        tags: Tuple of XML tag names to match.
+
+    Returns:
+        Compiled regex pattern, or None if tags is empty.
+    """
+    if not tags:
+        return None
+    # Each tag matches: <tag> or <tag attr=...> through </tag>
+    alternatives = "|".join(re.escape(tag) for tag in tags)
+    return re.compile(rf"<({alternatives})[\s>].*?</\1>", re.DOTALL)
+
+
+def _build_tag_prefixes(tags: tuple[str, ...]) -> tuple[str, ...]:
+    """Build prefix strings for matching list-type content items.
+
+    Args:
+        tags: Tuple of XML tag names.
+
+    Returns:
+        Tuple of prefix strings like ``("<tag1", "<tag2", ...)``.
+    """
+    return tuple(f"<{tag}" for tag in tags)
+
+
+def _strip_injected_context(
+    part: UserPromptPart,
+    tags: tuple[str, ...] = _DEFAULT_INJECTED_TAGS,
+) -> UserPromptPart | None:
+    """Strip injected context blocks and instruction items from a UserPromptPart.
+
+    Removes XML blocks (e.g., ``<runtime-context>...</runtime-context>``) from
+    string content, and tag-prefixed items from list content. The exact tags to
+    strip are determined by the ``tags`` parameter.
+
+    These are injected per-turn by filters and will be re-injected fresh
+    on the latest request, so historical copies are redundant.
+
+    Args:
+        part: The UserPromptPart to process.
+        tags: Tuple of XML tag names to strip. Defaults to SDK-level tags.
+
+    Returns:
+        The cleaned part, or None if the part became empty after stripping.
+    """
+    content = part.content
+
+    if isinstance(content, str):
+        tag_re = _build_tag_regex(tags)
+        cleaned = tag_re.sub("", content) if tag_re else content
+        cleaned = cleaned.strip()
+        if not cleaned:
+            return None
+        if cleaned != content:
+            return replace(part, content=cleaned)
+        return part
+
+    if isinstance(content, Sequence):
+        prefixes = _build_tag_prefixes(tags)
+        filtered = [
+            item
+            for item in content
+            if not (isinstance(item, str) and any(item.lstrip().startswith(p) for p in prefixes))
+        ]
+        if not filtered:
+            return None
+        if len(filtered) != len(content):
+            return replace(part, content=filtered)
+
+    return part
+
+
+def _find_last_user_turn_index(message_history: list[ModelMessage]) -> int | None:
+    """Find the index of the last user-initiated turn in message history.
+
+    A user turn is a ModelRequest that does NOT contain ToolReturnPart or
+    RetryPromptPart, indicating it was initiated by user input rather than
+    being an intermediate tool response.
+
+    Args:
+        message_history: The message history to search.
+
+    Returns:
+        The index of the last user turn, or None if no user turn found.
+    """
+    for i in range(len(message_history) - 1, -1, -1):
+        msg = message_history[i]
+        if isinstance(msg, ModelRequest) and not any(
+            isinstance(part, (ToolReturnPart, RetryPromptPart)) for part in msg.parts
+        ):
+            return i
+    return None
+
+
 def _trim_history_for_compact(
     message_history: list[ModelMessage],
+    *,
+    preserve_last_turn: bool = False,
+    injected_context_tags: tuple[str, ...] = _DEFAULT_INJECTED_TAGS,
 ) -> list[ModelMessage]:
     """Pre-trim message history before sending to compact agent.
 
-    Performs two operations to reduce token count:
-    1. Truncates large ToolReturnPart content (keeps head + tail)
-    2. Drops all image/video content from UserPromptPart
+    Performs multiple operations to aggressively reduce token count:
 
-    This ensures the compact agent can process the history without
-    exceeding its own context window, even when triggered at high
-    token usage (e.g., 89-99% of context).
+    1. Strips ThinkingPart from ModelResponse (internal reasoning, not useful for summary)
+    2. Truncates large ToolReturnPart content (keeps head + tail)
+    3. Drops all image/video content from UserPromptPart
+    4. Strips injected context blocks (identified by ``injected_context_tags``) from UserPromptPart
+    5. Removes UserPromptPart that become empty after stripping
+    6. Removes empty ModelRequest messages
 
     Args:
         message_history: The full message history from the main agent.
+        preserve_last_turn: If True, the last user turn and its subsequent tool
+            interactions preserve their injected context without stripping,
+            since the compact agent may need the latest context for an accurate
+            summary. Default False (strip all turns for maximum compression).
+        injected_context_tags: XML tag names for per-turn injected context
+            blocks to strip. Read from ``AgentContext.injected_context_tags``.
 
     Returns:
         A trimmed copy of the message history suitable for the compact agent.
     """
+    # Optionally find the last user turn boundary to preserve its injected context.
+    last_user_turn_idx = _find_last_user_turn_index(message_history) if preserve_last_turn else None
+
     trimmed: list[ModelMessage] = []
 
-    for message in message_history:
-        if not isinstance(message, ModelRequest):
-            # ModelResponse - keep as-is (text and tool calls are small)
+    for i, message in enumerate(message_history):
+        if isinstance(message, ModelResponse):
+            # Strip ThinkingParts (internal reasoning, not needed for summary)
+            filtered_parts = [part for part in message.parts if not isinstance(part, ThinkingPart)]
+            if len(filtered_parts) != len(message.parts):
+                message = replace(message, parts=filtered_parts)
             trimmed.append(message)
             continue
 
+        if not isinstance(message, ModelRequest):
+            trimmed.append(message)
+            continue
+
+        # Determine if this message is in the last user turn (when preservation is enabled)
+        is_in_last_turn = last_user_turn_idx is not None and i >= last_user_turn_idx
+
         new_parts = []
-        parts_modified = False
 
         for part in message.parts:
             if isinstance(part, ToolReturnPart):
-                part, modified = _truncate_tool_return(part)
-                parts_modified = parts_modified or modified
+                part, _ = _truncate_tool_return(part)
+                new_parts.append(part)
             elif isinstance(part, UserPromptPart):
-                part, modified = _strip_media_from_user_prompt(part)
-                parts_modified = parts_modified or modified
-            # SystemPromptPart, RetryPromptPart - keep as-is
-            new_parts.append(part)
+                # Always strip media (compact agent can't process images/videos)
+                part, _ = _strip_media_from_user_prompt(part)
+                if is_in_last_turn:
+                    # Preserve injected context in the last turn
+                    new_parts.append(part)
+                else:
+                    # Strip injected context from historical turns
+                    stripped = _strip_injected_context(part, tags=injected_context_tags)
+                    if stripped is not None:
+                        new_parts.append(stripped)
+                    # If None, the part was purely injected context - drop it
+            else:
+                # SystemPromptPart, RetryPromptPart - keep as-is
+                new_parts.append(part)
 
-        if parts_modified:
-            message = replace(message, parts=new_parts)
-        trimmed.append(message)
+        trimmed.append(replace(message, parts=new_parts))
 
     return trimmed
 
@@ -586,7 +721,10 @@ def create_compact_filter(
             await agent_ctx.emit_event(CompactStartEvent(event_id=event_id, message_count=len(message_history)))
 
             # Pre-trim history to reduce token count for compact agent
-            trimmed_history = _trim_history_for_compact(message_history)
+            trimmed_history = _trim_history_for_compact(
+                message_history,
+                injected_context_tags=agent_ctx.injected_context_tags,
+            )
 
             # Run compact agent on trimmed message history with AgentContext as deps
             result = await agent.run(

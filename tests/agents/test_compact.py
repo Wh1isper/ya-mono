@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic_ai import ThinkingPart
 from pydantic_ai.messages import (
     BinaryContent,
     ImageUrl,
@@ -7,6 +8,7 @@ from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
     TextPart,
+    ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
     VideoUrl,
@@ -14,17 +16,24 @@ from pydantic_ai.messages import (
 
 from ya_agent_sdk.agents.compact import (
     _COMPACT_STRIP_KEYS,
+    _DEFAULT_INJECTED_TAGS,
     _INCOMPATIBLE_BETAS,
     _MAX_TOOL_RETURN_CHARS,
+    _find_last_user_turn_index,
     _is_media_content,
     _media_to_placeholder,
     _strip_incompatible_settings,
+    _strip_injected_context,
     _trim_history_for_compact,
     _truncate_str,
 )
 from ya_agent_sdk.agents.main import create_agent
+from ya_agent_sdk.context.agent import PROJECT_GUIDANCE_TAG, USER_RULES_TAG
 from ya_agent_sdk.environment.local import LocalEnvironment
 from ya_agent_sdk.filters.auto_load_files import process_auto_load_files
+
+# Full tag set including application-level tags for testing
+_ALL_TAGS = (*_DEFAULT_INJECTED_TAGS, PROJECT_GUIDANCE_TAG, USER_RULES_TAG)
 
 # =============================================================================
 # _truncate_str tests
@@ -368,6 +377,398 @@ def test_trim_handles_mixed_messages() -> None:
     assert len(part3.content) == 2
     assert part3.content[0] == "What about this?"
     assert part3.content[1] == "[image: https://example.com/screenshot.png]"
+
+
+# =============================================================================
+# _strip_injected_context tests
+# =============================================================================
+
+
+def test_strip_injected_context_pure_runtime_context() -> None:
+    """UserPromptPart with only runtime-context should be removed entirely."""
+    part = UserPromptPart(
+        content="<runtime-context>\n  <agent-id>main</agent-id>\n  <current-time>2026-04-02T19:02:51+08:00</current-time>\n</runtime-context>"
+    )
+    assert _strip_injected_context(part) is None
+
+
+def test_strip_injected_context_pure_environment_context() -> None:
+    """UserPromptPart with only environment-context should be removed entirely."""
+    part = UserPromptPart(
+        content="<environment-context>\n<file-system>\n  <default-directory>/home/user</default-directory>\n</file-system>\n</environment-context>"
+    )
+    assert _strip_injected_context(part) is None
+
+
+def test_strip_injected_context_mixed_string_content() -> None:
+    """Runtime-context should be stripped but other content preserved."""
+    part = UserPromptPart(content="Hello world\n<runtime-context><agent-id>main</agent-id></runtime-context>")
+    result = _strip_injected_context(part)
+    assert result is not None
+    assert result.content == "Hello world"
+
+
+def test_strip_injected_context_plain_text() -> None:
+    """Plain text content should be unchanged."""
+    part = UserPromptPart(content="Just a normal message")
+    result = _strip_injected_context(part)
+    assert result is not None
+    assert result.content == "Just a normal message"
+    # Should return the same object (no copy needed)
+    assert result is part
+
+
+def test_strip_injected_context_list_with_instructions() -> None:
+    """Instruction items should be filtered from list content."""
+    part = UserPromptPart(
+        content=[
+            "user request text",
+            "<project-guidance name=AGENTS.md>\n## Project Overview\n...long content...</project-guidance>",
+            "<user-rules location=/home/.yaacli/RULES.md>\n## Preferences\n...</user-rules>",
+        ]
+    )
+    result = _strip_injected_context(part, tags=_ALL_TAGS)
+    assert result is not None
+    assert isinstance(result.content, list)
+    assert len(result.content) == 1
+    assert result.content[0] == "user request text"
+
+
+def test_strip_injected_context_list_all_instructions() -> None:
+    """List with only instruction items should be removed entirely."""
+    part = UserPromptPart(
+        content=[
+            "<project-guidance name=AGENTS.md>\ncontent</project-guidance>",
+            "<user-rules location=/home/RULES.md>\nrules</user-rules>",
+        ]
+    )
+    assert _strip_injected_context(part, tags=_ALL_TAGS) is None
+
+
+def test_strip_injected_context_list_no_instructions() -> None:
+    """List without instruction items should be unchanged."""
+    part = UserPromptPart(
+        content=[
+            "user text",
+            ImageUrl(url="https://example.com/img.png"),
+        ]
+    )
+    result = _strip_injected_context(part)
+    assert result is not None
+    assert result is part  # Same object, no modification
+
+
+def test_strip_injected_context_both_contexts_in_string() -> None:
+    """Both runtime and environment context should be stripped from the same string."""
+    part = UserPromptPart(
+        content=(
+            "<runtime-context><data>1</data></runtime-context>\n"
+            "important message\n"
+            "<environment-context><data>2</data></environment-context>"
+        )
+    )
+    result = _strip_injected_context(part)
+    assert result is not None
+    assert result.content == "important message"
+
+
+# =============================================================================
+# _trim_history_for_compact: thinking part stripping tests
+# =============================================================================
+
+
+def test_trim_strips_thinking_parts_from_response() -> None:
+    """ThinkingPart should be stripped from ModelResponse."""
+    history: list[ModelMessage] = [
+        ModelResponse(
+            parts=[
+                ThinkingPart(content="Let me think about this..."),
+                TextPart(content="Here is my answer."),
+            ]
+        ),
+    ]
+
+    trimmed = _trim_history_for_compact(history)
+
+    assert len(trimmed) == 1
+    response = trimmed[0]
+    assert isinstance(response, ModelResponse)
+    assert len(response.parts) == 1
+    assert isinstance(response.parts[0], TextPart)
+    assert response.parts[0].content == "Here is my answer."
+
+
+def test_trim_strips_thinking_preserves_tool_calls() -> None:
+    """ThinkingPart should be stripped but ToolCallPart preserved."""
+    history: list[ModelMessage] = [
+        ModelResponse(
+            parts=[
+                ThinkingPart(content="I need to read a file..."),
+                ToolCallPart(tool_name="view", args={"file_path": "test.py"}, tool_call_id="call_1"),
+            ]
+        ),
+    ]
+
+    trimmed = _trim_history_for_compact(history)
+
+    response = trimmed[0]
+    assert isinstance(response, ModelResponse)
+    assert len(response.parts) == 1
+    assert isinstance(response.parts[0], ToolCallPart)
+
+
+def test_trim_preserves_response_without_thinking() -> None:
+    """ModelResponse without ThinkingPart should not be modified."""
+    original_response = ModelResponse(parts=[TextPart(content="Hello")])
+    history: list[ModelMessage] = [original_response]
+
+    trimmed = _trim_history_for_compact(history)
+
+    assert trimmed[0] is original_response  # Same object, no unnecessary copy
+
+
+# =============================================================================
+# _trim_history_for_compact: injected context stripping tests
+# =============================================================================
+
+
+def test_trim_removes_runtime_context_user_prompt() -> None:
+    """UserPromptPart with only runtime-context should be removed."""
+    history: list[ModelMessage] = [
+        ModelRequest(
+            parts=[
+                ToolReturnPart(tool_name="shell", content="OK", tool_call_id="call_1"),
+                UserPromptPart(
+                    content="<runtime-context><agent-id>main</agent-id><current-time>2026-04-02</current-time></runtime-context>"
+                ),
+            ]
+        ),
+    ]
+
+    trimmed = _trim_history_for_compact(history)
+
+    request = trimmed[0]
+    assert isinstance(request, ModelRequest)
+    assert len(request.parts) == 1
+    assert isinstance(request.parts[0], ToolReturnPart)
+
+
+def test_trim_removes_environment_context_user_prompt() -> None:
+    """UserPromptPart with only environment-context should be removed."""
+    history: list[ModelMessage] = [
+        ModelRequest(
+            parts=[
+                UserPromptPart(content="Hello"),
+                UserPromptPart(
+                    content="<environment-context><file-system><path>/home</path></file-system></environment-context>"
+                ),
+            ]
+        ),
+    ]
+
+    trimmed = _trim_history_for_compact(history)
+
+    request = trimmed[0]
+    assert isinstance(request, ModelRequest)
+    assert len(request.parts) == 1
+    assert isinstance(request.parts[0], UserPromptPart)
+    assert request.parts[0].content == "Hello"  # type: ignore[union-attr]
+
+
+def test_trim_strips_instructions_from_list_user_prompt() -> None:
+    """Instruction items should be filtered from list-type user prompt content."""
+    history: list[ModelMessage] = [
+        ModelRequest(
+            parts=[
+                UserPromptPart(
+                    content=[
+                        "Fix the bug in main.py",
+                        "<project-guidance name=AGENTS.md>\n## Overview\n...</project-guidance>",
+                        "<user-rules location=/home/RULES.md>\n## Rules\n...</user-rules>",
+                    ]
+                ),
+            ]
+        ),
+    ]
+
+    trimmed = _trim_history_for_compact(history, injected_context_tags=_ALL_TAGS)
+
+    request = trimmed[0]
+    assert isinstance(request, ModelRequest)
+    part = request.parts[0]
+    assert isinstance(part, UserPromptPart)
+    assert isinstance(part.content, list)
+    assert len(part.content) == 1
+    assert part.content[0] == "Fix the bug in main.py"
+
+
+def test_trim_combined_all_stripping() -> None:
+    """Should handle a realistic history with thinking, context, and instructions."""
+    history: list[ModelMessage] = [
+        # User message with instructions
+        ModelRequest(
+            parts=[
+                UserPromptPart(
+                    content=[
+                        "Help me refactor",
+                        "<project-guidance name=AGENTS.md>\nProject info</project-guidance>",
+                        "<user-rules location=RULES.md>\nPrefs</user-rules>",
+                    ]
+                ),
+                UserPromptPart(content="<runtime-context><agent-id>main</agent-id></runtime-context>"),
+                UserPromptPart(content="<environment-context><file-system>data</file-system></environment-context>"),
+            ]
+        ),
+        # Response with thinking
+        ModelResponse(
+            parts=[
+                ThinkingPart(content="Let me analyze the code..."),
+                TextPart(content="I'll help you refactor."),
+                ToolCallPart(tool_name="view", args={"file_path": "main.py"}, tool_call_id="call_1"),
+            ]
+        ),
+        # Tool return with runtime context
+        ModelRequest(
+            parts=[
+                ToolReturnPart(tool_name="view", content="x" * 1000, tool_call_id="call_1"),
+                UserPromptPart(content="<runtime-context><agent-id>main</agent-id></runtime-context>"),
+            ]
+        ),
+    ]
+
+    trimmed = _trim_history_for_compact(history, injected_context_tags=_ALL_TAGS)
+
+    assert len(trimmed) == 3
+
+    # First request: instructions and contexts stripped, user text preserved
+    req0 = trimmed[0]
+    assert isinstance(req0, ModelRequest)
+    assert len(req0.parts) == 1  # Only the user text survives
+    part0 = req0.parts[0]
+    assert isinstance(part0, UserPromptPart)
+    assert isinstance(part0.content, list)
+    assert len(part0.content) == 1
+    assert part0.content[0] == "Help me refactor"
+
+    # Response: thinking stripped, text and tool call preserved
+    resp = trimmed[1]
+    assert isinstance(resp, ModelResponse)
+    assert len(resp.parts) == 2
+    assert isinstance(resp.parts[0], TextPart)
+    assert isinstance(resp.parts[1], ToolCallPart)
+
+    # Tool return request: tool return truncated, runtime context removed
+    req2 = trimmed[2]
+    assert isinstance(req2, ModelRequest)
+    assert len(req2.parts) == 1  # Only truncated tool return
+    part2 = req2.parts[0]
+    assert isinstance(part2, ToolReturnPart)
+    assert len(part2.content) < 1000  # type: ignore[arg-type]
+
+
+# =============================================================================
+# _find_last_user_turn_index tests
+# =============================================================================
+
+
+def test_find_last_user_turn_index_empty_history() -> None:
+    """Empty history should return None."""
+    assert _find_last_user_turn_index([]) is None
+
+
+def test_find_last_user_turn_index_only_tool_returns() -> None:
+    """History with only tool return requests should return None."""
+    history: list[ModelMessage] = [
+        ModelRequest(parts=[ToolReturnPart(tool_name="shell", content="OK", tool_call_id="call_1")]),
+    ]
+    assert _find_last_user_turn_index(history) is None
+
+
+def test_find_last_user_turn_index_single_user_turn() -> None:
+    """Single user prompt request should return index 0."""
+    history: list[ModelMessage] = [
+        ModelRequest(parts=[UserPromptPart(content="Hello")]),
+    ]
+    assert _find_last_user_turn_index(history) == 0
+
+
+def test_find_last_user_turn_index_multiple_turns() -> None:
+    """Should return the index of the last user turn."""
+    history: list[ModelMessage] = [
+        ModelRequest(parts=[UserPromptPart(content="First question")]),
+        ModelResponse(parts=[TextPart(content="Answer")]),
+        ModelRequest(parts=[ToolReturnPart(tool_name="view", content="data", tool_call_id="c1")]),
+        ModelResponse(parts=[TextPart(content="More")]),
+        ModelRequest(parts=[UserPromptPart(content="Second question")]),
+    ]
+    assert _find_last_user_turn_index(history) == 4
+
+
+def test_trim_preserves_last_turn_injected_context() -> None:
+    """With preserve_last_turn=True, the last user turn should keep injected context."""
+    history: list[ModelMessage] = [
+        # Earlier turn
+        ModelRequest(parts=[UserPromptPart(content="First question")]),
+        ModelResponse(parts=[TextPart(content="Answer")]),
+        # Last user turn with injected context
+        ModelRequest(
+            parts=[
+                UserPromptPart(
+                    content=[
+                        "My question",
+                        "<project-guidance name=AGENTS.md>\nProject info</project-guidance>",
+                    ]
+                ),
+                UserPromptPart(content="<runtime-context><agent-id>main</agent-id></runtime-context>"),
+                UserPromptPart(content="<environment-context><file-system>data</file-system></environment-context>"),
+            ]
+        ),
+    ]
+
+    trimmed = _trim_history_for_compact(history, preserve_last_turn=True, injected_context_tags=_ALL_TAGS)
+
+    # First turn: context stripped
+    req0 = trimmed[0]
+    assert isinstance(req0, ModelRequest)
+    assert len(req0.parts) == 1
+
+    # Last turn: all 3 parts preserved
+    request = trimmed[2]
+    assert isinstance(request, ModelRequest)
+    assert len(request.parts) == 3
+    part0 = request.parts[0]
+    assert isinstance(part0, UserPromptPart)
+    assert isinstance(part0.content, list)
+    assert len(part0.content) == 2  # User text + project-guidance
+
+
+def test_trim_strips_last_turn_by_default() -> None:
+    """By default (preserve_last_turn=False), the last turn is also stripped."""
+    history: list[ModelMessage] = [
+        ModelRequest(
+            parts=[
+                UserPromptPart(
+                    content=[
+                        "My question",
+                        "<project-guidance name=AGENTS.md>\nProject info</project-guidance>",
+                    ]
+                ),
+                UserPromptPart(content="<runtime-context><agent-id>main</agent-id></runtime-context>"),
+            ]
+        ),
+    ]
+
+    trimmed = _trim_history_for_compact(history, injected_context_tags=_ALL_TAGS)
+
+    request = trimmed[0]
+    assert isinstance(request, ModelRequest)
+    # Context stripped: only user text remains, runtime-context part removed
+    assert len(request.parts) == 1
+    part0 = request.parts[0]
+    assert isinstance(part0, UserPromptPart)
+    assert isinstance(part0.content, list)
+    assert len(part0.content) == 1
+    assert part0.content[0] == "My question"
 
 
 # =============================================================================
