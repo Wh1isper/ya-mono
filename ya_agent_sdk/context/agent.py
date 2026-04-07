@@ -650,6 +650,15 @@ class ModelConfig(BaseModel):
     compact_threshold: float = Field(default=0.90, ge=0.0, le=1.0)
     """Compact threshold for auto-compaction. When token usage exceeds this ratio, compact is triggered."""
 
+    cold_start_trim_seconds: int = 3600
+    """Seconds of inactivity after which KV cache is considered expired.
+
+    When the gap between the last model response timestamp and now exceeds
+    this value, all large tool return content is truncated before sending to
+    the model, saving input token cost on cold re-encoding.
+    Set to 0 to disable.
+    """
+
     max_images: int = 20
     """Maximum number of images allowed in message history. Default is 20 (Claude's limit)."""
 
