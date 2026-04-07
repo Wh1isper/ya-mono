@@ -54,6 +54,7 @@ from ya_agent_sdk.events import (
     ToolCallsStartEvent,
 )
 from ya_agent_sdk.filters.auto_load_files import process_auto_load_files
+from ya_agent_sdk.filters.cold_start import cold_start_trim
 from ya_agent_sdk.filters.environment_instructions import create_environment_instructions_filter
 from ya_agent_sdk.filters.system_prompt import create_system_prompt_filter
 from ya_agent_sdk.toolsets.core.base import BaseTool, GlobalHooks, Toolset
@@ -448,6 +449,7 @@ def create_agent(
             main_model=model,
             main_model_settings=model_settings,
         ),
+        cold_start_trim,
         create_environment_instructions_filter(actual_env),
         process_auto_load_files,
     ])
