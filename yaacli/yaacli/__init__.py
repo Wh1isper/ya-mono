@@ -108,6 +108,64 @@ def _patch_sniffio_asyncio_detection() -> None:
 
 _patch_sniffio_asyncio_detection()
 
+
+def _patch_anyio_cancel_scope_null_task() -> None:
+    """Patch anyio CancelScope to tolerate asyncio.current_task() returning None.
+
+    After Ctrl+C cancellation, httpx stream cleanup (`response.aclose()`) uses
+    anyio's `AsyncShieldCancellation` (a CancelScope) to shield the connection
+    close from further cancellation.  `CancelScope.__enter__` unconditionally
+    calls `asyncio.current_task()` and uses the result as a key in a
+    `WeakKeyDictionary`.  When cleanup runs in a context where the asyncio task
+    has already been torn down (e.g. async-generator finalization triggered by
+    GC after cancellation), `current_task()` returns None, causing:
+
+        TypeError: cannot create weak reference to 'NoneType' object
+
+    This patch wraps `__enter__` and `__exit__` so that when `current_task()`
+    is None the scope degrades to a no-op.  This is safe because:
+    - There is no task to shield; cancellation management is meaningless.
+    - The code inside the scope (closing the TCP connection) is a best-effort
+      cleanup that should not raise.
+    """
+    import asyncio
+
+    try:
+        from anyio._backends._asyncio import CancelScope
+    except ImportError:
+        return
+
+    _original_enter = CancelScope.__enter__
+    _original_exit = CancelScope.__exit__
+
+    _NOOP_ATTR = "_yaacli_noop"
+
+    def _safe_enter(self: CancelScope) -> CancelScope:
+        if asyncio.current_task() is None:
+            # No active task -- degrade to a no-op context manager.
+            self._active = True
+            object.__setattr__(self, _NOOP_ATTR, True)
+            return self
+        object.__setattr__(self, _NOOP_ATTR, False)
+        return _original_enter(self)
+
+    def _safe_exit(
+        self: CancelScope,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> bool:
+        if getattr(self, _NOOP_ATTR, False):
+            self._active = False
+            return False  # Do not suppress exceptions
+        return _original_exit(self, exc_type, exc_val, exc_tb)
+
+    CancelScope.__enter__ = _safe_enter  # type: ignore[assignment]
+    CancelScope.__exit__ = _safe_exit  # type: ignore[assignment]
+
+
+_patch_anyio_cancel_scope_null_task()
+
 try:
     __version__ = importlib.metadata.version(__name__)
 except importlib.metadata.PackageNotFoundError:

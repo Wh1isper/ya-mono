@@ -10,6 +10,8 @@ Large output is truncated and full content is written to tmp files.
 
 from __future__ import annotations
 
+from html import escape as _html_escape
+
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from pydantic_ai.tools import RunContext
 from y_agent_environment import CompletedProcess, FileOperator
@@ -23,21 +25,29 @@ logger = get_logger(__name__)
 _INJECT_TRUNCATE_LIMIT = 20000
 
 
+def _xml_escape(s: str, *, quote: bool = False) -> str:
+    """Escape XML-special characters.
+
+    Args:
+        s: String to escape.
+        quote: If True, also escape quote characters (for attributes).
+    """
+    return _html_escape(s, quote=quote)
+
+
 def _format_stream(tag: str, content: str) -> str:
     """Format a stdout/stderr stream element, truncating if needed."""
     if len(content) > _INJECT_TRUNCATE_LIMIT:
-        return (
-            f'  <{tag} truncated="true">\n{content[:_INJECT_TRUNCATE_LIMIT]}\n'
-            f"...(truncated, full output at `{tag}_file_path`)\n  </{tag}>"
-        )
-    return f"  <{tag}>{content}</{tag}>"
+        escaped = _xml_escape(content[:_INJECT_TRUNCATE_LIMIT])
+        return f'  <{tag} truncated="true">\n{escaped}\n...(truncated, full output at `{tag}_file_path`)\n  </{tag}>'
+    return f"  <{tag}>{_xml_escape(content)}</{tag}>"
 
 
 def _format_completed_result(result: CompletedProcess) -> str:
     """Format a single completed process result for injection."""
     parts: list[str] = [
-        f'<background-result process-id="{result.process_id}" '
-        f'command="{result.command}" exit-code="{result.exit_code}">'
+        f'<background-result process-id="{_xml_escape(result.process_id, quote=True)}" '
+        f'command="{_xml_escape(result.command, quote=True)}" exit-code="{result.exit_code}">'
     ]
 
     if result.stdout:

@@ -970,6 +970,13 @@ async def stream_agent(  # noqa: C901
                                 agent_info=main_agent_info, event=event, node=node, run=run, output_queue=output_queue
                             )
                         )
+        except TypeError as e:
+            # anyio CancelScope fails when asyncio.current_task() returns None during
+            # httpx stream cleanup after cancellation.  Benign -- stream already closing.
+            if "cannot create weak reference to 'NoneType'" in str(e):
+                logger.debug("Suppressed anyio CancelScope cleanup error from streaming: %s", e)
+            else:
+                raise
         except ValueError as e:
             # Suppress ContextVar cleanup errors from pydantic-ai's streaming internals.
             # When pydantic-ai's _streaming_handler runs in a child task (wrap_task) with a copied
@@ -1145,6 +1152,12 @@ async def stream_agent(  # noqa: C901
         except BaseException as e:
             if isinstance(e, asyncio.CancelledError):
                 logger.debug("Main agent task cancelled")
+            elif isinstance(e, TypeError) and "cannot create weak reference to 'NoneType'" in str(e):
+                # anyio CancelScope fails when asyncio.current_task() returns None
+                # during httpx stream cleanup after cancellation.  The stream was
+                # already being torn down; this error is benign.
+                logger.debug("Suppressed anyio CancelScope cleanup error: %s", e)
+                return
             elif isinstance(e, ValueError) and "was created in a different" in str(e):
                 # Suppress ContextVar cleanup error from pydantic-ai.
                 # This occurs when async generator cleanup runs in a different
