@@ -862,11 +862,11 @@ class TUIApp:
                         ("class:status-bar", " | "),
                         ("class:status-bar.warning", f"Loop: {ctx.loop_iteration}/{ctx.loop_max_iterations}"),
                     ])
-                bg_count = self._get_background_task_count()
-                if bg_count > 0:
+                bg_label = self._format_background_label()
+                if bg_label:
                     parts.extend([
                         ("class:status-bar", " | "),
-                        ("class:status-bar.warning", f"BG: {bg_count} running"),
+                        ("class:status-bar.warning", bg_label),
                     ])
                 parts.extend([
                     ("class:status-bar", " | "),
@@ -889,11 +889,11 @@ class TUIApp:
                 ("class:status-bar", " | "),
                 ("class:status-bar", f"Context: {context_pct}%"),
             ]
-            bg_count = self._get_background_task_count()
-            if bg_count > 0:
+            bg_label = self._format_background_label()
+            if bg_label:
                 parts.extend([
                     ("class:status-bar", " | "),
-                    ("class:status-bar.warning", f"BG: {bg_count} running"),
+                    ("class:status-bar.warning", bg_label),
                 ])
             parts.extend([
                 ("class:status-bar", " | "),
@@ -1007,6 +1007,34 @@ class TUIApp:
         if manager is None:
             return 0
         return len(manager.active_tasks)
+
+    def _get_background_process_count(self) -> int:
+        """Get the number of active background shell processes."""
+        try:
+            if self._runtime and self._runtime.env and self._runtime.env.shell:
+                return len(self._runtime.env.shell.active_background_processes)
+        except RuntimeError:
+            pass
+        return 0
+
+    def _format_background_label(self) -> str:
+        """Format background indicator label combining tasks and processes.
+
+        Returns empty string if nothing is running. Examples:
+        - "BG: 2 tasks" (only subagent tasks)
+        - "BG: 3 procs" (only shell processes)
+        - "BG: 2 tasks, 3 procs" (both)
+        """
+        task_count = self._get_background_task_count()
+        proc_count = self._get_background_process_count()
+        if task_count == 0 and proc_count == 0:
+            return ""
+        parts: list[str] = []
+        if task_count > 0:
+            parts.append(f"{task_count} task{'s' if task_count != 1 else ''}")
+        if proc_count > 0:
+            parts.append(f"{proc_count} proc{'s' if proc_count != 1 else ''}")
+        return f"BG: {', '.join(parts)}"
 
     def _on_background_task_complete(self, agent_id: str) -> None:
         """Callback invoked when a background task completes.
