@@ -16,6 +16,7 @@ def _make_ctx(shell: Shell | None = None, file_operator=None) -> RunContext:
     deps.shell = shell
     deps.file_operator = file_operator
     deps.run_id = "test-run-12345678"
+    deps.emit_event = AsyncMock()
 
     ctx = MagicMock(spec=RunContext)
     ctx.deps = deps
