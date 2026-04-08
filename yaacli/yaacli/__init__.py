@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import logging
+from types import TracebackType
 
 
 def _configure_logging() -> None:
@@ -153,7 +154,7 @@ def _patch_anyio_cancel_scope_null_task() -> None:
         self: CancelScope,
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
-        exc_tb: object,
+        exc_tb: TracebackType | None,
     ) -> bool:
         if getattr(self, _NOOP_ATTR, False):
             self._active = False
