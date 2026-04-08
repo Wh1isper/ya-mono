@@ -439,3 +439,64 @@ class ShellInputTool(BaseTool):
             process_id=process_id,
             written=True,
         )
+
+
+class ShellSignalResult(TypedDict, total=False):
+    """Result of sending a signal to a background process."""
+
+    process_id: str
+    signal: int
+    sent: bool
+    error: str
+
+
+class ShellSignalTool(BaseTool):
+    """Tool for sending a Unix signal to a background process."""
+
+    name = "shell_signal"
+    description = (
+        "Send a Unix signal to a background process. "
+        "Common signals: 2 (SIGINT/Ctrl+C), 15 (SIGTERM). "
+        "Use shell_kill to terminate and clean up instead."
+    )
+    tags = frozenset({"shell"})
+    superseded_by_tags: frozenset[str] = frozenset()
+
+    def is_available(self, ctx: RunContext[AgentContext]) -> bool:
+        return ctx.deps.shell is not None
+
+    async def call(
+        self,
+        ctx: RunContext[AgentContext],
+        process_id: Annotated[str, Field(description="Process ID of the background process.")],
+        signal: Annotated[
+            int,
+            Field(
+                description="Signal number to send. Common values: 2 (SIGINT/Ctrl+C), 15 (SIGTERM), 9 (SIGKILL), 18 (SIGCONT).",
+            ),
+        ],
+    ) -> ShellSignalResult:
+        shell = cast(Shell, ctx.deps.shell)
+
+        try:
+            await shell.send_signal(process_id, signal)
+        except KeyError as e:
+            return ShellSignalResult(
+                process_id=process_id,
+                signal=signal,
+                sent=False,
+                error=str(e),
+            )
+        except Exception as e:
+            return ShellSignalResult(
+                process_id=process_id,
+                signal=signal,
+                sent=False,
+                error=f"Failed to send signal {signal}: {e}",
+            )
+
+        return ShellSignalResult(
+            process_id=process_id,
+            signal=signal,
+            sent=True,
+        )

@@ -1036,6 +1036,11 @@ class LocalShell(Shell):
             with contextlib.suppress(ProcessLookupError):
                 process.kill()
 
+        async def _send_signal(sig: int) -> None:
+            if process.pid is not None:
+                with contextlib.suppress(ProcessLookupError, OSError):
+                    os.kill(process.pid, sig)
+
         stdin = StdinAdapter(process.stdin) if process.stdin is not None else None
 
         return ExecutionHandle(
@@ -1045,6 +1050,7 @@ class LocalShell(Shell):
             kill=_kill,
             stdin=stdin,
             pid=process.pid,
+            send_signal=_send_signal,
         )
 
 
