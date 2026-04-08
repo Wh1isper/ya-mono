@@ -24,6 +24,9 @@ Returns a process_id immediately. Manage with:
   - Use for answering interactive prompts (y/n), sending REPL commands, or piping data
   - A trailing newline is added automatically (simulates pressing Enter)
   - Set close_stdin=true to send EOF after writing
+- shell_signal: Send a Unix signal to a background process
+  - Common signals: 2 (SIGINT/Ctrl+C), 15 (SIGTERM)
+  - Does NOT clean up tracking -- use shell_kill to terminate and clean up
 - shell_kill: Terminate a running process (returns final buffered output)
 - shell_status: List all background processes and their status
 

@@ -166,6 +166,26 @@ class DockerShell(Shell):
   <note>Commands are executed inside the Docker container via docker exec.</note>
 </shell-execution>"""
 
+    def _build_docker_exec_args(
+        self,
+        command: str,
+        *,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
+    ) -> list[str]:
+        """Build the docker exec command-line arguments."""
+        if cwd is not None:
+            workdir = cwd if cwd.startswith("/") else f"{self._container_workdir}/{cwd}"
+        else:
+            workdir = self._container_workdir
+
+        args: list[str] = ["docker", "exec", "-i"]
+        if env:
+            for k, v in env.items():
+                args.extend(["-e", f"{k}={v}"])
+        args.extend(["-w", workdir, self._container_id, "/bin/sh", "-c", command])
+        return args
+
     async def _create_process(
         self,
         command: str,
@@ -181,17 +201,7 @@ class DockerShell(Shell):
         if not command:
             raise ShellExecutionError("", stderr="Empty command")
 
-        # Determine working directory inside container
-        if cwd is not None:
-            workdir = cwd if cwd.startswith("/") else f"{self._container_workdir}/{cwd}"
-        else:
-            workdir = self._container_workdir
-
-        args: list[str] = ["docker", "exec", "-i"]
-        if env:
-            for k, v in env.items():
-                args.extend(["-e", f"{k}={v}"])
-        args.extend(["-w", workdir, self._container_id, "/bin/sh", "-c", command])
+        args = self._build_docker_exec_args(command, env=env, cwd=cwd)
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -214,6 +224,11 @@ class DockerShell(Shell):
             with contextlib.suppress(ProcessLookupError):
                 process.kill()
 
+        async def _send_signal(sig: int) -> None:
+            if process.pid is not None:
+                with contextlib.suppress(ProcessLookupError, OSError):
+                    os.kill(process.pid, sig)
+
         stdin = StdinAdapter(process.stdin) if process.stdin is not None else None
 
         return ExecutionHandle(
@@ -223,6 +238,7 @@ class DockerShell(Shell):
             kill=_kill,
             stdin=stdin,
             pid=process.pid,
+            send_signal=_send_signal,
         )
 
 
