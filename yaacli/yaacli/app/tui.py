@@ -91,13 +91,13 @@ from yaacli.events import ContextUpdateEvent, LoopCompleteEvent, LoopCompleteRea
 from yaacli.hooks import emit_context_update
 from yaacli.logging import configure_tui_logging, get_logger
 from yaacli.perf import perf_log_report, perf_report, perf_timer
-from yaacli.processes import PROCESS_MANAGER_KEY, ProcessManager
 from yaacli.runtime import create_tui_runtime
 from yaacli.session import TUIContext
 from yaacli.usage import SessionUsage
 
 if TYPE_CHECKING:
     from prompt_toolkit.key_binding import KeyPressEvent
+    from y_agent_environment import BackgroundProcess
 
 logger = get_logger(__name__)
 
@@ -862,11 +862,11 @@ class TUIApp:
                         ("class:status-bar", " | "),
                         ("class:status-bar.warning", f"Loop: {ctx.loop_iteration}/{ctx.loop_max_iterations}"),
                     ])
-                bg_count = self._get_background_task_count()
-                if bg_count > 0:
+                bg_label = self._format_background_label()
+                if bg_label:
                     parts.extend([
                         ("class:status-bar", " | "),
-                        ("class:status-bar.warning", f"BG: {bg_count} running"),
+                        ("class:status-bar.warning", bg_label),
                     ])
                 parts.extend([
                     ("class:status-bar", " | "),
@@ -889,11 +889,11 @@ class TUIApp:
                 ("class:status-bar", " | "),
                 ("class:status-bar", f"Context: {context_pct}%"),
             ]
-            bg_count = self._get_background_task_count()
-            if bg_count > 0:
+            bg_label = self._format_background_label()
+            if bg_label:
                 parts.extend([
                     ("class:status-bar", " | "),
-                    ("class:status-bar.warning", f"BG: {bg_count} running"),
+                    ("class:status-bar.warning", bg_label),
                 ])
             parts.extend([
                 ("class:status-bar", " | "),
@@ -1007,6 +1007,34 @@ class TUIApp:
         if manager is None:
             return 0
         return len(manager.active_tasks)
+
+    def _get_background_process_count(self) -> int:
+        """Get the number of active background shell processes."""
+        try:
+            if self._runtime and self._runtime.env and self._runtime.env.shell:
+                return len(self._runtime.env.shell.active_background_processes)
+        except RuntimeError:
+            pass
+        return 0
+
+    def _format_background_label(self) -> str:
+        """Format background indicator label combining tasks and processes.
+
+        Returns empty string if nothing is running. Examples:
+        - "BG: 2 tasks" (only subagent tasks)
+        - "BG: 3 procs" (only shell processes)
+        - "BG: 2 tasks, 3 procs" (both)
+        """
+        task_count = self._get_background_task_count()
+        proc_count = self._get_background_process_count()
+        if task_count == 0 and proc_count == 0:
+            return ""
+        parts: list[str] = []
+        if task_count > 0:
+            parts.append(f"{task_count} task{'s' if task_count != 1 else ''}")
+        if proc_count > 0:
+            parts.append(f"{proc_count} proc{'s' if proc_count != 1 else ''}")
+        return f"BG: {', '.join(parts)}"
 
     def _on_background_task_complete(self, agent_id: str) -> None:
         """Callback invoked when a background task completes.
@@ -2334,17 +2362,15 @@ class TUIApp:
 
             lines.append(self._renderer.render(table).rstrip())
 
-        # --- Section 3: Background Processes ---
-        process_list = []
+        # --- Section 3: Background Processes (from Shell ABC) ---
+        bg_processes: dict[str, BackgroundProcess] = {}
         try:
-            if self._runtime and self._runtime.env and self._runtime.env.resources:
-                resource = self._runtime.env.resources.get(PROCESS_MANAGER_KEY)
-                if isinstance(resource, ProcessManager):
-                    process_list = resource.list_processes()
+            if self._runtime and self._runtime.env and self._runtime.env.shell:
+                bg_processes = self._runtime.env.shell.active_background_processes
         except RuntimeError:
             pass
 
-        if process_list:
+        if bg_processes:
             has_content = True
             if lines:
                 lines.append("")
@@ -2357,14 +2383,11 @@ class TUIApp:
             table.add_column("Command")
             table.add_column("PID", style="dim")
 
-            for proc in process_list:
-                if proc.is_running:
-                    status_text = Text("running", style="cyan")
-                else:
-                    code = proc.exit_code if proc.exit_code is not None else "?"
-                    status_text = Text(f"exited ({code})", style="green" if code == 0 else "red")
-                cmd = f"{proc.command} {' '.join(proc.args)}".strip()
-                table.add_row(proc.process_id, status_text, cmd, str(proc.pid))
+            for _proc_id, proc in bg_processes.items():
+                elapsed = (datetime.now() - proc.started_at).total_seconds()
+                status_text = Text(f"running ({elapsed:.0f}s)", style="cyan")
+                pid_str = str(proc.pid) if proc.pid is not None else "-"
+                table.add_row(proc.process_id, status_text, proc.command, pid_str)
 
             lines.append(self._renderer.render(table).rstrip())
 

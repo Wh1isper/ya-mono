@@ -3,5 +3,5 @@
 
 [tools]
 # Tools requiring user approval before execution
-# Example: need_approval = ["shell", "write"]
+# Example: need_approval = ["shell_exec", "write"]
 need_approval = []

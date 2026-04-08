@@ -4,6 +4,7 @@ This module provides history processors for pydantic-ai agents.
 """
 
 from ya_agent_sdk.filters.auto_load_files import process_auto_load_files
+from ya_agent_sdk.filters.background_shell import inject_background_results
 from ya_agent_sdk.filters.cold_start import cold_start_trim
 from ya_agent_sdk.filters.environment_instructions import create_environment_instructions_filter
 from ya_agent_sdk.filters.handoff import process_handoff_message
@@ -21,6 +22,7 @@ __all__ = [
     "drop_extra_videos",
     "drop_gif_images",
     "fix_truncated_tool_args",
+    "inject_background_results",
     "process_auto_load_files",
     "process_handoff_message",
     "split_large_images",

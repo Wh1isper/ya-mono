@@ -261,6 +261,7 @@ dependencies = [
     { name = "jmespath" },
     { name = "s3transfer" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/72/56/3909516140653c389214d01f15660fa76514a9a9e30da1cb9e894f01051e/boto3-1.42.79.tar.gz", hash = "sha256:286c4220785e4fbe46aaea04d005b0dcdd8aaf5b885d92b2609c934d794ec5d9", size = 112818 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ce/c0/d018824c2859976753cc4b78c48e1be641cf734b7d84e455b0f7f9b9d66d/boto3-1.42.79-py3-none-any.whl", hash = "sha256:2336d744dfe9017d6b96b8e40fdd445295ca6a67f02f1c8c488edeb92c4b7918", size = 140555 },
 ]
@@ -274,6 +275,7 @@ dependencies = [
     { name = "types-s3transfer" },
     { name = "typing-extensions", marker = "python_full_version < '3.12'" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/ca/32/a4c0ffc850ca94bb0e6a0f9c6fa7d10a6b4000b18603008047c6805bc836/boto3_stubs-1.42.79.tar.gz", hash = "sha256:5f1fbe16f98293a67ce59769e670938605d59e444221c1b08a3a0d78c395077b", size = 101797 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/44/59/27b488c9eb868ad8be153d2a8509d456c4831108c9b8d566aece816f76a1/boto3_stubs-1.42.79-py3-none-any.whl", hash = "sha256:785a745a8ada037eb34c42f885217b786e8015bb241db4bff71d806093934433", size = 70246 },
 ]
@@ -502,14 +504,14 @@ name = "cohere"
 version = "5.21.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "fastavro" },
-    { name = "httpx" },
-    { name = "pydantic" },
-    { name = "pydantic-core" },
-    { name = "requests" },
-    { name = "tokenizers" },
-    { name = "types-requests" },
-    { name = "typing-extensions" },
+    { name = "fastavro", marker = "python_full_version >= '3.13' or sys_platform != 'emscripten'" },
+    { name = "httpx", marker = "python_full_version >= '3.13' or sys_platform != 'emscripten'" },
+    { name = "pydantic", marker = "python_full_version >= '3.13' or sys_platform != 'emscripten'" },
+    { name = "pydantic-core", marker = "python_full_version >= '3.13' or sys_platform != 'emscripten'" },
+    { name = "requests", marker = "python_full_version >= '3.13' or sys_platform != 'emscripten'" },
+    { name = "tokenizers", marker = "python_full_version >= '3.13' or sys_platform != 'emscripten'" },
+    { name = "types-requests", marker = "python_full_version >= '3.13' or sys_platform != 'emscripten'" },
+    { name = "typing-extensions", marker = "python_full_version >= '3.13' or sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d2/75/4c346f6e2322e545f8452692304bd4eca15a2a0209ab9af6a0d1a7810b67/cohere-5.21.1.tar.gz", hash = "sha256:e5ade4423b928b01ff2038980e1b62b2a5bb412c8ab83e30882753b810a5509f", size = 191272 }
 wheels = [
@@ -3742,7 +3744,7 @@ name = "types-requests"
 version = "2.33.0.20260327"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "urllib3" },
+    { name = "urllib3", marker = "python_full_version >= '3.13' or sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/02/5f/2e3dbae6e21be6ae026563bad96cbf76602d73aa85ea09f13419ddbdabb4/types_requests-2.33.0.20260327.tar.gz", hash = "sha256:f4f74f0b44f059e3db420ff17bd1966e3587cdd34062fe38a23cda97868f8dd8", size = 23804 }
 wheels = [
@@ -4035,17 +4037,16 @@ wheels = [
 
 [[package]]
 name = "y-agent-environment"
-version = "0.6.0"
+version = "0.8.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "pathspec" },
     { name = "pydantic" },
-    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c1/b0/b3615a32ecf7b3490e7d21b6b6106b3e4911361aaac705dc4942aa9fdb9a/y_agent_environment-0.6.0.tar.gz", hash = "sha256:af9ec1de4a06b5b94f32fbf217f9175d1452f8deeaf89898a30ee55fc5f42c45", size = 80474 }
+sdist = { url = "https://files.pythonhosted.org/packages/62/9e/9d3664fa25f88cb76bdef6847fefb4cc91d26615de4b316377f06502bcad/y_agent_environment-0.8.1.tar.gz", hash = "sha256:6e5bc9a6a47abeebe0e4abc7c050c19efc72b76a5be3e27c7b035b3c5e2b96a8", size = 85914 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b6/95/46e3c9b991b3b1793267c43fe20ca6bb50eb5ae21f3c185bafdf083006cb/y_agent_environment-0.6.0-py3-none-any.whl", hash = "sha256:beb6f0fde6dddd1b93a8f73e4c4be7fcc6fd39bc7d566d5742800ac4443fab91", size = 25043 },
+    { url = "https://files.pythonhosted.org/packages/44/3e/833c3b1c80cd08400b791399b8200ca6ea9f4e51b1f66a711a8b832fabaf/y_agent_environment-0.8.1-py3-none-any.whl", hash = "sha256:864bc29ce21b55db437c0ac50dd9d9c857229f8177cc95a3e95000da5184786e", size = 31566 },
 ]
 
 [[package]]
@@ -4172,7 +4173,7 @@ requires-dist = [
     { name = "tavily-python", marker = "extra == 'web'", specifier = ">=0.7.0" },
     { name = "tenacity", specifier = ">=9.0.0" },
     { name = "typing-extensions", specifier = ">=4.15.0" },
-    { name = "y-agent-environment", specifier = "==0.6.0" },
+    { name = "y-agent-environment", specifier = "==0.8.1" },
 ]
 provides-extras = ["all", "docker", "document", "examples", "s3", "tool-search", "web"]
 

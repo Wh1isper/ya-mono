@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import logging
+from types import TracebackType
 
 
 def _configure_logging() -> None:
@@ -76,25 +77,95 @@ _patch_pydantic_ai_contextvar()
 
 
 def _patch_sniffio_asyncio_detection() -> None:
-    """Explicitly set sniffio's async library ContextVar to 'asyncio'.
+    """Force sniffio to always detect 'asyncio' in the yaacli process.
 
-    sniffio's fallback detection uses ``asyncio.current_task()`` which returns
-    ``None`` when code runs outside of an asyncio Task (e.g., during garbage
-    collection of httpcore connections, or in ``__del__`` finalizers).  This
-    causes ``AsyncLibraryNotFoundError`` in httpcore's ``AsyncShieldCancellation``.
+    sniffio detects the current async library in this order:
+      1. thread_local.name  (threading.local, per-thread)
+      2. current_async_library_cvar  (ContextVar, per-context)
+      3. asyncio.current_task()  (fallback)
 
-    Setting the ContextVar explicitly ensures sniffio always detects 'asyncio'
-    in all context copies and during GC cleanup.
+    Previous approach (ContextVar only) failed in cancel+resend scenarios:
+    when a user cancels a running agent and immediately sends a new message,
+    prompt_toolkit's input thread schedules the key handler via
+    call_soon_threadsafe, which creates a context copy from the input
+    thread's context.  Through task cancellation and recreation cycles,
+    the ContextVar value can be lost in certain context branches, causing
+    AsyncLibraryNotFoundError from httpcore/anyio.
+
+    Setting thread_local.name is the most robust approach because:
+    - It is checked FIRST by sniffio (highest priority)
+    - It is not affected by ContextVar propagation across task contexts
+    - The asyncio event loop runs single-threaded, so all event loop
+      code (including model requests) sees the thread_local value
+    - yaacli exclusively uses asyncio, so this is always correct
     """
     try:
-        from sniffio import current_async_library_cvar
+        from sniffio._impl import thread_local
     except ImportError:
         return
 
-    current_async_library_cvar.set("asyncio")
+    thread_local.name = "asyncio"
 
 
 _patch_sniffio_asyncio_detection()
+
+
+def _patch_anyio_cancel_scope_null_task() -> None:
+    """Patch anyio CancelScope to tolerate asyncio.current_task() returning None.
+
+    After Ctrl+C cancellation, httpx stream cleanup (`response.aclose()`) uses
+    anyio's `AsyncShieldCancellation` (a CancelScope) to shield the connection
+    close from further cancellation.  `CancelScope.__enter__` unconditionally
+    calls `asyncio.current_task()` and uses the result as a key in a
+    `WeakKeyDictionary`.  When cleanup runs in a context where the asyncio task
+    has already been torn down (e.g. async-generator finalization triggered by
+    GC after cancellation), `current_task()` returns None, causing:
+
+        TypeError: cannot create weak reference to 'NoneType' object
+
+    This patch wraps `__enter__` and `__exit__` so that when `current_task()`
+    is None the scope degrades to a no-op.  This is safe because:
+    - There is no task to shield; cancellation management is meaningless.
+    - The code inside the scope (closing the TCP connection) is a best-effort
+      cleanup that should not raise.
+    """
+    import asyncio
+
+    try:
+        from anyio._backends._asyncio import CancelScope
+    except ImportError:
+        return
+
+    _original_enter = CancelScope.__enter__
+    _original_exit = CancelScope.__exit__
+
+    _NOOP_ATTR = "_yaacli_noop"
+
+    def _safe_enter(self: CancelScope) -> CancelScope:
+        if asyncio.current_task() is None:
+            # No active task -- degrade to a no-op context manager.
+            self._active = True
+            object.__setattr__(self, _NOOP_ATTR, True)
+            return self
+        object.__setattr__(self, _NOOP_ATTR, False)
+        return _original_enter(self)
+
+    def _safe_exit(
+        self: CancelScope,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> bool:
+        if getattr(self, _NOOP_ATTR, False):
+            self._active = False
+            return False  # Do not suppress exceptions
+        return _original_exit(self, exc_type, exc_val, exc_tb)
+
+    CancelScope.__enter__ = _safe_enter  # type: ignore[assignment]
+    CancelScope.__exit__ = _safe_exit  # type: ignore[assignment]
+
+
+_patch_anyio_cancel_scope_null_task()
 
 try:
     __version__ = importlib.metadata.version(__name__)
