@@ -15,7 +15,7 @@ from ya_agent_sdk.toolsets.core.shell.shell import OUTPUT_TRUNCATE_LIMIT
 async def test_shell_tool_basic_attributes(agent_context: AgentContext) -> None:
     """Should have correct name and description."""
     tool = ShellTool()
-    assert tool.name == "shell"
+    assert tool.name == "shell_exec"
     assert "Execute" in tool.description
 
 

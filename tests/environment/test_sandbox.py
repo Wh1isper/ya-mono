@@ -5,7 +5,7 @@ The entire module is skipped when docker package is unavailable.
 """
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from y_agent_environment import ShellExecutionError
@@ -462,7 +462,7 @@ async def test_sandbox_environment_with_custom_shell(tmp_path: Path) -> None:
     mock_shell = MagicMock()
     mock_shell.execute = MagicMock(return_value=(0, "output", ""))
     mock_shell.get_context_instructions = MagicMock(return_value="custom shell")
-    mock_shell.close = MagicMock()
+    mock_shell.close = AsyncMock()
 
     env = SandboxEnvironment(
         mounts=[VirtualMount(tmp_path, Path("/workspace"))],

@@ -178,7 +178,7 @@ def create_tui_runtime(
 
     This function wraps the SDK's create_agent() with TUI-specific
     configuration, integrating:
-    - TUIEnvironment with ProcessManager
+    - TUIEnvironment with Shell ABC background process management
     - TUIContext with SteeringManager
     - MCP servers from configuration
     - Browser toolset if available

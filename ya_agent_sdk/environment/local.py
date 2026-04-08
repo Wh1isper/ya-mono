@@ -5,6 +5,7 @@ using standard library functions.
 """
 
 import asyncio
+import contextlib
 import glob as glob_module
 import os
 import shutil
@@ -16,6 +17,7 @@ from typing import TYPE_CHECKING
 import anyio
 from y_agent_environment import (
     Environment,
+    ExecutionHandle,
     FileOperationError,
     FileOperator,
     FileStat,
@@ -25,6 +27,7 @@ from y_agent_environment import (
     Shell,
     ShellExecutionError,
     ShellTimeoutError,
+    StdinAdapter,
     TmpFileOperator,
 )
 
@@ -904,6 +907,20 @@ class LocalShell(Shell):
                 continue
         return False
 
+    def _build_effective_env(self, env: dict[str, str] | None) -> dict[str, str] | None:
+        """Build effective environment for subprocess.
+
+        - include_os_env=True + env provided: merge os.environ as base layer
+        - include_os_env=True + env=None: inherit naturally (pass None)
+        - include_os_env=False + env provided: use only provided env
+        - include_os_env=False + env=None: pass empty dict to prevent inheritance
+        """
+        if env is not None and self._include_os_env:
+            return {**os.environ, **env}
+        if env is None and not self._include_os_env:
+            return {}
+        return env
+
     async def execute(
         self,
         command: str,
@@ -916,7 +933,8 @@ class LocalShell(Shell):
 
         Args:
             command: Command string to execute via shell.
-            timeout: Timeout in seconds (uses default if None).
+            timeout: Timeout in seconds. None means no timeout -- the command
+                runs until it completes or is cancelled.
             env: Environment variables.
             cwd: Working directory (relative or absolute path).
 
@@ -927,19 +945,10 @@ class LocalShell(Shell):
             raise ShellExecutionError("", stderr="Empty command")
 
         resolved_cwd = self._resolve_cwd(cwd)
-        effective_timeout = timeout if timeout is not None else self._default_timeout
+        effective_timeout = timeout
 
         try:
-            # Build effective environment for the subprocess.
-            # - include_os_env=True + env provided: merge os.environ as base layer
-            # - include_os_env=True + env=None: inherit naturally (pass None)
-            # - include_os_env=False + env provided: use only provided env
-            # - include_os_env=False + env=None: pass empty dict to prevent inheritance
-            effective_env = env
-            if env is not None and self._include_os_env:
-                effective_env = {**os.environ, **env}
-            elif env is None and not self._include_os_env:
-                effective_env = {}
+            effective_env = self._build_effective_env(env)
 
             process = await asyncio.create_subprocess_shell(
                 command,
@@ -950,10 +959,13 @@ class LocalShell(Shell):
             )
 
             try:
-                stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=effective_timeout,
-                )
+                if effective_timeout is not None:
+                    stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                        process.communicate(),
+                        timeout=effective_timeout,
+                    )
+                else:
+                    stdout_bytes, stderr_bytes = await process.communicate()
             except TimeoutError as e:
                 # Try graceful termination first
                 process.terminate()
@@ -963,7 +975,7 @@ class LocalShell(Shell):
                     # Force kill if graceful termination fails
                     process.kill()
                     await process.wait()
-                raise ShellTimeoutError(command, effective_timeout) from e
+                raise ShellTimeoutError(command, effective_timeout or 0) from e
 
             stdout = stdout_bytes.decode("utf-8", errors="replace")
             stderr = stderr_bytes.decode("utf-8", errors="replace")
@@ -981,6 +993,59 @@ class LocalShell(Shell):
             ) from e
         except OSError as e:
             raise ShellExecutionError(command, stderr=str(e)) from e
+
+    async def _create_process(
+        self,
+        command: str,
+        *,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
+    ) -> ExecutionHandle:
+        """Create a local subprocess and return an ExecutionHandle.
+
+        Validates the command and working directory, creates an async
+        subprocess with piped stdout/stderr, and returns stream handles
+        and lifecycle callbacks.
+        """
+        if not command:
+            raise ShellExecutionError("", stderr="Empty command")
+
+        resolved_cwd = self._resolve_cwd(cwd)
+        effective_env = self._build_effective_env(env)
+
+        try:
+            process = await asyncio.create_subprocess_shell(
+                command,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=resolved_cwd,
+                env=effective_env,
+            )
+        except Exception as e:
+            raise ShellExecutionError(command, stderr=str(e)) from e
+
+        if process.stdout is None or process.stderr is None:
+            raise ShellExecutionError(command, stderr="Failed to capture subprocess streams")
+
+        async def _wait() -> int:
+            await process.wait()
+            return process.returncode or 0
+
+        async def _kill() -> None:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+
+        stdin = StdinAdapter(process.stdin) if process.stdin is not None else None
+
+        return ExecutionHandle(
+            stdout=process.stdout,
+            stderr=process.stderr,
+            wait=_wait,
+            kill=_kill,
+            stdin=stdin,
+            pid=process.pid,
+        )
 
 
 class LocalEnvironment(Environment):
@@ -1099,10 +1164,13 @@ class LocalEnvironment(Environment):
             )
 
     async def _teardown(self) -> None:
-        """Clean up tmp directory and reset operators."""
+        """Clean up tmp directory.
+
+        Note: Do NOT null _file_operator or _shell here.
+        The base Environment.__aexit__ calls close() on them after
+        _teardown returns.  Nulling here would skip close() and
+        leak background processes.
+        """
         if self._tmp_dir_obj is not None:
             self._tmp_dir_obj.cleanup()
             self._tmp_dir_obj = None
-
-        self._file_operator = None
-        self._shell = None

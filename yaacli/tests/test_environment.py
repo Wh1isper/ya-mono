@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 from yaacli.environment import TUIEnvironment
-from yaacli.processes import PROCESS_MANAGER_KEY, ProcessManager
 
 
 class TestTUIEnvironment:
@@ -22,64 +20,35 @@ class TestTUIEnvironment:
             assert env.resources is not None
 
     @pytest.mark.asyncio
-    async def test_process_manager_available(self, tmp_path: Path) -> None:
-        """ProcessManager should be available after entering."""
+    async def test_background_shell_via_shell_abc(self, tmp_path: Path) -> None:
+        """Shell ABC should support background process management."""
         async with TUIEnvironment(default_path=tmp_path) as env:
-            # Via property
-            pm = env.process_manager
-            assert isinstance(pm, ProcessManager)
+            # Start a background process via Shell ABC
+            process_id = await env.shell.start("echo hello")
 
-            # Via resources
-            pm2 = env.resources.get_typed(PROCESS_MANAGER_KEY, ProcessManager)
-            assert pm2 is pm
+            # Should be tracked
+            assert process_id in env.shell.active_background_processes
+
+            # Wait and drain output
+            stdout, stderr, is_running, exit_code = await env.shell.wait_process(process_id, timeout=5.0)
+            assert exit_code == 0
+            assert "hello" in stdout
 
     @pytest.mark.asyncio
-    async def test_process_manager_not_available_before_enter(self, tmp_path: Path) -> None:
-        """process_manager should raise before entering."""
-        env = TUIEnvironment(default_path=tmp_path)
-
-        with pytest.raises(RuntimeError, match="not entered"):
-            _ = env.process_manager
-
-    @pytest.mark.asyncio
-    async def test_spawn_process(self, tmp_path: Path) -> None:
-        """Should be able to spawn processes."""
-        async with TUIEnvironment(default_path=tmp_path) as env:
-            process = await env.process_manager.spawn(
-                sys.executable,
-                ["-c", "import time; time.sleep(0.1)"],
-                process_id="test-spawn",
-            )
-
-            assert process.process_id == "test-spawn"
-            assert len(env.process_manager) == 1
-
-    @pytest.mark.asyncio
-    async def test_processes_killed_on_exit(self, tmp_path: Path) -> None:
-        """All processes should be killed when exiting context."""
-        pm_ref: ProcessManager | None = None
+    async def test_background_processes_killed_on_exit(self, tmp_path: Path) -> None:
+        """Background shell processes should be killed when exiting context."""
+        shell_ref = None
 
         async with TUIEnvironment(default_path=tmp_path) as env:
-            await env.process_manager.spawn(
-                sys.executable,
-                ["-c", "import time; time.sleep(10)"],
-                process_id="long-running",
-            )
-            pm_ref = env.process_manager
+            await env.shell.start("sleep 10")
+            shell_ref = env.shell
 
             # Process should be running
-            proc = pm_ref.get_process("long-running")
-            assert proc is not None
-            assert proc.is_running is True
+            assert env.shell.has_active_background_processes is True
 
-        # After exit, process should be killed
-        # Note: pm_ref still exists but process should be terminated
-        import asyncio
-
-        await asyncio.sleep(0.1)
-        proc = pm_ref.get_process("long-running")
-        assert proc is not None
-        assert proc.is_running is False
+        # After exit, shell.close() should have killed all processes
+        assert shell_ref is not None
+        assert shell_ref.has_active_background_processes is False
 
     @pytest.mark.asyncio
     async def test_inherits_local_environment_features(self, tmp_path: Path) -> None:

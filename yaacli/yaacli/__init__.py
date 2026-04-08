@@ -76,22 +76,34 @@ _patch_pydantic_ai_contextvar()
 
 
 def _patch_sniffio_asyncio_detection() -> None:
-    """Explicitly set sniffio's async library ContextVar to 'asyncio'.
+    """Force sniffio to always detect 'asyncio' in the yaacli process.
 
-    sniffio's fallback detection uses ``asyncio.current_task()`` which returns
-    ``None`` when code runs outside of an asyncio Task (e.g., during garbage
-    collection of httpcore connections, or in ``__del__`` finalizers).  This
-    causes ``AsyncLibraryNotFoundError`` in httpcore's ``AsyncShieldCancellation``.
+    sniffio detects the current async library in this order:
+      1. thread_local.name  (threading.local, per-thread)
+      2. current_async_library_cvar  (ContextVar, per-context)
+      3. asyncio.current_task()  (fallback)
 
-    Setting the ContextVar explicitly ensures sniffio always detects 'asyncio'
-    in all context copies and during GC cleanup.
+    Previous approach (ContextVar only) failed in cancel+resend scenarios:
+    when a user cancels a running agent and immediately sends a new message,
+    prompt_toolkit's input thread schedules the key handler via
+    call_soon_threadsafe, which creates a context copy from the input
+    thread's context.  Through task cancellation and recreation cycles,
+    the ContextVar value can be lost in certain context branches, causing
+    AsyncLibraryNotFoundError from httpcore/anyio.
+
+    Setting thread_local.name is the most robust approach because:
+    - It is checked FIRST by sniffio (highest priority)
+    - It is not affected by ContextVar propagation across task contexts
+    - The asyncio event loop runs single-threaded, so all event loop
+      code (including model requests) sees the thread_local value
+    - yaacli exclusively uses asyncio, so this is always correct
     """
     try:
-        from sniffio import current_async_library_cvar
+        from sniffio._impl import thread_local
     except ImportError:
         return
 
-    current_async_library_cvar.set("asyncio")
+    thread_local.name = "asyncio"
 
 
 _patch_sniffio_asyncio_detection()

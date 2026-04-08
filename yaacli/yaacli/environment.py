@@ -1,14 +1,15 @@
 """TUI Environment for yaacli.
 
-TUIEnvironment extends LocalEnvironment with ProcessManager for
-background process management. Process tools are provided via
-ProcessManager.get_toolsets() and collected automatically.
+TUIEnvironment extends LocalEnvironment with BackgroundTaskManager
+for managing background async tasks. Shell background process management
+is handled by the Shell ABC from y-agent-environment directly.
 
 Example:
     async with TUIEnvironment(default_path=Path.cwd()) as env:
-        process = await env.process_manager.spawn("npm", ["run", "dev"])
-        for info in env.process_manager.list_processes():
-            print(f"{info.process_id}: {info.command}")
+        # Background shell processes via Shell ABC
+        process_id = await env.shell.start("npm run dev")
+        for pid, proc in env.shell.active_background_processes.items():
+            print(f"{pid}: {proc.command}")
 """
 
 from __future__ import annotations
@@ -19,15 +20,14 @@ from y_agent_environment import ResourceFactory, ResourceRegistryState
 
 from ya_agent_sdk.environment.local import LocalEnvironment
 from yaacli.background import BACKGROUND_MANAGER_KEY, BackgroundTaskManager
-from yaacli.processes import PROCESS_MANAGER_KEY, ProcessManager
 
 
 class TUIEnvironment(LocalEnvironment):
-    """Extended environment for TUI with process management.
+    """Extended environment for TUI with background task management.
 
-    ProcessManager is registered as a resource and accessible via:
-    - env.process_manager (convenience property)
-    - env.resources.get_typed(PROCESS_MANAGER_KEY, ProcessManager)
+    Background process management is provided by Shell ABC directly
+    (start/drain_output/wait_process/kill_process). BackgroundTaskManager
+    handles non-process async tasks and is registered as a resource.
     """
 
     def __init__(
@@ -51,27 +51,16 @@ class TUIEnvironment(LocalEnvironment):
             resource_factories=resource_factories,
             include_os_env=include_os_env,
         )
-        self._process_manager: ProcessManager | None = None
         self._background_manager: BackgroundTaskManager | None = None
 
     async def _setup(self) -> None:
         await super()._setup()
-        self._process_manager = ProcessManager()
-        self.resources.set(PROCESS_MANAGER_KEY, self._process_manager)
         self._background_manager = BackgroundTaskManager()
         self.resources.set(BACKGROUND_MANAGER_KEY, self._background_manager)
 
     async def _teardown(self) -> None:
-        self._process_manager = None
         self._background_manager = None
         await super()._teardown()
-
-    @property
-    def process_manager(self) -> ProcessManager:
-        """Get the ProcessManager resource."""
-        if self._process_manager is None:
-            raise RuntimeError("TUIEnvironment not entered. Use 'async with TUIEnvironment() as env:'")
-        return self._process_manager
 
     @property
     def background_manager(self) -> BackgroundTaskManager:

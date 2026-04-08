@@ -14,6 +14,7 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import tempfile
 from pathlib import Path
@@ -22,11 +23,13 @@ from typing import TYPE_CHECKING
 from y_agent_environment import (
     Environment,
     EnvironmentNotEnteredError,
+    ExecutionHandle,
     ResourceFactory,
     ResourceRegistryState,
     Shell,
     ShellExecutionError,
     ShellTimeoutError,
+    StdinAdapter,
 )
 
 from ya_agent_sdk.environment.local import VirtualLocalFileOperator, VirtualMount
@@ -162,6 +165,65 @@ class DockerShell(Shell):
   <default-timeout>{self._default_timeout}s</default-timeout>
   <note>Commands are executed inside the Docker container via docker exec.</note>
 </shell-execution>"""
+
+    async def _create_process(
+        self,
+        command: str,
+        *,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
+    ) -> ExecutionHandle:
+        """Create a background process in the Docker container.
+
+        Uses `docker exec -i` subprocess to get native stdin/stdout/stderr
+        pipes, enabling interactive input and real-time streaming.
+        """
+        if not command:
+            raise ShellExecutionError("", stderr="Empty command")
+
+        # Determine working directory inside container
+        if cwd is not None:
+            workdir = cwd if cwd.startswith("/") else f"{self._container_workdir}/{cwd}"
+        else:
+            workdir = self._container_workdir
+
+        args: list[str] = ["docker", "exec", "-i"]
+        if env:
+            for k, v in env.items():
+                args.extend(["-e", f"{k}={v}"])
+        args.extend(["-w", workdir, self._container_id, "/bin/sh", "-c", command])
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *args,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except Exception as e:
+            raise ShellExecutionError(command, stderr=str(e)) from e
+
+        if process.stdout is None or process.stderr is None:
+            raise ShellExecutionError(command, stderr="Failed to capture subprocess streams")
+
+        async def _wait() -> int:
+            await process.wait()
+            return process.returncode or 0
+
+        async def _kill() -> None:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+
+        stdin = StdinAdapter(process.stdin) if process.stdin is not None else None
+
+        return ExecutionHandle(
+            stdout=process.stdout,
+            stderr=process.stderr,
+            wait=_wait,
+            kill=_kill,
+            stdin=stdin,
+            pid=process.pid,
+        )
 
 
 class SandboxEnvironment(Environment):
@@ -364,7 +426,13 @@ class SandboxEnvironment(Environment):
             )
 
     async def _teardown(self) -> None:
-        """Clean up container and tmp directory."""
+        """Clean up container and tmp directory.
+
+        Note: Do NOT null _file_operator or _shell here.
+        The base Environment.__aexit__ calls close() on them after
+        _teardown returns.  Nulling here would skip close() and
+        leak background processes.
+        """
         # Cleanup container if we created it and cleanup_on_exit is True
         if self._cleanup_on_exit and self._created_container and self._container_id is not None:
             await self._stop_container()
@@ -373,9 +441,6 @@ class SandboxEnvironment(Environment):
         if self._tmp_dir_obj is not None:
             self._tmp_dir_obj.cleanup()
             self._tmp_dir_obj = None
-
-        self._file_operator = None
-        self._shell = None
 
     async def _create_container(self) -> str:
         """Create and start a new container with all mounts and tmp_dir."""

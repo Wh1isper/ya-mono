@@ -91,13 +91,13 @@ from yaacli.events import ContextUpdateEvent, LoopCompleteEvent, LoopCompleteRea
 from yaacli.hooks import emit_context_update
 from yaacli.logging import configure_tui_logging, get_logger
 from yaacli.perf import perf_log_report, perf_report, perf_timer
-from yaacli.processes import PROCESS_MANAGER_KEY, ProcessManager
 from yaacli.runtime import create_tui_runtime
 from yaacli.session import TUIContext
 from yaacli.usage import SessionUsage
 
 if TYPE_CHECKING:
     from prompt_toolkit.key_binding import KeyPressEvent
+    from y_agent_environment import BackgroundProcess
 
 logger = get_logger(__name__)
 
@@ -2334,17 +2334,15 @@ class TUIApp:
 
             lines.append(self._renderer.render(table).rstrip())
 
-        # --- Section 3: Background Processes ---
-        process_list = []
+        # --- Section 3: Background Processes (from Shell ABC) ---
+        bg_processes: dict[str, BackgroundProcess] = {}
         try:
-            if self._runtime and self._runtime.env and self._runtime.env.resources:
-                resource = self._runtime.env.resources.get(PROCESS_MANAGER_KEY)
-                if isinstance(resource, ProcessManager):
-                    process_list = resource.list_processes()
+            if self._runtime and self._runtime.env and self._runtime.env.shell:
+                bg_processes = self._runtime.env.shell.active_background_processes
         except RuntimeError:
             pass
 
-        if process_list:
+        if bg_processes:
             has_content = True
             if lines:
                 lines.append("")
@@ -2357,14 +2355,11 @@ class TUIApp:
             table.add_column("Command")
             table.add_column("PID", style="dim")
 
-            for proc in process_list:
-                if proc.is_running:
-                    status_text = Text("running", style="cyan")
-                else:
-                    code = proc.exit_code if proc.exit_code is not None else "?"
-                    status_text = Text(f"exited ({code})", style="green" if code == 0 else "red")
-                cmd = f"{proc.command} {' '.join(proc.args)}".strip()
-                table.add_row(proc.process_id, status_text, cmd, str(proc.pid))
+            for _proc_id, proc in bg_processes.items():
+                elapsed = (datetime.now() - proc.started_at).total_seconds()
+                status_text = Text(f"running ({elapsed:.0f}s)", style="cyan")
+                pid_str = str(proc.pid) if proc.pid is not None else "-"
+                table.add_row(proc.process_id, status_text, proc.command, pid_str)
 
             lines.append(self._renderer.render(table).rstrip())
 

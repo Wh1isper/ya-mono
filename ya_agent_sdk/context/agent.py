@@ -1415,11 +1415,24 @@ class AgentContext(BaseModel):
 
         parts.append(_xml_to_string(root))
 
-        # Build system-reminder element (sibling to runtime-context)
-        reminders: list[str] = []
+        # Background process summary (only on user prompts)
+        if is_user_prompt and self.shell is not None:
+            bg_summary = self.shell.background_status_summary()
+            if bg_summary:
+                parts.append(bg_summary)
 
-        # Handoff threshold warning
-        if (
+        # System reminders (sibling to runtime-context)
+        self._build_system_reminders(parts, run_context)
+
+        return "\n\n".join(parts)
+
+    def _build_system_reminders(
+        self,
+        parts: list[str],
+        run_context: RunContext[AgentContext] | None,
+    ) -> None:
+        """Build system-reminder XML and append to parts if needed."""
+        if not (
             self.context_manage_tool_names
             and self.model_cfg.context_window is not None
             and self.model_cfg.proactive_context_management_threshold is not None
@@ -1427,27 +1440,25 @@ class AgentContext(BaseModel):
             and (request_usage := get_latest_request_usage(run_context.messages))
             and request_usage.total_tokens is not None
         ):
-            threshold_tokens = int(
-                self.model_cfg.context_window * self.model_cfg.proactive_context_management_threshold
-            )
-            if request_usage.total_tokens >= threshold_tokens:
-                usage_pct = int(request_usage.total_tokens / self.model_cfg.context_window * 100)
-                compact_pct = int(self.model_cfg.compact_threshold * 100)
-                tool_names = ", ".join(f"`{n}`" for n in self.context_manage_tool_names)
-                reminders.append(
-                    f"Context usage is at {usage_pct}% ({request_usage.total_tokens:,} / {self.model_cfg.context_window:,} tokens). "
-                    f"Auto-compaction will trigger at {compact_pct}%. "
-                    f"Please use the {tool_names} tool to summarize progress and continue when appropriate."
-                )
+            return
 
-        if reminders:
-            reminder_root = Element("system-reminder")
-            for reminder_text in reminders:
-                item = SubElement(reminder_root, "item")
-                item.text = reminder_text
-            parts.append(_xml_to_string(reminder_root))
+        threshold_tokens = int(self.model_cfg.context_window * self.model_cfg.proactive_context_management_threshold)
+        if request_usage.total_tokens < threshold_tokens:
+            return
 
-        return "\n\n".join(parts)
+        usage_pct = int(request_usage.total_tokens / self.model_cfg.context_window * 100)
+        compact_pct = int(self.model_cfg.compact_threshold * 100)
+        tool_names = ", ".join(f"`{n}`" for n in self.context_manage_tool_names)
+        reminder_text = (
+            f"Context usage is at {usage_pct}% ({request_usage.total_tokens:,} / {self.model_cfg.context_window:,} tokens). "
+            f"Auto-compaction will trigger at {compact_pct}%. "
+            f"Please use the {tool_names} tool to summarize progress and continue when appropriate."
+        )
+
+        reminder_root = Element("system-reminder")
+        item = SubElement(reminder_root, "item")
+        item.text = reminder_text
+        parts.append(_xml_to_string(reminder_root))
 
     def _build_notes_element(self, parent: Element, *, is_user_prompt: bool = True) -> None:
         """Build notes XML element and append to parent if entries exist.
@@ -1600,6 +1611,7 @@ class AgentContext(BaseModel):
         """
         # Import filters here to avoid circular imports
         from ya_agent_sdk.filters.auto_load_files import process_auto_load_files
+        from ya_agent_sdk.filters.background_shell import inject_background_results
         from ya_agent_sdk.filters.bus_message import inject_bus_messages
         from ya_agent_sdk.filters.capability import filter_by_capability
         from ya_agent_sdk.filters.handoff import process_handoff_message
@@ -1629,6 +1641,7 @@ class AgentContext(BaseModel):
             process_auto_load_files,
             filter_by_capability,
             inject_bus_messages,  # Before runtime_instructions, after handoff/auto_load
+            inject_background_results,  # Consume completed bg results, before runtime_instructions
             inject_runtime_instructions,
             dynamic_tool_id_wrapper,
         ]
