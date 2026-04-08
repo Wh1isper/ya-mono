@@ -18,6 +18,7 @@ from y_agent_environment import CompletedProcess, FileOperator
 
 from ya_agent_sdk._logger import get_logger
 from ya_agent_sdk.context import AgentContext
+from ya_agent_sdk.events import BackgroundShellCompleteEvent
 
 logger = get_logger(__name__)
 
@@ -123,6 +124,15 @@ async def inject_background_results(
             if path_lines:
                 formatted += "\n" + "\n".join(path_lines)
         injection_parts.append(formatted)
+
+        await ctx.deps.emit_event(
+            BackgroundShellCompleteEvent(
+                event_id=f"bg-{result.process_id}",
+                process_id=result.process_id,
+                command=result.command,
+                exit_code=result.exit_code,
+            )
+        )
 
     if summary:
         injection_parts.append(summary)

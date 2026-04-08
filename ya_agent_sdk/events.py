@@ -530,6 +530,55 @@ class NoteEvent(AgentEvent):
 
 
 # =============================================================================
+# Background Shell Events
+# =============================================================================
+
+
+@dataclass
+class BackgroundShellStartEvent(AgentEvent):
+    """Emitted when a background shell process is started.
+
+    Attributes:
+        process_id: Unique identifier for the background process.
+        command: The shell command that was started.
+    """
+
+    process_id: str = ""
+    command: str = ""
+
+
+@dataclass
+class BackgroundShellCompleteEvent(AgentEvent):
+    """Emitted when a background shell process completes.
+
+    Emitted by the background_shell filter when consuming completed
+    process results during the next agent turn.
+
+    Attributes:
+        process_id: Unique identifier for the background process.
+        command: The shell command that was executed.
+        exit_code: Process exit code (0 = success).
+    """
+
+    process_id: str = ""
+    command: str = ""
+    exit_code: int = 0
+
+
+@dataclass
+class BackgroundShellKilledEvent(AgentEvent):
+    """Emitted when a background shell process is manually killed.
+
+    Attributes:
+        process_id: Unique identifier for the background process.
+        command: The shell command that was killed.
+    """
+
+    process_id: str = ""
+    command: str = ""
+
+
+# =============================================================================
 # Type Aliases
 # =============================================================================
 

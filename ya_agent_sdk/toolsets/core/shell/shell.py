@@ -16,6 +16,7 @@ from y_agent_environment import Shell
 
 from ya_agent_sdk._logger import get_logger
 from ya_agent_sdk.context import AgentContext
+from ya_agent_sdk.events import BackgroundShellKilledEvent, BackgroundShellStartEvent
 from ya_agent_sdk.toolsets.core.base import BaseTool
 
 logger = get_logger(__name__)
@@ -113,6 +114,13 @@ class ShellTool(BaseTool):
         if background:
             try:
                 process_id = await shell.start(command, env=environment, cwd=cwd)
+                await ctx.deps.emit_event(
+                    BackgroundShellStartEvent(
+                        event_id=f"bg-{process_id}",
+                        process_id=process_id,
+                        command=command,
+                    )
+                )
                 return ShellResult(
                     stdout="",
                     stderr="",
@@ -317,7 +325,16 @@ class ShellKillTool(BaseTool):
         shell = cast(Shell, ctx.deps.shell)
 
         try:
+            bg_proc = shell._background_processes.get(process_id)
+            bg_command = bg_proc.command if bg_proc else ""
             stdout, stderr = await shell.kill_process(process_id)
+            await ctx.deps.emit_event(
+                BackgroundShellKilledEvent(
+                    event_id=f"bg-{process_id}",
+                    process_id=process_id,
+                    command=bg_command,
+                )
+            )
             return ShellKillResult(
                 process_id=process_id,
                 killed=True,
