@@ -9,7 +9,11 @@ from pydantic_ai import RunContext
 from ya_agent_sdk.context import AgentContext
 from ya_agent_sdk.context.agent import ToolConfig
 from ya_agent_sdk.environment.local import LocalEnvironment
-from ya_agent_sdk.toolsets.core.filesystem.grep import GrepTool
+from ya_agent_sdk.toolsets.core.filesystem.grep import (
+    _OUTPUT_HARD_LIMIT,
+    _TRUNCATED_LINE_MAX,
+    GrepTool,
+)
 
 
 async def test_grep_attributes(agent_context: AgentContext) -> None:
@@ -258,8 +262,8 @@ async def test_grep_skips_directories(tmp_path: Path) -> None:
         assert len(result) == 1
 
 
-async def test_grep_large_result_truncation(tmp_path: Path) -> None:
-    """Should truncate results when they exceed 60000 characters."""
+async def test_grep_soft_truncation(tmp_path: Path) -> None:
+    """Should drop context and truncate matching_line when output exceeds soft threshold."""
     async with AsyncExitStack() as stack:
         env = await stack.enter_async_context(
             LocalEnvironment(allowed_paths=[tmp_path], default_path=tmp_path, tmp_base_dir=tmp_path)
@@ -283,13 +287,93 @@ async def test_grep_large_result_truncation(tmp_path: Path) -> None:
             context_lines=5,
         )
         assert isinstance(result, dict)
-        # When truncated, context is dropped and system message added
-        if "<system>" in result:
-            assert "truncated" in result["<system>"].lower()
-            # Truncated results should not have 'context' field
-            for key, val in result.items():
-                if key != "<system>" and isinstance(val, dict):
-                    assert "context" not in val
+        assert "<system>" in result
+        # Context should be dropped
+        for key, val in result.items():
+            if not key.startswith("<") and isinstance(val, dict):
+                assert "context" not in val
+                # matching_line should be truncated for long lines
+                assert len(val["matching_line"]) <= _TRUNCATED_LINE_MAX + 3  # +3 for "..."
+                # file_path should be preserved
+                assert "file_path" in val
+
+
+async def test_grep_matching_line_truncation(tmp_path: Path) -> None:
+    """Should truncate long matching_line values when soft truncation triggers."""
+    async with AsyncExitStack() as stack:
+        env = await stack.enter_async_context(
+            LocalEnvironment(allowed_paths=[tmp_path], default_path=tmp_path, tmp_base_dir=tmp_path)
+        )
+        ctx = await stack.enter_async_context(AgentContext(env=env))
+        tool = GrepTool()
+
+        # Create a file with very long lines that will trigger truncation
+        long_suffix = "x" * 1000
+        lines = [f"match_{i}_{long_suffix}" for i in range(100)]
+        (tmp_path / "longlines.txt").write_text("\n".join(lines))
+
+        mock_run_ctx = MagicMock(spec=RunContext)
+        mock_run_ctx.deps = ctx
+
+        result = await tool.call(
+            mock_run_ctx,
+            pattern="match_\\d+",
+            max_results=-1,
+            max_matches_per_file=-1,
+        )
+        assert isinstance(result, dict)
+        assert "<system>" in result
+        # Check that matching lines are truncated with "..." suffix
+        for key, val in result.items():
+            if not key.startswith("<") and isinstance(val, dict):
+                line = val["matching_line"]
+                assert len(line) <= _TRUNCATED_LINE_MAX + 3
+                if len(line) > _TRUNCATED_LINE_MAX:
+                    assert line.endswith("...")
+
+
+async def test_grep_hard_limit_writes_temp_file(tmp_path: Path) -> None:
+    """Should write to temp file and return bounded preview when truncated output still exceeds hard limit."""
+    async with AsyncExitStack() as stack:
+        env = await stack.enter_async_context(
+            LocalEnvironment(allowed_paths=[tmp_path], default_path=tmp_path, tmp_base_dir=tmp_path)
+        )
+        ctx = await stack.enter_async_context(AgentContext(env=env))
+        tool = GrepTool()
+
+        # Create many files with matches to generate huge output even after soft truncation
+        # With 200 matches of ~300 char lines, truncated output will be ~80K+ chars
+        for i in range(20):
+            lines = [f"match_{i}_{j}_" + "a" * 250 for j in range(50)]
+            (tmp_path / f"file_{i}.txt").write_text("\n".join(lines))
+
+        mock_run_ctx = MagicMock(spec=RunContext)
+        mock_run_ctx.deps = ctx
+
+        result = await tool.call(
+            mock_run_ctx,
+            pattern="match_\\d+",
+            max_results=-1,
+            max_matches_per_file=-1,
+            max_files=-1,
+        )
+        assert isinstance(result, dict)
+        assert "<system>" in result
+        assert "output_file_path" in result, "Should write to temp file when output is too large"
+        assert "total_matches" in result
+        assert result["showing"] < result["total_matches"], "Preview should show fewer matches than total"
+
+        # Preview must be within the hard limit
+        import json
+
+        serialized = json.dumps(result, default=str, ensure_ascii=False)
+        assert len(serialized) <= _OUTPUT_HARD_LIMIT
+
+        # Temp file should exist and be readable
+        file_op = ctx.file_operator
+        assert file_op is not None
+        content = await file_op.read_file(result["output_file_path"])
+        assert len(content) > 0
 
 
 async def test_grep_unreadable_file_handling(tmp_path: Path) -> None:
@@ -515,14 +599,36 @@ async def test_grep_truncation_preserves_skipped_large_files(tmp_path: Path) -> 
         )
         assert isinstance(result, dict)
 
-        # Results should be truncated
+        # Results should be truncated (soft or hard)
         assert "<system>" in result
-        assert "truncated" in result["<system>"].lower()
 
-        # Skipped large files metadata should be preserved
+        # Skipped large files metadata should be preserved through truncation
         assert "<skipped_large_files>" in result, "Truncation dropped <skipped_large_files>"
         assert any("large.py" in f for f in result["<skipped_large_files>"])
 
         # Note with shell fallback guidance should be preserved
         assert "<note>" in result, "Truncation dropped <note>"
         assert "shell" in result["<note>"].lower()
+
+
+async def test_grep_output_within_threshold_not_truncated(tmp_path: Path) -> None:
+    """Should return full results when output is within the soft truncation threshold."""
+    async with AsyncExitStack() as stack:
+        env = await stack.enter_async_context(
+            LocalEnvironment(allowed_paths=[tmp_path], default_path=tmp_path, tmp_base_dir=tmp_path)
+        )
+        ctx = await stack.enter_async_context(AgentContext(env=env))
+        tool = GrepTool()
+
+        # Create a small file - output will be well within limits
+        (tmp_path / "small.txt").write_text("hello world\nfoo bar\nhello again")
+
+        mock_run_ctx = MagicMock(spec=RunContext)
+        mock_run_ctx.deps = ctx
+
+        result = await tool.call(mock_run_ctx, pattern="hello")
+        assert isinstance(result, dict)
+        # Should have full context (not truncated)
+        for key, val in result.items():
+            if not key.startswith("<") and isinstance(val, dict):
+                assert "context" in val
