@@ -134,7 +134,7 @@ def add_toolset_instructions(
     if _HAS_NATIVE_TOOLSET_INSTRUCTIONS:
         return agent
 
-    from ya_agent_sdk.toolsets.base import InstructableToolset
+    from ya_agent_sdk.toolsets.base import InstructableToolset, collect_instruction_parts
 
     @agent.instructions
     async def _(ctx: RunContext[AgentDepsT]) -> str | None:
@@ -143,10 +143,7 @@ def add_toolset_instructions(
             if isinstance(toolset, InstructableToolset):
                 instructions = await toolset.get_instructions(ctx)  # type: ignore[arg-type]
                 if instructions:
-                    if isinstance(instructions, list):
-                        parts.extend(instructions)
-                    else:
-                        parts.append(instructions)
+                    collect_instruction_parts(instructions, parts)
         if not parts:
             return None
         return "\n".join(parts)

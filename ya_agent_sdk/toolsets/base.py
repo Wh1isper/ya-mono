@@ -8,10 +8,12 @@ This module provides the foundational abstractions for building toolsets:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel
 from pydantic_ai import RunContext
+from pydantic_ai.messages import InstructionPart
 from pydantic_ai.toolsets import AbstractToolset
 from typing_extensions import TypeVar
 
@@ -64,9 +66,33 @@ class InstructableToolset(Protocol):
     allowing add_toolset_instructions() to work with both Toolset and BrowserUseToolset.
     """
 
-    async def get_instructions(self, ctx: RunContext[Any]) -> str | list[str] | None:
+    async def get_instructions(
+        self, ctx: RunContext[Any]
+    ) -> str | InstructionPart | Sequence[str | InstructionPart] | None:
         """Get instructions to inject into the system prompt."""
         ...
+
+
+def collect_instruction_parts(
+    instructions: str | InstructionPart | Sequence[str | InstructionPart],
+    parts: list[str],
+) -> None:
+    """Normalize instruction results into a flat list of strings.
+
+    Handles the various return types of ``get_instructions`` (plain ``str``,
+    ``InstructionPart``, or a sequence of either) and appends string content
+    to *parts* in place.
+    """
+    if isinstance(instructions, str):
+        parts.append(instructions)
+    elif isinstance(instructions, InstructionPart):
+        parts.append(instructions.content)
+    else:
+        for item in instructions:
+            if isinstance(item, InstructionPart):
+                parts.append(item.content)
+            else:
+                parts.append(item)
 
 
 class BaseTool(ABC):

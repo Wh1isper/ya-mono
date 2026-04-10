@@ -22,7 +22,7 @@ from pydantic_ai.toolsets.abstract import AbstractToolset, ToolsetTool
 from ya_agent_sdk._logger import get_logger
 from ya_agent_sdk.context import AgentContext
 from ya_agent_sdk.events import NamespaceStatus, ToolSearchInitEvent
-from ya_agent_sdk.toolsets.base import BaseToolset, InstructableToolset
+from ya_agent_sdk.toolsets.base import BaseToolset, InstructableToolset, collect_instruction_parts
 from ya_agent_sdk.toolsets.tool_search.metadata import ToolMetadata, extract_metadata_from_schema
 from ya_agent_sdk.toolsets.tool_search.strategies.keyword import KeywordSearchStrategy
 
@@ -312,10 +312,7 @@ class ToolSearchToolSet(BaseToolset[AgentContext]):
                     continue
             instructions = await ts.get_instructions(ctx)
             if instructions:
-                if isinstance(instructions, list):
-                    parts.extend(instructions)
-                else:
-                    parts.append(instructions)
+                collect_instruction_parts(instructions, parts)
 
         # Add tool_search instruction
         search_instruction = self._build_search_instruction()

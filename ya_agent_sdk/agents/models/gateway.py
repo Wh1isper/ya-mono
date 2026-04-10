@@ -7,7 +7,7 @@ from pydantic_ai.models import Model
 from pydantic_ai.models import infer_model as legacy_infer_model
 from pydantic_ai.providers import Provider
 
-from ya_agent_sdk.agents.models.utils import cached_async_http_client, create_async_http_client
+from ya_agent_sdk.agents.models.utils import create_async_http_client
 
 
 def _request_hook(api_key: str) -> Callable[[httpx.Request], Awaitable[httpx.Request]]:
@@ -39,10 +39,10 @@ def make_gateway_provider(
         A gateway_provider function that can be passed to legacy_infer_model.
 
     Usage:
-        # With extra headers (new client per call)
+        # With extra headers for sticky routing
         model = infer_model("google-gla:...", extra_headers={"x-session-id": session_id})
 
-        # Without extra headers (uses cached client)
+        # Without extra headers
         model = infer_model("google-gla:...")
     """
     gateway_prefix = gateway_name.upper()
@@ -64,7 +64,7 @@ def make_gateway_provider(
         if extra_headers and needs_extra_headers_patch:
             http_client = create_async_http_client(extra_headers=extra_headers)
         else:
-            http_client = cached_async_http_client(provider=f"{gateway_name}/{provider_name}")
+            http_client = create_async_http_client()
 
         http_client.event_hooks = {"request": [_request_hook(api_key)]}
 
@@ -113,7 +113,6 @@ def infer_model(gateway_name: str, model: str, extra_headers: dict[str, str] | N
     Args:
         model: Model string in format "provider:model_name"
         extra_headers: Optional dict of extra headers to send with each request.
-            When provided, a new http client is created (not cached).
             Useful for sticky routing via x-session-id header.
 
     Returns:
