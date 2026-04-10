@@ -2,6 +2,7 @@
 
 import json
 import re
+import uuid
 from functools import cache
 from pathlib import Path
 from typing import Annotated, Any, cast
@@ -20,7 +21,12 @@ from ya_agent_sdk.toolsets.core.filesystem._utils import is_binary_file
 logger = get_logger(__name__)
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
-_MAX_RESULT_SIZE = 60000
+# Threshold to trigger soft truncation (drop context, limit line length)
+_TRUNCATION_THRESHOLD = 30000
+# Hard output size limit (aligned with glob) -- write to temp file if exceeded
+_OUTPUT_HARD_LIMIT = 20000
+# Max matching_line length in truncated output
+_TRUNCATED_LINE_MAX = 300
 
 
 @cache
@@ -42,27 +48,85 @@ def _add_gitignore_info(results: dict[str, Any], gitignore_summary: list[str]) -
 
 
 def _truncate_results(results: dict[str, Any]) -> dict[str, Any]:
-    """Truncate results by dropping context when too large.
+    """Truncate results by dropping context and limiting matching_line length.
 
     Preserves all metadata keys (e.g. <skipped_large_files>, <note>, <gitignore_excluded>)
     from the original results.
     """
     logger.info("Results too long, dropping context")
-    truncated: dict[str, Any] = {
-        match: {
-            "line_number": match_data["line_number"],
-            "matching_line": match_data["matching_line"],
-            "context_start_line": match_data["context_start_line"],
-        }
-        for match, match_data in results.items()
-        if isinstance(match_data, dict) and "line_number" in match_data
-    }
-    truncated["<system>"] = "Results truncated. Use `view` to read specific files."
-    # Preserve metadata keys from original results
+    truncated: dict[str, Any] = {}
     for key, value in results.items():
-        if key.startswith("<") and key != "<system>":
+        if key.startswith("<"):
             truncated[key] = value
+        elif isinstance(value, dict) and "line_number" in value:
+            matching_line = value["matching_line"]
+            if len(matching_line) > _TRUNCATED_LINE_MAX:
+                matching_line = matching_line[:_TRUNCATED_LINE_MAX] + "..."
+            truncated[key] = {
+                "file_path": value["file_path"],
+                "line_number": value["line_number"],
+                "matching_line": matching_line,
+            }
+    truncated["<system>"] = "Context dropped to reduce output size. Use `view` to read specific files."
     return truncated
+
+
+async def _guard_output_size(
+    results: dict[str, Any],
+    file_operator: FileOperator,
+) -> dict[str, Any]:
+    """Ensure grep output stays within size limits.
+
+    Two-phase approach:
+    1. Soft truncation: drop context and limit matching_line length.
+    2. Hard guard: write to temp file and return a bounded preview.
+    """
+    serialized = json.dumps(results, default=str, ensure_ascii=False)
+    if len(serialized) <= _TRUNCATION_THRESHOLD:
+        return results
+
+    # Phase 1: soft truncation
+    truncated = _truncate_results(results)
+    serialized = json.dumps(truncated, default=str, ensure_ascii=False)
+    if len(serialized) <= _OUTPUT_HARD_LIMIT:
+        return truncated
+
+    # Phase 2: write full truncated results to temp file, return bounded preview
+    logger.info("Truncated results still too large (%d chars), writing to temp file", len(serialized))
+    output_path: str | None = None
+    try:
+        output_file = f"grep-{uuid.uuid4().hex[:12]}.json"
+        output_path = await file_operator.write_tmp_file(output_file, serialized)
+    except Exception:
+        logger.warning("Failed to write grep output to temp file", exc_info=True)
+
+    # Extract match keys and metadata
+    match_keys = [k for k in truncated if not k.startswith("<")]
+    metadata = {k: v for k, v in truncated.items() if k.startswith("<")}
+
+    # Build preview note
+    if output_path is not None:
+        system_msg = (
+            f"Output too large ({len(serialized)} chars). Full results saved to temp file. Use `view` to read it."
+        )
+    else:
+        system_msg = f"Output too large ({len(serialized)} chars). Failed to save temp file; showing truncated preview."
+
+    # Build preview incrementally to guarantee it stays within the hard limit
+    preview: dict[str, Any] = {**metadata}
+    preview["<system>"] = system_msg
+    preview["total_matches"] = len(match_keys)
+    preview["showing"] = 0
+    if output_path is not None:
+        preview["output_file_path"] = output_path
+
+    for key in match_keys:
+        candidate = {**preview, key: truncated[key], "showing": preview["showing"] + 1}
+        if len(json.dumps(candidate, default=str, ensure_ascii=False)) > _OUTPUT_HARD_LIMIT:
+            break
+        preview = candidate
+
+    return preview
 
 
 class GrepTool(BaseTool):
@@ -259,10 +323,7 @@ class GrepTool(BaseTool):
             )
         _add_gitignore_info(results, gitignore_summary)
 
-        if len(json.dumps(results, default=str)) > _MAX_RESULT_SIZE:
-            return _truncate_results(results)
-
-        return results
+        return await _guard_output_size(results, file_operator)
 
 
 __all__ = ["GrepTool"]
