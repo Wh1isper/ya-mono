@@ -16,27 +16,29 @@ Example:
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated
+from typing import Annotated, cast
 
 from pydantic import Field
 from pydantic_ai import RunContext
+from y_agent_environment import Shell
 
 from ya_agent_sdk.context import AgentContext
 from ya_agent_sdk.context.bus import BusMessage
+from ya_agent_sdk.events import BackgroundShellStartEvent
 from ya_agent_sdk.toolsets.core.base import BaseTool
 from ya_agent_sdk.toolsets.core.subagent.factory import generate_unique_id
-from yaacli.background import BACKGROUND_MANAGER_KEY, BackgroundTaskManager
+from yaacli.background import BACKGROUND_MONITOR_KEY, BackgroundMonitor
 from yaacli.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-def _get_background_manager(ctx: RunContext[AgentContext]) -> BackgroundTaskManager | None:
-    """Get BackgroundTaskManager from resources."""
+def _get_background_monitor(ctx: RunContext[AgentContext]) -> BackgroundMonitor | None:
+    """Get BackgroundMonitor from resources."""
     if ctx.deps.resources is None:
         return None
-    resource = ctx.deps.resources.get(BACKGROUND_MANAGER_KEY)
-    if isinstance(resource, BackgroundTaskManager):
+    resource = ctx.deps.resources.get(BACKGROUND_MONITOR_KEY)
+    if isinstance(resource, BackgroundMonitor):
         return resource
     return None
 
@@ -56,7 +58,7 @@ class SpawnDelegateTool(BaseTool):
     description = "Spawn a subagent in the background (non-blocking). Result delivered via message bus."
 
     def is_available(self, ctx: RunContext[AgentContext]) -> bool:
-        """Available only for main agent with BackgroundTaskManager and delegate tool.
+        """Available only for main agent with BackgroundMonitor and delegate tool.
 
         Restricted to main agent because:
         - Results are sent to target=deps.agent_id via message bus
@@ -66,17 +68,17 @@ class SpawnDelegateTool(BaseTool):
         # Only available for main agent to avoid unreachable messages
         if ctx.deps.agent_id != "main":
             return False
-        manager = _get_background_manager(ctx)
-        return manager is not None and manager.has_delegate_tool
+        monitor = _get_background_monitor(ctx)
+        return monitor is not None and monitor.has_delegate_tool
 
     async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         """Generate instruction for spawn delegate."""
-        manager = _get_background_manager(ctx)
-        if manager is None:
+        monitor = _get_background_monitor(ctx)
+        if monitor is None:
             return None
 
         # Get active background tasks info
-        task_info = manager.get_context_instruction()
+        task_info = monitor.get_context_instruction()
 
         lines = [
             "Same subagent names as the `delegate` tool.",
@@ -99,11 +101,11 @@ class SpawnDelegateTool(BaseTool):
         ] = None,
     ) -> str:
         """Launch a subagent in the background."""
-        manager = _get_background_manager(ctx)
-        if manager is None:
-            return "Error: BackgroundTaskManager not available"
+        monitor = _get_background_monitor(ctx)
+        if monitor is None:
+            return "Error: BackgroundMonitor not available"
 
-        delegate = manager.get_delegate_tool()
+        delegate = monitor.get_delegate_tool()
         if delegate is None:
             return "Error: delegate tool not available"
 
@@ -144,10 +146,10 @@ class SpawnDelegateTool(BaseTool):
                 )
             finally:
                 # Notify completion so TUI can trigger a new agent turn if idle
-                manager.notify_completion(agent_id)
+                monitor.notify_completion(agent_id)
 
         task = asyncio.create_task(_run_background())
-        manager.register_task(agent_id, task, subagent_name=subagent_name, prompt=prompt, is_resume=is_resume)
+        monitor.register_task(agent_id, task, subagent_name=subagent_name, prompt=prompt, is_resume=is_resume)
 
         action = "Resumed" if is_resume else "Spawned"
         return (
@@ -157,9 +159,9 @@ class SpawnDelegateTool(BaseTool):
         )
 
     @staticmethod
-    def _get_manager(ctx: RunContext[AgentContext]) -> BackgroundTaskManager | None:
-        """Get BackgroundTaskManager from resources."""
-        return _get_background_manager(ctx)
+    def _get_monitor(ctx: RunContext[AgentContext]) -> BackgroundMonitor | None:
+        """Get BackgroundMonitor from resources."""
+        return _get_background_monitor(ctx)
 
 
 class SteerSubagentTool(BaseTool):
@@ -179,13 +181,13 @@ class SteerSubagentTool(BaseTool):
         """Available only for main agent with active background tasks."""
         if ctx.deps.agent_id != "main":
             return False
-        manager = _get_background_manager(ctx)
-        return manager is not None and manager.has_active_tasks
+        monitor = _get_background_monitor(ctx)
+        return monitor is not None and monitor.has_active_tasks
 
     async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
         """Only show instruction when there are active background tasks."""
-        manager = _get_background_manager(ctx)
-        if manager is None or not manager.has_active_tasks:
+        monitor = _get_background_monitor(ctx)
+        if monitor is None or not monitor.has_active_tasks:
             return None
         return (
             "Send additional guidance to a running background subagent.\n"
@@ -200,14 +202,14 @@ class SteerSubagentTool(BaseTool):
         message: Annotated[str, Field(description="Steering guidance to send")],
     ) -> str:
         """Send steering message to a running background subagent."""
-        manager = _get_background_manager(ctx)
-        if manager is None:
-            return "Error: BackgroundTaskManager not available"
+        monitor = _get_background_monitor(ctx)
+        if monitor is None:
+            return "Error: BackgroundMonitor not available"
 
         # Verify the target agent is actually running (single snapshot to avoid race)
-        tasks = manager.active_tasks
+        tasks = monitor.active_tasks
         if agent_id not in tasks or tasks[agent_id].done():
-            return self._suggest_resume(ctx, agent_id, message, manager)
+            return self._suggest_resume(ctx, agent_id, message, monitor)
 
         # Send targeted message via shared bus
         ctx.deps.send_message(
@@ -225,7 +227,7 @@ class SteerSubagentTool(BaseTool):
         ctx: RunContext[AgentContext],
         agent_id: str,
         message: str,
-        manager: BackgroundTaskManager,
+        monitor: BackgroundMonitor,
     ) -> str:
         """Build error message suggesting resume for finished agents."""
         # Look up agent_name from registry for the delegate call
@@ -233,7 +235,7 @@ class SteerSubagentTool(BaseTool):
         agent_name = agent_info.agent_name if agent_info else agent_id.rsplit("-bg-", 1)[0]
 
         # Check if there are other active tasks to mention
-        active = [aid for aid, t in manager.active_tasks.items() if not t.done()]
+        active = [aid for aid, t in monitor.active_tasks.items() if not t.done()]
         active_hint = f" Active tasks: {', '.join(active)}" if active else ""
 
         # Truncate message for the suggestion if too long, and escape quotes
@@ -249,9 +251,100 @@ class SteerSubagentTool(BaseTool):
         )
 
     @staticmethod
-    def _get_manager(ctx: RunContext[AgentContext]) -> BackgroundTaskManager | None:
-        """Get BackgroundTaskManager from resources."""
-        return _get_background_manager(ctx)
+    def _get_monitor(ctx: RunContext[AgentContext]) -> BackgroundMonitor | None:
+        """Get BackgroundMonitor from resources."""
+        return _get_background_monitor(ctx)
 
 
-background_tools: list[type[BaseTool]] = [SpawnDelegateTool, SteerSubagentTool]
+class MonitoredShellTool(BaseTool):
+    """Start a background shell process with output monitoring.
+
+    This tool wraps shell.start() and registers the process with
+    BackgroundMonitor for output monitoring. When the process produces
+    new stdout/stderr output, the agent is automatically notified via
+    message bus.
+
+    The returned process_id works with all standard shell tools:
+    shell_wait, shell_kill, shell_status, shell_input, shell_signal.
+    """
+
+    name = "shell_monitor"
+    description = (
+        "Start a background shell process with output monitoring. Automatically notifies when new output is available."
+    )
+    tags = frozenset({"shell"})
+
+    def is_available(self, ctx: RunContext[AgentContext]) -> bool:
+        """Available when shell and BackgroundMonitor are both present."""
+        if ctx.deps.shell is None:
+            return False
+        monitor = _get_background_monitor(ctx)
+        return monitor is not None and monitor.is_shell_monitor_running
+
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+        """Instruction for the monitored shell tool."""
+        return (
+            "Start a background shell process that automatically notifies you when new output is available.\n"
+            "The process works with all existing shell tools (shell_wait, shell_kill, shell_input, etc.).\n"
+            "Use this instead of shell_exec(background=True) when you want to be notified of output "
+            "without having to poll manually."
+        )
+
+    async def call(
+        self,
+        ctx: RunContext[AgentContext],
+        command: Annotated[str, Field(description="The shell command to execute.")],
+        environment: Annotated[
+            dict[str, str] | None,
+            Field(description="Environment variables to set for the command."),
+        ] = None,
+        cwd: Annotated[
+            str | None,
+            Field(description="Working directory (relative or absolute path)."),
+        ] = None,
+    ) -> dict[str, str]:
+        """Start a monitored background shell process."""
+        if not command or not command.strip():
+            return {"error": "Command cannot be empty."}
+
+        monitor = _get_background_monitor(ctx)
+        if monitor is None:
+            return {"error": "BackgroundMonitor not available"}
+
+        shell = cast(Shell, ctx.deps.shell)
+
+        # Merge environment: ctx.shell_env (base) + per-call env (overrides)
+        shell_env = ctx.deps.shell_env
+        if shell_env or environment:
+            merged_env = {**shell_env, **(environment or {})}
+            environment = merged_env
+
+        try:
+            process_id = await shell.start(command, env=environment, cwd=cwd)
+        except Exception as e:
+            return {"error": f"Failed to start background command: {e}"}
+
+        # Register for output monitoring
+        monitor.register_monitored_process(process_id)
+
+        # Emit event for consistency with shell_exec background mode
+        await ctx.deps.emit_event(
+            BackgroundShellStartEvent(
+                event_id=f"bg-{process_id}",
+                process_id=process_id,
+                command=command,
+            )
+        )
+
+        return {
+            "process_id": process_id,
+            "hint": (
+                f"Monitored background process started (id={process_id}). "
+                "You will be notified automatically when new output is available. "
+                "Use shell_wait to read output, shell_input to send stdin, "
+                "shell_kill to terminate."
+            ),
+        }
+
+
+background_tools: list[type[BaseTool]] = [SpawnDelegateTool, SteerSubagentTool, MonitoredShellTool]
