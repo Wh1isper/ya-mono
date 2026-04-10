@@ -82,7 +82,7 @@ from ya_agent_sdk.utils import get_latest_request_usage
 
 # Import state management from app.state (re-export TUIMode, TUIState for backward compatibility)
 from yaacli.app.state import TUIMode
-from yaacli.background import BACKGROUND_MANAGER_KEY, BackgroundTaskInfo, BackgroundTaskManager
+from yaacli.background import BACKGROUND_MONITOR_KEY, BackgroundMonitor, BackgroundTaskInfo
 from yaacli.browser import BrowserManager
 from yaacli.config import ConfigManager, YaacliConfig
 from yaacli.display import EventRenderer, RichRenderer, ToolMessage
@@ -366,11 +366,19 @@ class TUIApp:
         logger.info("TUIApp initialized")
         configure_tui_logging(log_queue, verbose=self.verbose)
 
-        # Set core_toolset on BackgroundTaskManager so it can find the delegate tool
-        bg_manager = self._get_background_manager()
-        if bg_manager and self._runtime:
-            bg_manager.set_core_toolset(self._runtime.core_toolset)
-            bg_manager.set_completion_callback(self._on_background_task_complete)
+        # Set core_toolset on BackgroundMonitor so it can find the delegate tool
+        bg_monitor = self._get_background_monitor()
+        if bg_monitor and self._runtime:
+            bg_monitor.set_core_toolset(self._runtime.core_toolset)
+            bg_monitor.set_completion_callback(self._on_background_task_complete)
+
+            # Start shell process completion monitoring
+            if self._runtime.env.shell is not None:
+                bg_monitor.start_shell_monitor(
+                    shell=self._runtime.env.shell,
+                    bus=self._runtime.ctx.message_bus,
+                    agent_id=self._runtime.ctx.agent_id,
+                )
 
         return self
 
@@ -382,9 +390,9 @@ class TUIApp:
     ) -> bool | None:
         """Cleanup resources."""
         # Clear completion callback
-        bg_manager = self._get_background_manager()
-        if bg_manager:
-            bg_manager.set_completion_callback(None)
+        bg_monitor = self._get_background_monitor()
+        if bg_monitor:
+            bg_monitor.set_completion_callback(None)
 
         # Cancel any running agent task
         await self._cancel_agent_task()
@@ -993,20 +1001,20 @@ class TUIApp:
 
         return parts
 
-    def _get_background_manager(self) -> BackgroundTaskManager | None:
-        """Get BackgroundTaskManager from environment resources."""
+    def _get_background_monitor(self) -> BackgroundMonitor | None:
+        """Get BackgroundMonitor from environment resources."""
         if self._runtime and self._runtime.env and self._runtime.env.resources:
-            resource = self._runtime.env.resources.get(BACKGROUND_MANAGER_KEY)
-            if isinstance(resource, BackgroundTaskManager):
+            resource = self._runtime.env.resources.get(BACKGROUND_MONITOR_KEY)
+            if isinstance(resource, BackgroundMonitor):
                 return resource
         return None
 
     def _get_background_task_count(self) -> int:
         """Get the number of active background tasks."""
-        manager = self._get_background_manager()
-        if manager is None:
+        monitor = self._get_background_monitor()
+        if monitor is None:
             return 0
-        return len(manager.active_tasks)
+        return len(monitor.active_tasks)
 
     def _get_background_process_count(self) -> int:
         """Get the number of active background shell processes."""
@@ -2323,12 +2331,12 @@ class TUIApp:
             lines.append(self._renderer.render(table).rstrip())
 
         # --- Section 2: Background Subagents ---
-        bg_manager = self._get_background_manager()
+        bg_monitor = self._get_background_monitor()
         bg_active: dict[str, asyncio.Task[Any]] = {}
         bg_infos: dict[str, BackgroundTaskInfo] = {}
-        if bg_manager:
-            bg_active = bg_manager.active_tasks
-            bg_infos = bg_manager.task_infos
+        if bg_monitor:
+            bg_active = bg_monitor.active_tasks
+            bg_infos = bg_monitor.task_infos
 
         # Show all known background subagents (running + recently completed)
         if bg_infos:

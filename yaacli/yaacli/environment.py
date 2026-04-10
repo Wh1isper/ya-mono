@@ -1,8 +1,9 @@
 """TUI Environment for yaacli.
 
-TUIEnvironment extends LocalEnvironment with BackgroundTaskManager
-for managing background async tasks. Shell background process management
-is handled by the Shell ABC from y-agent-environment directly.
+TUIEnvironment extends LocalEnvironment with BackgroundMonitor
+for managing background subagent tasks and shell process monitoring.
+Shell background process management is handled by the Shell ABC from
+y-agent-environment directly.
 
 Example:
     async with TUIEnvironment(default_path=Path.cwd()) as env:
@@ -19,15 +20,16 @@ from pathlib import Path
 from y_agent_environment import ResourceFactory, ResourceRegistryState
 
 from ya_agent_sdk.environment.local import LocalEnvironment
-from yaacli.background import BACKGROUND_MANAGER_KEY, BackgroundTaskManager
+from yaacli.background import BACKGROUND_MONITOR_KEY, BackgroundMonitor
 
 
 class TUIEnvironment(LocalEnvironment):
-    """Extended environment for TUI with background task management.
+    """Extended environment for TUI with background monitoring.
 
     Background process management is provided by Shell ABC directly
-    (start/drain_output/wait_process/kill_process). BackgroundTaskManager
-    handles non-process async tasks and is registered as a resource.
+    (start/drain_output/wait_process/kill_process). BackgroundMonitor
+    handles subagent task tracking and shell process completion
+    monitoring, and is registered as a resource.
     """
 
     def __init__(
@@ -51,20 +53,20 @@ class TUIEnvironment(LocalEnvironment):
             resource_factories=resource_factories,
             include_os_env=include_os_env,
         )
-        self._background_manager: BackgroundTaskManager | None = None
+        self._background_monitor: BackgroundMonitor | None = None
 
     async def _setup(self) -> None:
         await super()._setup()
-        self._background_manager = BackgroundTaskManager()
-        self.resources.set(BACKGROUND_MANAGER_KEY, self._background_manager)
+        self._background_monitor = BackgroundMonitor()
+        self.resources.set(BACKGROUND_MONITOR_KEY, self._background_monitor)
 
     async def _teardown(self) -> None:
-        self._background_manager = None
+        self._background_monitor = None
         await super()._teardown()
 
     @property
-    def background_manager(self) -> BackgroundTaskManager:
-        """Get the BackgroundTaskManager resource."""
-        if self._background_manager is None:
+    def background_monitor(self) -> BackgroundMonitor:
+        """Get the BackgroundMonitor resource."""
+        if self._background_monitor is None:
             raise RuntimeError("TUIEnvironment not entered. Use 'async with TUIEnvironment() as env:'")
-        return self._background_manager
+        return self._background_monitor
