@@ -347,3 +347,53 @@ def test_build_handoff_messages_with_prompt_and_steering() -> None:
     assert len(user_parts) == 3  # user-steering label + steering + context-restored
     assert "user-steering" in user_parts[0].content
     assert "[User Steering] Use click library" in user_parts[1].content
+
+
+# =============================================================================
+# Keep tag: _build_handoff_messages tagging
+# =============================================================================
+
+
+def test_build_handoff_messages_tags_with_keep_handoff() -> None:
+    """Handoff messages should have keep:handoff metadata on response and final request."""
+    from ya_agent_sdk.filters._builders import KEEP_HANDOFF, KEEP_TAG_KEY
+
+    result = _build_handoff_messages("Summary", original_prompt="Hello", tool_call_id="test-id")
+
+    # Message 0: initial request (no keep tag)
+    assert result[0].metadata is None or KEEP_TAG_KEY not in (result[0].metadata or {})
+
+    # Message 1: ModelResponse with tool call
+    assert isinstance(result[1], ModelResponse)
+    assert result[1].metadata is not None
+    assert result[1].metadata[KEEP_TAG_KEY] == KEEP_HANDOFF
+
+    # Message 2: final request with tool return + context-restored
+    assert isinstance(result[2], ModelRequest)
+    assert result[2].metadata is not None
+    assert result[2].metadata[KEEP_TAG_KEY] == KEEP_HANDOFF
+
+
+def test_build_handoff_messages_uses_shared_builders() -> None:
+    """Handoff messages should use shared builders for original-request, steering, context-restored."""
+    result = _build_handoff_messages(
+        "Summary",
+        original_prompt="Build a CLI",
+        steering_messages=["Use click"],
+        tool_call_id="test-id",
+    )
+
+    # Original prompt in first message
+    first_msg = result[0]
+    assert isinstance(first_msg, ModelRequest)
+    user_parts = [p for p in first_msg.parts if isinstance(p, UserPromptPart)]
+    assert any("original-request" in p.content for p in user_parts)
+    assert any(p.content == "Build a CLI" for p in user_parts)
+
+    # Steering + context-restored in last message
+    third_msg = result[2]
+    assert isinstance(third_msg, ModelRequest)
+    user_parts = [p for p in third_msg.parts if isinstance(p, UserPromptPart)]
+    assert any("user-steering" in p.content for p in user_parts)
+    assert any("[User Steering] Use click" in p.content for p in user_parts)
+    assert any("context-restored" in p.content for p in user_parts)

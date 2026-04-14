@@ -33,6 +33,13 @@ from ya_agent_sdk.events import (
     HandoffFailedEvent,
     HandoffStartEvent,
 )
+from ya_agent_sdk.filters._builders import (
+    KEEP_HANDOFF,
+    KEEP_TAG_KEY,
+    build_context_restored_part,
+    build_original_request_parts,
+    build_steering_parts,
+)
 
 logger = get_logger(__name__)
 
@@ -50,8 +57,8 @@ def _build_handoff_messages(
     2. Response with virtual summarize tool call
     3. Request with summarize tool return (summary) + steering + summary-complete marker
 
-    This structure makes it clear to the model that the summary is a tool
-    result, not the model's own output, avoiding confusion when users mention "handoff".
+    Messages are tagged with ``keep:handoff`` metadata so that subsequent
+    compaction cycles preserve them instead of trimming away the summary.
 
     Args:
         summary: The handoff summary content.
@@ -62,18 +69,14 @@ def _build_handoff_messages(
     Returns:
         List of ModelMessage representing the compacted history.
     """
+    keep_metadata = {KEEP_TAG_KEY: KEEP_HANDOFF}
+
     # Message 1: system + labeled original user prompt
     # Placeholder will be replaced by create_system_prompt_filter downstream
     request_parts: list[SystemPromptPart | UserPromptPart] = [
         SystemPromptPart(content="Placeholder system prompt"),
+        *build_original_request_parts(original_prompt),
     ]
-    if original_prompt is not None:
-        request_parts.append(
-            UserPromptPart(
-                content="<original-request>Below is the user's original request from the start of the conversation:</original-request>"
-            )
-        )
-        request_parts.append(UserPromptPart(content=original_prompt))
 
     # Message 2: virtual handoff tool call
     tool_call = ToolCallPart(
@@ -89,35 +92,14 @@ def _build_handoff_messages(
             content=summary,
             tool_call_id=tool_call_id,
         ),
+        *build_steering_parts(steering_messages),
+        build_context_restored_part(),
     ]
-
-    if steering_messages:
-        final_parts.append(
-            UserPromptPart(
-                content="<user-steering>Below are messages the user sent during your previous work session:</user-steering>"
-            )
-        )
-        for steering in steering_messages:
-            final_parts.append(UserPromptPart(content=f"[User Steering] {steering}"))
-
-    final_parts.append(
-        UserPromptPart(
-            content=(
-                "<context-restored>"
-                "Context was compacted from a long conversation. "
-                "The summary above is the most authoritative source for current state. "
-                "Synthesize the summary, original request, and any user steering messages to resume work. "
-                "Do NOT repeat questions, confirmations, or actions documented in the summary. "
-                "If the summary records a user decision, respect it without re-asking."
-                "</context-restored>"
-            )
-        )
-    )
 
     return [
         ModelRequest(parts=request_parts),
-        ModelResponse(parts=[tool_call]),
-        ModelRequest(parts=final_parts),
+        ModelResponse(parts=[tool_call], metadata=keep_metadata),
+        ModelRequest(parts=final_parts, metadata=keep_metadata),
     ]
 
 

@@ -43,6 +43,14 @@ from ya_agent_sdk.filters import (
     create_system_prompt_filter,
     fix_truncated_tool_args,
 )
+from ya_agent_sdk.filters._builders import (
+    KEEP_COMPACT,
+    KEEP_TAG_KEY,
+    build_context_restored_part,
+    build_original_request_parts,
+    build_steering_parts,
+    has_keep_tag,
+)
 from ya_agent_sdk.usage import InternalUsage
 from ya_agent_sdk.utils import get_latest_request_usage
 
@@ -331,6 +339,50 @@ def _find_last_user_turn_index(message_history: list[ModelMessage]) -> int | Non
     return None
 
 
+def _trim_request_parts(
+    message: ModelRequest,
+    *,
+    is_in_last_turn: bool,
+    injected_context_tags: tuple[str, ...],
+) -> ModelRequest:
+    """Trim parts of a ModelRequest for compact.
+
+    Truncates large ToolReturnPart, strips media and injected context
+    from UserPromptPart.
+
+    Args:
+        message: The ModelRequest to trim.
+        is_in_last_turn: Whether this message is in the last user turn.
+        injected_context_tags: XML tag names to strip from historical turns.
+
+    Returns:
+        A trimmed copy of the ModelRequest.
+    """
+    new_parts = []
+
+    for part in message.parts:
+        if isinstance(part, ToolReturnPart):
+            part, _ = _truncate_tool_return(part)
+            new_parts.append(part)
+        elif isinstance(part, UserPromptPart):
+            # Always strip media (compact agent can't process images/videos)
+            part, _ = _strip_media_from_user_prompt(part)
+            if is_in_last_turn:
+                # Preserve injected context in the last turn
+                new_parts.append(part)
+            else:
+                # Strip injected context from historical turns
+                stripped = _strip_injected_context(part, tags=injected_context_tags)
+                if stripped is not None:
+                    new_parts.append(stripped)
+                # If None, the part was purely injected context - drop it
+        else:
+            # SystemPromptPart, RetryPromptPart - keep as-is
+            new_parts.append(part)
+
+    return replace(message, parts=new_parts)
+
+
 def _trim_history_for_compact(
     message_history: list[ModelMessage],
     *,
@@ -366,6 +418,11 @@ def _trim_history_for_compact(
     trimmed: list[ModelMessage] = []
 
     for i, message in enumerate(message_history):
+        # Skip messages tagged for preservation (prior session summaries)
+        if has_keep_tag(message):
+            trimmed.append(message)
+            continue
+
         if isinstance(message, ModelResponse):
             # Strip ThinkingParts (internal reasoning, not needed for summary)
             filtered_parts = [part for part in message.parts if not isinstance(part, ThinkingPart)]
@@ -381,29 +438,13 @@ def _trim_history_for_compact(
         # Determine if this message is in the last user turn (when preservation is enabled)
         is_in_last_turn = last_user_turn_idx is not None and i >= last_user_turn_idx
 
-        new_parts = []
-
-        for part in message.parts:
-            if isinstance(part, ToolReturnPart):
-                part, _ = _truncate_tool_return(part)
-                new_parts.append(part)
-            elif isinstance(part, UserPromptPart):
-                # Always strip media (compact agent can't process images/videos)
-                part, _ = _strip_media_from_user_prompt(part)
-                if is_in_last_turn:
-                    # Preserve injected context in the last turn
-                    new_parts.append(part)
-                else:
-                    # Strip injected context from historical turns
-                    stripped = _strip_injected_context(part, tags=injected_context_tags)
-                    if stripped is not None:
-                        new_parts.append(stripped)
-                    # If None, the part was purely injected context - drop it
-            else:
-                # SystemPromptPart, RetryPromptPart - keep as-is
-                new_parts.append(part)
-
-        trimmed.append(replace(message, parts=new_parts))
+        trimmed.append(
+            _trim_request_parts(
+                message,
+                is_in_last_turn=is_in_last_turn,
+                injected_context_tags=injected_context_tags,
+            )
+        )
 
     return trimmed
 
@@ -586,6 +627,9 @@ def _build_compacted_messages(
 ) -> list[ModelMessage]:
     """Build compacted message history.
 
+    Messages are tagged with ``keep:compact`` metadata so that subsequent
+    compaction cycles preserve them instead of trimming away the summary.
+
     Args:
         summary: The compacted summary content.
         original_prompt: The initial user prompt.
@@ -594,6 +638,8 @@ def _build_compacted_messages(
     Returns:
         List of ModelMessage representing the compacted history.
     """
+    keep_metadata = {KEEP_TAG_KEY: KEEP_COMPACT}
+
     request_parts: list[SystemPromptPart | UserPromptPart] = [
         SystemPromptPart(content="Placeholder system prompt"),
         UserPromptPart(
@@ -605,40 +651,15 @@ def _build_compacted_messages(
 
     # Build final request parts with labeled original prompt and steering messages
     final_parts: list[UserPromptPart] = [
-        UserPromptPart(
-            content="<original-request>Below is the user's original request from the start of the conversation:</original-request>"
-        ),
-        UserPromptPart(content=original_prompt),
+        *build_original_request_parts(original_prompt),
+        *build_steering_parts(steering_messages),
+        build_context_restored_part(),
     ]
-
-    # Append steering messages with label if any
-    if steering_messages:
-        final_parts.append(
-            UserPromptPart(
-                content="<user-steering>Below are messages the user sent during your previous work session:</user-steering>"
-            )
-        )
-        for steering in steering_messages:
-            final_parts.append(UserPromptPart(content=f"[User Steering] {steering}"))
-
-    final_parts.append(
-        UserPromptPart(
-            content=(
-                "<context-restored>"
-                "Context was compacted from a long conversation. "
-                "The summary above is the most authoritative source for current state. "
-                "Synthesize the summary, original request, and any user steering messages to resume work. "
-                "Do NOT repeat questions, confirmations, or actions documented in the summary. "
-                "If the summary records a user decision, respect it without re-asking."
-                "</context-restored>"
-            )
-        )
-    )
 
     return [
         ModelRequest(parts=request_parts),
-        ModelResponse(parts=[TextPart(content=summary)]),
-        ModelRequest(parts=final_parts),
+        ModelResponse(parts=[TextPart(content=summary)], metadata=keep_metadata),
+        ModelRequest(parts=final_parts, metadata=keep_metadata),
     ]
 
 
@@ -770,6 +791,7 @@ def create_compact_filter(
                     summary_markdown=condense_markdown,
                     original_message_count=len(message_history),
                     compacted_message_count=len(compacted),
+                    condense_result=condense_result,
                 )
             )
 

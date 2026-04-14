@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -56,11 +56,15 @@ class CompactCompleteEvent(AgentEvent):
         summary_markdown: The compacted summary in markdown format.
         original_message_count: Number of messages before compaction.
         compacted_message_count: Number of messages after compaction.
+        condense_result: The raw CondenseResult from the compact agent, if available.
+            Runtime consumers (e.g., memory agents) can use this for richer
+            knowledge extraction.
     """
 
     summary_markdown: str = ""
     original_message_count: int = 0
     compacted_message_count: int = 0
+    condense_result: Any = None
 
 
 @dataclass
