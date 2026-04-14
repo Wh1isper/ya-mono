@@ -967,3 +967,130 @@ def test_strip_incompatible_settings_known_keys() -> None:
 def test_strip_incompatible_settings_known_betas() -> None:
     """All expected betas should be in _INCOMPATIBLE_BETAS."""
     assert "interleaved-thinking-2025-05-14" in _INCOMPATIBLE_BETAS
+
+
+# =============================================================================
+# Keep tag: _build_compacted_messages tagging
+# =============================================================================
+
+
+def test_build_compacted_messages_tags_response_with_keep() -> None:
+    """Compacted ModelResponse should have keep:compact metadata."""
+    from ya_agent_sdk.agents.compact import _build_compacted_messages
+    from ya_agent_sdk.filters._builders import KEEP_COMPACT, KEEP_TAG_KEY
+
+    messages = _build_compacted_messages("Summary text", "Original prompt")
+    # Message 0: initial request (no keep tag)
+    assert messages[0].metadata is None or KEEP_TAG_KEY not in (messages[0].metadata or {})
+    # Message 1: ModelResponse with summary
+    assert isinstance(messages[1], ModelResponse)
+    assert messages[1].metadata is not None
+    assert messages[1].metadata[KEEP_TAG_KEY] == KEEP_COMPACT
+    # Message 2: final request with original-request + context-restored
+    assert isinstance(messages[2], ModelRequest)
+    assert messages[2].metadata is not None
+    assert messages[2].metadata[KEEP_TAG_KEY] == KEEP_COMPACT
+
+
+def test_build_compacted_messages_uses_shared_builders() -> None:
+    """Compacted messages should contain original-request, steering, and context-restored parts."""
+    from ya_agent_sdk.agents.compact import _build_compacted_messages
+
+    messages = _build_compacted_messages(
+        "Summary text",
+        "Build a CLI",
+        steering_messages=["Use click"],
+    )
+    final_request = messages[2]
+    assert isinstance(final_request, ModelRequest)
+    user_parts = [p for p in final_request.parts if isinstance(p, UserPromptPart)]
+    # Should have: original-request label, original prompt, steering label, steering msg, context-restored
+    assert any("original-request" in p.content for p in user_parts)
+    assert any(p.content == "Build a CLI" for p in user_parts)
+    assert any("user-steering" in p.content for p in user_parts)
+    assert any("[User Steering] Use click" in p.content for p in user_parts)
+    assert any("context-restored" in p.content for p in user_parts)
+
+
+# =============================================================================
+# Keep tag: _trim_history_for_compact preserves tagged messages
+# =============================================================================
+
+
+def test_trim_history_preserves_keep_tagged_response() -> None:
+    """Messages tagged with keep metadata should pass through trimming unchanged."""
+    from ya_agent_sdk.agents.compact import _build_compacted_messages, _trim_history_for_compact
+
+    # Simulate a history that includes a prior compact summary
+    prior_compact = _build_compacted_messages("Prior session summary with lots of detail", "Original prompt")
+
+    # Add normal conversation messages after the compact summary
+    normal_messages: list[ModelMessage] = [
+        ModelRequest(
+            parts=[UserPromptPart(content="<runtime-context>big injected context</runtime-context>\nDo something")]
+        ),
+        ModelResponse(parts=[TextPart(content="OK, doing it")]),
+        ModelRequest(parts=[UserPromptPart(content="Thanks")]),
+    ]
+
+    history = prior_compact + normal_messages
+    trimmed = _trim_history_for_compact(history)
+
+    # Prior compact messages (tagged) should be preserved exactly
+    assert trimmed[1] is prior_compact[1]  # ModelResponse with summary - same object
+    assert trimmed[2] is prior_compact[2]  # ModelRequest with context-restored - same object
+
+    # Normal messages should still be processed (injected context stripped)
+    trimmed_normal_request = trimmed[3]
+    assert isinstance(trimmed_normal_request, ModelRequest)
+    user_parts = [p for p in trimmed_normal_request.parts if isinstance(p, UserPromptPart)]
+    # runtime-context should be stripped from normal messages
+    assert all("runtime-context" not in p.content for p in user_parts)
+
+
+def test_trim_history_preserves_keep_tagged_handoff() -> None:
+    """Handoff-tagged messages should also be preserved during compact trimming."""
+    from ya_agent_sdk.agents.compact import _trim_history_for_compact
+    from ya_agent_sdk.filters._builders import KEEP_TAG_KEY
+    from ya_agent_sdk.filters.handoff import _build_handoff_messages
+
+    # Build handoff messages (tagged with keep:handoff)
+    handoff_msgs = _build_handoff_messages(
+        "Handoff summary with critical context " * 50,  # Long summary
+        original_prompt="Build something",
+        steering_messages=["Focus on tests"],
+    )
+
+    # Add more conversation after handoff
+    extra: list[ModelMessage] = [
+        ModelRequest(parts=[UserPromptPart(content="Continue work")]),
+        ModelResponse(parts=[TextPart(content="Working on it")]),
+    ]
+
+    history = handoff_msgs + extra
+    trimmed = _trim_history_for_compact(history)
+
+    # Handoff-tagged messages should be preserved exactly (not truncated)
+    for i, msg in enumerate(handoff_msgs):
+        if msg.metadata and KEEP_TAG_KEY in msg.metadata:
+            assert trimmed[i] is msg, f"Message {i} should be preserved by reference"
+
+
+def test_trim_history_truncates_untagged_tool_return() -> None:
+    """Untagged ToolReturnPart should still be truncated as before."""
+    long_content = "x" * 1000
+
+    history: list[ModelMessage] = [
+        ModelRequest(parts=[UserPromptPart(content="Hello")]),
+        ModelResponse(parts=[ToolCallPart(tool_name="test", args={}, tool_call_id="t1")]),
+        ModelRequest(parts=[ToolReturnPart(tool_name="test", content=long_content, tool_call_id="t1")]),
+    ]
+
+    trimmed = _trim_history_for_compact(history)
+
+    tool_returns = [
+        p for msg in trimmed if isinstance(msg, ModelRequest) for p in msg.parts if isinstance(p, ToolReturnPart)
+    ]
+    assert len(tool_returns) == 1
+    # Should be truncated (original was 1000 chars, max is 500)
+    assert len(tool_returns[0].model_response_str()) < len(long_content)
