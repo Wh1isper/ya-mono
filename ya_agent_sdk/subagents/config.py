@@ -11,6 +11,7 @@ from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict
+from pydantic_ai.capabilities import AbstractCapability
 
 
 class SubagentConfig(BaseModel):
@@ -64,6 +65,14 @@ class SubagentConfig(BaseModel):
 
     model_cfg: str | dict[str, Any] | None = None
     """ModelConfig: 'inherit' (default), preset name (e.g., 'claude_200k'), or dict config."""
+
+    capabilities: list[AbstractCapability[Any]] | None = None
+    """Pydantic AI capabilities for this subagent.
+
+    When set, the subagent uses these capabilities instead of inheriting from parent.
+    Only usable via programmatic SubagentConfig construction, not from markdown files
+    (capability instances cannot be serialized in YAML frontmatter).
+    """
 
 
 def parse_subagent_markdown(content: str) -> SubagentConfig:

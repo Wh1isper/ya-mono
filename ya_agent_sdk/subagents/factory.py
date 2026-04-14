@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import RunContext
 from pydantic_ai._agent_graph import HistoryProcessor
+from pydantic_ai.capabilities import AbstractCapability
 
 from ya_agent_sdk.context import AgentContext, ModelConfig
 from ya_agent_sdk.subagents.builder import build_subagent_agent
@@ -40,6 +41,7 @@ def create_subagent_tool_from_config(
     history_processors: Sequence[HistoryProcessor[AgentContext]] | None = None,
     model_cfg: ModelConfig | None = None,
     inherit_hooks: bool = False,
+    capabilities: list[AbstractCapability[Any]] | None = None,
 ) -> type[BaseTool]:
     """Create a subagent tool from a SubagentConfig.
 
@@ -50,6 +52,8 @@ def create_subagent_tool_from_config(
         model_settings: Fallback model settings. Used if config.model_settings is 'inherit' or None.
         history_processors: History processors to use for the subagent.
         model_cfg: Fallback ModelConfig. Used if config.model_cfg is None.
+        inherit_hooks: Whether to inherit hooks from parent toolset.
+        capabilities: Parent capabilities to inherit (if config doesn't override).
 
     Returns:
         A BaseTool subclass that wraps the subagent.
@@ -62,6 +66,7 @@ def create_subagent_tool_from_config(
         history_processors=history_processors,
         model_cfg=model_cfg,
         inherit_hooks=inherit_hooks,
+        capabilities=capabilities,
     )
 
     required_tools = config.tools
@@ -89,6 +94,7 @@ def create_subagent_tool_from_markdown(
     history_processors: Sequence[HistoryProcessor[AgentContext]] | None = None,
     model_cfg: ModelConfig | None = None,
     inherit_hooks: bool = False,
+    capabilities: list[AbstractCapability[Any]] | None = None,
 ) -> type[BaseTool]:
     """Create a subagent tool from markdown content or file path.
 
@@ -101,6 +107,7 @@ def create_subagent_tool_from_markdown(
         model_settings: Fallback model settings. Used if config.model_settings is 'inherit' or None.
         history_processors: History processors to use for the subagent.
         model_cfg: Fallback ModelConfig. Used if config.model_cfg is None.
+        capabilities: Parent capabilities to inherit (if config doesn't override).
 
     Returns:
         A BaseTool subclass that wraps the subagent.
@@ -140,6 +147,7 @@ def create_subagent_tool_from_markdown(
         history_processors=history_processors,
         model_cfg=model_cfg,
         inherit_hooks=inherit_hooks,
+        capabilities=capabilities,
     )
 
 
@@ -152,6 +160,7 @@ def load_subagent_tools_from_dir(
     history_processors: Sequence[HistoryProcessor[AgentContext]] | None = None,
     model_cfg: ModelConfig | None = None,
     inherit_hooks: bool = False,
+    capabilities: list[AbstractCapability[Any]] | None = None,
 ) -> list[type[BaseTool]]:
     """Load all subagent tools from a directory.
 
@@ -189,6 +198,7 @@ def load_subagent_tools_from_dir(
             history_processors=history_processors,
             model_cfg=model_cfg,
             inherit_hooks=inherit_hooks,
+            capabilities=capabilities,
         )
         tools.append(tool)
 

@@ -305,6 +305,7 @@ class Toolset(BaseToolset[AgentDepsT]):
         model_cfg: ModelConfig | None = None,
         unified: bool = False,
         inherit_hooks: bool = False,
+        capabilities: list[Any] | None = None,
     ) -> Toolset[AgentDepsT]:
         """Create a new Toolset that includes subagent tools.
 
@@ -321,6 +322,9 @@ class Toolset(BaseToolset[AgentDepsT]):
             unified: If True, create a single 'delegate' tool that can call any subagent
                 by name parameter. If False (default), create separate tools for each
                 subagent.
+            inherit_hooks: Whether to inherit hooks from parent toolset.
+            capabilities: Parent capabilities to pass to subagents. Each subagent
+                inherits these unless its config.capabilities overrides them.
 
         Returns:
             A new Toolset instance with subagent tools added.
@@ -364,6 +368,7 @@ class Toolset(BaseToolset[AgentDepsT]):
                 history_processors=history_processors,
                 model_cfg=model_cfg,
                 inherit_hooks=inherit_hooks,
+                capabilities=capabilities,
             )
             subagent_tools = [unified_tool]
         else:
@@ -377,6 +382,7 @@ class Toolset(BaseToolset[AgentDepsT]):
                     history_processors=history_processors,
                     model_cfg=model_cfg,
                     inherit_hooks=inherit_hooks,
+                    capabilities=capabilities,
                 )
                 for cfg in configs
             ]
