@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Generic, cast
 import jinja2
 from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, UsageLimits, UserError
 from pydantic_ai._agent_graph import CallToolsNode, HistoryProcessor, ModelRequestNode
+from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.messages import ModelMessage, UserContent
 from pydantic_ai.models import KnownModelName, Model
 from pydantic_ai.output import OutputSpec
@@ -304,6 +305,9 @@ def create_agent(
     include_builtin_subagents: bool = False,
     unified_subagents: bool = False,
     inherit_hooks: bool = True,
+    # --- Capabilities ---
+    capabilities: Sequence[AbstractCapability[AgentDepsT]] | None = None,
+    inherit_capabilities: bool = True,
     # --- Agent ---
     agent_tools: Sequence[Any] | None = None,
     agent_name: str = "main",
@@ -357,6 +361,13 @@ def create_agent(
         compact_model: Model for compact filter. Falls back to AgentSettings.
         compact_model_settings: Model settings for compact filter.
         compact_model_cfg: ModelConfig for compact filter. Defaults to main model_cfg.
+
+        capabilities: Pydantic AI capabilities to attach to the agent. Capabilities
+            bundle tools, lifecycle hooks, instructions, and model settings into
+            reusable composable units. See pydantic-ai capabilities documentation.
+        inherit_capabilities: If True (default), subagents inherit the parent's
+            capabilities unless overridden by their own config.capabilities.
+            If False, subagents get no capabilities unless explicitly set in config.
 
         agent_tools: Additional tools to pass directly to Agent (pydantic-ai Tool objects).
         agent_name: Name of the agent for logging.
@@ -484,6 +495,10 @@ def create_agent(
 
         if all_subagent_configs:
             logger.debug("Adding %d subagent configs to toolset", len(all_subagent_configs))
+            # Resolve capabilities for subagents
+            subagent_capabilities: list[AbstractCapability[Any]] | None = None
+            if inherit_capabilities and capabilities:
+                subagent_capabilities = list(capabilities)
             core_toolset = core_toolset.with_subagents(
                 all_subagent_configs,
                 model=model,
@@ -492,6 +507,7 @@ def create_agent(
                 model_cfg=effective_model_cfg,
                 unified=unified_subagents,
                 inherit_hooks=inherit_hooks,
+                capabilities=subagent_capabilities,
             )
 
     # Auto-detect context management tools from registered tools
@@ -533,6 +549,7 @@ def create_agent(
             output_type=output_type,
             tools=agent_tools or (),
             toolsets=all_toolsets if all_toolsets else None,
+            capabilities=list(capabilities) if capabilities else None,
             history_processors=[
                 *(all_processors or []),
                 create_system_prompt_filter(system_prompt=effective_system_prompt),

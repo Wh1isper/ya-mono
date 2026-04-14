@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import Agent
 from pydantic_ai._agent_graph import HistoryProcessor
+from pydantic_ai.capabilities import AbstractCapability
 
 from ya_agent_sdk.agents.guards import attach_message_bus_guard
 from ya_agent_sdk.agents.models import infer_model
@@ -107,6 +108,21 @@ def _build_toolsets(
         return [parent_subset]
 
 
+def _resolve_capabilities(
+    config: SubagentConfig,
+    parent_capabilities: list[AbstractCapability[Any]] | None,
+) -> list[AbstractCapability[Any]] | None:
+    """Resolve effective capabilities for a subagent.
+
+    Resolution logic:
+    - config.capabilities is set -> use config's own (override parent)
+    - config.capabilities is None -> use parent_capabilities (inherit)
+    """
+    if config.capabilities is not None:
+        return config.capabilities
+    return parent_capabilities
+
+
 def build_subagent_agent(
     config: SubagentConfig,
     parent_toolset: Toolset[Any],
@@ -116,6 +132,7 @@ def build_subagent_agent(
     history_processors: Sequence[HistoryProcessor[AgentContext]] | None = None,
     model_cfg: ModelConfig | None = None,
     inherit_hooks: bool = False,
+    capabilities: list[AbstractCapability[Any]] | None = None,
 ) -> tuple[Agent[AgentContext, str], ModelConfig | None]:
     """Build a pydantic-ai Agent from a SubagentConfig.
 
@@ -123,7 +140,7 @@ def build_subagent_agent(
     (create_subagent_tool_from_config) and unified subagent tools.
 
     Handles model resolution, toolset construction (including independent toolsets),
-    and message bus guard attachment.
+    capability resolution, and message bus guard attachment.
 
     Args:
         config: The parsed subagent configuration.
@@ -132,6 +149,8 @@ def build_subagent_agent(
         model_settings: Fallback model settings.
         history_processors: History processors for the subagent.
         model_cfg: Fallback ModelConfig.
+        inherit_hooks: Whether to inherit hooks from parent toolset.
+        capabilities: Parent capabilities to inherit (if config doesn't override).
 
     Returns:
         Tuple of (Agent, resolved_model_cfg).
@@ -139,6 +158,7 @@ def build_subagent_agent(
     effective_model = _resolve_model(config, model)
     resolved_settings = _resolve_model_settings(config, model_settings)
     resolved_model_cfg = _resolve_model_cfg(config, model_cfg)
+    resolved_capabilities = _resolve_capabilities(config, capabilities)
     toolsets = _build_toolsets(config, parent_toolset, inherit_hooks=inherit_hooks)
 
     agent: Agent[AgentContext, str] = Agent(
@@ -148,6 +168,7 @@ def build_subagent_agent(
         model_settings=resolved_settings,  # type: ignore[arg-type]
         deps_type=AgentContext,
         history_processors=history_processors,
+        capabilities=resolved_capabilities,
         name=config.name,
     )
 

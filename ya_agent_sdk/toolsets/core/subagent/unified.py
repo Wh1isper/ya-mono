@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 from pydantic import Field
 from pydantic_ai import Agent, RunContext
 from pydantic_ai._agent_graph import HistoryProcessor
+from pydantic_ai.capabilities import AbstractCapability
 
 from ya_agent_sdk._logger import get_logger
 from ya_agent_sdk.context import AgentContext, ModelConfig
@@ -73,6 +74,7 @@ def _build_subagent_entry(
     history_processors: Sequence[HistoryProcessor[AgentContext]] | None = None,
     model_cfg: ModelConfig | None = None,
     inherit_hooks: bool = False,
+    capabilities: list[AbstractCapability[Any]] | None = None,
 ) -> SubagentEntry:
     """Build a SubagentEntry from config."""
     agent, resolved_model_cfg = build_subagent_agent(
@@ -83,6 +85,7 @@ def _build_subagent_entry(
         history_processors=history_processors,
         model_cfg=model_cfg,
         inherit_hooks=inherit_hooks,
+        capabilities=capabilities,
     )
     call_func = create_subagent_call_func(agent, model_cfg=resolved_model_cfg)
 
@@ -149,6 +152,7 @@ def _build_registry(
     history_processors: Sequence[HistoryProcessor[AgentContext]] | None = None,
     model_cfg: ModelConfig | None = None,
     inherit_hooks: bool = False,
+    capabilities: list[AbstractCapability[Any]] | None = None,
 ) -> dict[str, SubagentEntry]:
     """Build registry of subagent entries from configs."""
     registry: dict[str, SubagentEntry] = {}
@@ -161,6 +165,7 @@ def _build_registry(
             history_processors=history_processors,
             model_cfg=model_cfg,
             inherit_hooks=inherit_hooks,
+            capabilities=capabilities,
         )
         registry[config.name] = entry
     return registry
@@ -177,6 +182,7 @@ def create_unified_subagent_tool(
     history_processors: Sequence[HistoryProcessor[AgentContext]] | None = None,
     model_cfg: ModelConfig | None = None,
     inherit_hooks: bool = False,
+    capabilities: list[AbstractCapability[Any]] | None = None,
 ) -> type[BaseTool]:
     """Create a unified subagent tool from multiple SubagentConfigs.
 
@@ -193,6 +199,8 @@ def create_unified_subagent_tool(
         model_settings: Fallback model settings for subagents.
         history_processors: History processors for all subagents.
         model_cfg: Fallback ModelConfig for subagents.
+        inherit_hooks: Whether to inherit hooks from parent toolset.
+        capabilities: Parent capabilities to inherit (if config doesn't override).
 
     Returns:
         A BaseTool subclass that delegates to subagents by name.
@@ -226,6 +234,7 @@ def create_unified_subagent_tool(
         history_processors=history_processors,
         model_cfg=model_cfg,
         inherit_hooks=inherit_hooks,
+        capabilities=capabilities,
     )
 
     # Store references for closure
