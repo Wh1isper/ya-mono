@@ -183,6 +183,38 @@ def test_prune_sessions_nonexistent_dir(tmp_path: Path) -> None:
     app._prune_sessions(tmp_path / "nonexistent")
 
 
+def test_save_session_snapshot_includes_extra_usages_for_error_recovery(tmp_path: Path) -> None:
+    """Error recovery snapshots should preserve extra_usages in exported state."""
+    from yaacli.app.tui import TUIApp
+
+    sessions_dir = tmp_path / "sessions"
+    sessions_dir.mkdir()
+
+    config = MagicMock()
+    config.general.max_requests = 10
+    config.display.max_output_lines = 500
+    config.display.mouse_support = True
+    config_manager = MagicMock()
+    config_manager.get_sessions_dir.return_value = sessions_dir
+
+    app = TUIApp(config=config, config_manager=config_manager)
+    app._message_history = [MagicMock()]
+    app._runtime = MagicMock()
+    state = MagicMock()
+    state.model_dump_json.return_value = "{}"
+    app._runtime.ctx.export_state.return_value = state
+
+    with patch("yaacli.app.tui.ModelMessagesTypeAdapter.dump_json", return_value=b"[]"):
+        saved = app._save_session_snapshot(include_extra_usages=True, save_reason="error")
+
+    assert saved is True
+    app._runtime.ctx.export_state.assert_called_once_with(include_extra_usages=True)
+
+    metadata = json.loads((sessions_dir / app.session_id / "metadata.json").read_text())
+    assert metadata["session_id"] == app.session_id
+    assert metadata["last_save_reason"] == "error"
+
+
 # =============================================================================
 # Load Session Tests
 # =============================================================================

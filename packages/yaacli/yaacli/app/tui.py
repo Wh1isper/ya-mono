@@ -1170,9 +1170,14 @@ class TUIApp:
             else:
                 self._finalize_streaming_text()
                 self._finalize_streaming_thinking()
-                # Display error - message_history is already saved in memory
-                # by _execute_stream, so user can continue with a new prompt
                 self._append_error_output(e)
+                if self.has_session_data:
+                    self._append_system_output(
+                        "Session state saved. Enter your next prompt to continue from the current context."
+                    )
+                    self._append_system_output(
+                        f"After restarting, run /session {self._session_id} to restore this session."
+                    )
                 logger.exception("Agent execution failed")
         finally:
             # Finalize any remaining streaming text/thinking
@@ -1285,16 +1290,16 @@ class TUIApp:
             except Exception:
                 logger.debug("Failed to save message history from errored run", exc_info=True)
 
-            # Raise after saving history - on error, history is preserved in memory
-            # but not written to disk (auto_save_history is skipped)
-            stream.raise_if_exception()
+            # Persist the latest recoverable state before surfacing stream errors.
+            # Successful runs exclude extra_usages so future restores start clean.
+            # Error paths include extra_usages to preserve crash-recovery context.
+            try:
+                stream.raise_if_exception()
+            except Exception:
+                self._save_session_snapshot(include_extra_usages=True, save_reason="error")
+                raise
 
-            # Only auto-save session to disk on successful completion
-            # Note: export_state() defaults to include_extra_usages=False,
-            # so next restore won't have stale usage data
-            if stream.run:
-                self._auto_save_history()
-
+            self._auto_save_history()
             return stream.run.result if stream.run else None
 
     async def _request_user_action(
@@ -2490,17 +2495,24 @@ class TUIApp:
         except Exception as e:
             self._append_system_output(f"Error loading session: {e}")
 
-    def _auto_save_history(self) -> None:
-        """Auto-save session to session-specific directory.
+    def _save_session_snapshot(
+        self,
+        *,
+        include_extra_usages: bool,
+        save_reason: str,
+    ) -> bool:
+        """Persist the current session to disk.
 
-        Saves message history, context state, and metadata to:
-        ~/.yaacli/sessions/{session_id}/
+        Args:
+            include_extra_usages: Whether to include extra_usages in exported state.
+                Use True for error recovery snapshots.
+            save_reason: Metadata tag describing why the snapshot was saved.
 
-        This is called automatically after each agent run completes.
-        Also prunes old sessions beyond the retention limit.
+        Returns:
+            True when a snapshot was written, False when there is no message history.
         """
         if not self._message_history:
-            return
+            return False
 
         sessions_dir = self.config_manager.get_sessions_dir()
         save_dir = sessions_dir / self._session_id
@@ -2514,7 +2526,7 @@ class TUIApp:
 
         # Save context state
         state_file = save_dir / "context_state.json"
-        state = self.runtime.ctx.export_state()
+        state = self.runtime.ctx.export_state(include_extra_usages=include_extra_usages)
         state_file.write_text(state.model_dump_json(indent=2))
 
         # Save/update metadata
@@ -2529,12 +2541,18 @@ class TUIApp:
                 "created_at": now,
                 "updated_at": now,
             }
+        metadata["last_save_reason"] = save_reason
         metadata_file.write_text(json.dumps(metadata, indent=2))
 
-        logger.debug(f"Auto-saved session to {save_dir}")
+        logger.debug("Saved session snapshot to %s (reason=%s)", save_dir, save_reason)
 
         # Prune old sessions
         self._prune_sessions(sessions_dir)
+        return True
+
+    def _auto_save_history(self) -> None:
+        """Auto-save session to session-specific directory after a successful run."""
+        self._save_session_snapshot(include_extra_usages=False, save_reason="success")
 
     @property
     def session_id(self) -> str:

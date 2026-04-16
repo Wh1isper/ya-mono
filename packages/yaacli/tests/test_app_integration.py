@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -722,3 +722,26 @@ async def test_tui_app_cancel_agent_task_suppresses_benign_contextvar_cleanup_er
 
     assert task.cancel_called is True
     assert app._agent_task is None
+
+
+@pytest.mark.asyncio
+async def test_tui_app_run_agent_reports_saved_recovery_session():
+    """Agent errors should surface recovery guidance when session data is saved."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+
+    app = TUIApp(config=config, config_manager=config_manager)
+    runtime = MagicMock()
+    runtime.ctx = MagicMock(loop_active=False)
+    runtime.ctx.steering_messages = []
+    app._runtime = runtime
+    app._execute_stream = AsyncMock(side_effect=RuntimeError("peer closed connection"))
+    app._check_pending_bus_messages = MagicMock()
+
+    with patch.object(TUIApp, "has_session_data", new_callable=PropertyMock, return_value=True):
+        await app._run_agent("hello")
+
+    joined_output = "\n".join(app._output_lines)
+    assert "Session state saved." in joined_output
+    assert f"/session {app.session_id}" in joined_output
+    assert app.state == TUIState.IDLE
