@@ -63,7 +63,7 @@ build-all: clean-build ## Build distributions for all packages
 .PHONY: clean-build
 clean-build: ## Clean build artifacts
 	@echo "Removing build artifacts"
-	@uv run python -c "from pathlib import Path; import shutil; [shutil.rmtree(path) for path in map(Path, ['dist', 'packages/ya-agent-sdk/dist', 'packages/yaacli/dist']) if path.exists()]"
+	@uv run python -c "from pathlib import Path; import shutil; [shutil.rmtree(path, ignore_errors=True) for path in (Path('dist'), Path('packages/ya-agent-sdk/dist'), Path('packages/yaacli/dist'))]"
 
 .PHONY: publish
 publish: ## Publish built distributions to PyPI
