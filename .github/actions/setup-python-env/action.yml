@@ -27,14 +27,14 @@ runs:
       with:
         version: ${{ inputs.uv-version }}
         enable-cache: 'true'
-        cache-suffix: ${{ matrix.python-version }}
+        cache-suffix: ${{ inputs.python-version }}
 
     - name: Install Python dependencies (no extras)
       if: ${{ inputs.extras == '' }}
-      run: uv sync --frozen --all-packages --python=${{ matrix.python-version }}
+      run: uv sync --frozen --all-packages --python=${{ inputs.python-version }}
       shell: bash
 
     - name: Install Python dependencies (with extras)
       if: ${{ inputs.extras != '' }}
-      run: uv sync --frozen --all-packages --python=${{ matrix.python-version }} --extra ${{ inputs.extras }}
+      run: uv sync --frozen --all-packages --python=${{ inputs.python-version }} --extra ${{ inputs.extras }}
       shell: bash
