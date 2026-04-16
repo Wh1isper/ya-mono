@@ -29,7 +29,6 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # No extra only runs on 3.13
         include:
           - python-version: "3.11"
             extras: "all"
@@ -37,8 +36,6 @@ jobs:
             extras: "all"
           - python-version: "3.13"
             extras: "all"
-          # - python-version: "3.14"
-          #   extras: "all"
           - python-version: "3.13"
             extras: ""
       fail-fast: false
@@ -58,7 +55,7 @@ jobs:
           extras: ${{ matrix.extras }}
 
       - name: Run tests
-        run: uv run python -m pytest tests -n auto --cov --cov-config=pyproject.toml --cov-report=xml
+        run: make test
 
       - name: Check typing
         run: uv run pyright
@@ -67,5 +64,5 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          slug: wh1isper/ya-agent-sdk
+          slug: wh1isper/ya-mono
         if: ${{ matrix.python-version == '3.13' && matrix.extras == 'all' }}

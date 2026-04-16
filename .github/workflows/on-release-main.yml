@@ -15,8 +15,8 @@ jobs:
       - name: Check out
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}  # Checkout the exact tag
-          fetch-depth: 0  # Required for uv-dynamic-versioning to detect version from tags
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
 
       - name: Set up the environment
         uses: ./.github/actions/setup-python-env
@@ -25,38 +25,38 @@ jobs:
         run: bash scripts/sync-skills.sh
 
       - name: Build all packages
-        run: uv build --all-packages
+        run: uv build --all-packages -o dist
 
       - name: Inspect package version
         id: inspect_package
         run: |
-          version=$(uvx --with uv-dynamic-versioning hatchling version)
+          version=$(cd packages/ya-agent-sdk && uvx --with uv-dynamic-versioning hatchling version)
           echo "version=$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Publish packages to PyPI
-        run: uv publish
+        run: uv publish dist/*
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
 
       - name: Upload dists to release
         uses: svenstaro/upload-release-action@v2
         with:
-            repo_token: ${{ secrets.GITHUB_TOKEN }}
-            file: dist/*
-            file_glob: true
-            tag: ${{ github.ref }}
-            overwrite: true
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: dist/*
+          file_glob: true
+          tag: ${{ github.ref }}
+          overwrite: true
 
       - name: Create SKILL.zip
         run: |
-          cp -r yaacli/yaacli/skills/building-agents ya-agent-sdk
+          cp -r packages/yaacli/yaacli/skills/building-agents ya-agent-sdk
           zip -r SKILL.zip ya-agent-sdk
 
       - name: Upload SKILL.zip to release
         uses: svenstaro/upload-release-action@v2
         with:
-            repo_token: ${{ secrets.GITHUB_TOKEN }}
-            file: SKILL.zip
-            tag: ${{ github.ref }}
-            overwrite: true
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: SKILL.zip
+          tag: ${{ github.ref }}
+          overwrite: true

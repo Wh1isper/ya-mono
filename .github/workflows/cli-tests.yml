@@ -5,11 +5,21 @@ on:
     branches:
       - main
     paths:
-      - "yaacli/**"
+      - "packages/yaacli/**"
+      - "packages/ya-agent-sdk/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/cli-tests.yml"
+      - ".github/actions/setup-python-env/**"
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - "yaacli/**"
+      - "packages/yaacli/**"
+      - "packages/ya-agent-sdk/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/cli-tests.yml"
+      - ".github/actions/setup-python-env/**"
 
 jobs:
   cli-tests:
@@ -34,4 +44,4 @@ jobs:
           extras: "all"
 
       - name: Run CLI tests
-        run: uv run python -m pytest yaacli/tests -n auto
+        run: uv run python -m pytest packages/yaacli/tests -n auto

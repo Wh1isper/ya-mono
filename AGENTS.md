@@ -1,283 +1,172 @@
-## Project Overview
+## Repository Overview
 
-**ya-agent-sdk** is an application framework for building AI agents with [Pydantic AI](https://ai.pydantic.dev/). It provides environment abstractions, session management, and hierarchical agent patterns.
+`ya-mono` is a workspace-first monorepo managed with `uv`.
+
+Workspace members:
+
+- `packages/ya-agent-sdk` — SDK for building AI agents with Pydantic AI
+- `packages/yaacli` — TUI reference implementation built on top of the SDK
+
+Shared repository areas:
+
+- `docs/` — shared documentation referenced by the SDK package and skill bundle
+- `examples/` — runnable examples for the SDK
+- `scripts/` — repository automation scripts
+- `.github/` — CI and release workflows
+
+## Primary Package Focus
+
+Most architecture work in this repository targets `packages/ya-agent-sdk`.
 
 - **Language**: Python 3.11+
 - **Package Manager**: uv
 - **Build System**: hatchling
 
-## Key Features
+## SDK Package Structure
 
-- **Environment-based Architecture**: Inject file operations, shell access, and resources via `Environment` for clean separation of concerns (LocalEnvironment, SandboxEnvironment)
-- **Resumable Sessions**: Export/restore `AgentContext` state for multi-turn conversations across restarts
-- **Hierarchical Agents**: Subagent system with task delegation, tool inheritance, and markdown-based configuration
-- **Skills System**: Markdown-based instruction files with hot reload and progressive loading
-- **Human-in-the-Loop**: Built-in approval workflows for sensitive tool operations
-- **Toolset Architecture**: Extensible tool system with pre/post hooks for logging, validation, and error handling
-- **Resumable Resources**: Export and restore resource states (like browser sessions) across process restarts
-- **Browser Automation**: Docker-based headless Chrome sandbox for safe browser automation
-- **Streaming Support**: Real-time streaming of agent responses and tool executions
-
-## Project Structure
-
+```text
+packages/ya-agent-sdk/
+├── pyproject.toml
+├── README.md
+├── SKILL.md
+├── tests/
+│   ├── agents/
+│   ├── environment/
+│   ├── filters/
+│   ├── sandbox/
+│   ├── subagents/
+│   └── toolsets/
+└── ya_agent_sdk/
+    ├── agents/
+    ├── context/
+    ├── environment/
+    ├── filters/
+    ├── sandbox/
+    ├── stream/
+    ├── subagents/
+    ├── toolsets/
+    ├── _config.py
+    ├── _logger.py
+    ├── events.py
+    ├── media.py
+    ├── presets.py
+    ├── usage.py
+    └── utils.py
 ```
-ya_agent_sdk/
-├── agents/                # Agent implementations
-│   ├── main.py            # create_agent, stream_agent entry points
-│   ├── compact.py         # Compact agent variant
-│   ├── image_understanding.py  # Image understanding agent
-│   ├── video_understanding.py  # Video understanding agent
-│   ├── audio_understanding.py  # Audio understanding agent
-│   └── models/            # Model configuration and inference
-│
-├── context.py             # AgentContext, ModelConfig, ToolConfig, ResumableState
-│
-├── environment/           # Environment management
-│   ├── base.py            # Environment ABC, FileOperator, Shell, ResourceRegistry, BaseResource
-│   ├── composite.py       # CompositeFileOperator for multi-backend VFS routing
-│   ├── local.py           # LocalEnvironment, LocalFileOperator, VirtualLocalFileOperator
-│   └── sandbox.py         # SandboxEnvironment, DockerShell
-│
-├── toolsets/              # Tool implementations
-│   ├── core/              # Core toolsets collection
-│   │   ├── base.py        # BaseTool, Toolset, GlobalHooks (base classes)
-│   │   ├── content/       # Content loading tools
-│   │   ├── context/       # Context management tools (summarize)
-│   │   ├── document/      # Document processing tools
-│   │   ├── enhance/       # Enhancement tools (todo, thinking)
-│   │   ├── filesystem/    # File system operation tools
-│   │   ├── multimodal/    # Multimodal tools (read_image, read_video, read_audio)
-│   │   ├── shell/         # Shell command execution tools
-│   │   ├── subagent/      # Subagent delegation tools
-│   │   └── web/           # Web interaction tools
-│   └── browser_use/       # Browser automation toolset (independent)
-│
-├── subagents/             # Subagent system
-│   ├── config.py          # SubagentConfig parsing
-│   ├── factory.py         # Subagent tool factory functions
-│   └── presets/           # Built-in subagent presets
-│       ├── debugger.md    # Debugging specialist
-│       ├── explorer.md    # Codebase exploration specialist
-│       ├── searcher.md    # Search specialist
-│       └── code-reviewer.md # Code review specialist
-│
-├── filters/               # Message history processors
-│   ├── handoff.py         # Handoff message processing
-│   ├── image.py           # Image filtering
-│   ├── system_prompt.py   # System prompt filtering
-│   └── tool_args.py       # Tool argument fixing
-│
-├── sandbox/               # Sandbox environments
-│   └── browser/           # Browser sandbox
-│
-├── skills/                # Skill definitions
-│   └── checkpointing/     # Checkpointing skill
-│
-├── stream/                # Stream processing
-├── presets.py             # Preset configurations (model settings, etc.)
-├── usage.py               # Usage tracking models (InternalUsage, ExtraUsageRecord)
-├── utils.py               # Utility functions
-└── _logger.py             # Centralized logging
 
-tests/                     # Test suite (pytest)
-├── environment/           # Environment tests
-├── filters/               # Filter tests
-├── sandbox/               # Sandbox tests
-├── subagents/             # Subagent tests
-└── toolsets/              # Toolset tests
+## CLI Package Structure
+
+```text
+packages/yaacli/
+├── pyproject.toml
+├── README.md
+├── LICENSE
+├── tests/
+├── spec/
+└── yaacli/
+    ├── background.py
+    ├── browser.py
+    ├── cli.py
+    ├── config.py
+    ├── display.py
+    ├── environment.py
+    ├── events.py
+    ├── guards.py
+    ├── hooks.py
+    ├── logging.py
+    ├── mcp.py
+    ├── runtime.py
+    ├── session.py
+    └── usage.py
 ```
+
+## Key SDK Features
+
+- Environment-based architecture via `Environment`
+- Resumable sessions with `AgentContext` state export and restore
+- Hierarchical agents and markdown-configured subagents
+- Skills system with hot reload and progressive loading
+- Human-in-the-loop approval workflows
+- Extensible toolset architecture with hooks
+- Resumable resources for long-lived browser or external sessions
+- Browser automation through sandbox integration
+- Streaming support with lifecycle and event hooks
 
 ## Development Workflow
 
-After modifying any code:
+After changing code, run:
 
-1. `make lint` - Quick formatting and auto-fix (ruff + pre-commit)
-2. `make check` - Full validation (lock file, pre-commit, Pyright type checking, deptry)
-3. `make test` - Run test suite with coverage
+1. `make lint`
+2. `make check`
+3. `make test`
 
-## Key Commands
+Useful commands:
 
-| Command         | Description                                         |
-| --------------- | --------------------------------------------------- |
-| `make install`  | Create venv with uv and install pre-commit hooks    |
-| `make lint`     | Run pre-commit linters (ruff format/lint)           |
-| `make check`    | Full validation: lint + pyright + deptry            |
-| `make test`     | Run pytest with coverage (inline snapshot disabled) |
-| `make test-fix` | Run pytest with inline snapshot update enabled      |
-| `make build`    | Build wheel file                                    |
+| Command          | Description                                          |
+| ---------------- | ---------------------------------------------------- |
+| `make install`   | Sync the full workspace and install pre-commit hooks |
+| `make lint`      | Run pre-commit linters                               |
+| `make check`     | Lock validation, lint, pyright, deptry               |
+| `make test`      | Run SDK and CLI tests                                |
+| `make test-sdk`  | Run SDK tests only                                   |
+| `make test-cli`  | Run CLI tests only                                   |
+| `make build`     | Build the `ya-agent-sdk` package                     |
+| `make build-all` | Build both workspace packages                        |
+| `make cli`       | Sync skill assets and launch the CLI                 |
 
 ## Code Style
 
-- **Formatter**: ruff (line-length: 120)
-- **Type Checking**: pyright (standard mode)
-- **Target Python**: 3.11
-- **Import Style**: All imports must be at module level (top of file). Do not use function-level imports except within `TYPE_CHECKING` blocks for avoiding circular dependencies.
-
-## Testing
-
-- Framework: pytest with pytest-asyncio
-- Coverage: pytest-cov
-- Test location: `tests/`
-- **Test Style**: Use standalone functions (not classes). Prefer `def test_xxx()` over `class TestXxx`.
-
-## Dependencies
-
-Core dependencies:
-
-- pydantic-ai-slim (AI agent framework)
-- pydantic / pydantic-settings (data validation and configuration)
-- httpx, anyio (async HTTP and concurrency)
-- cdp-use (browser automation)
-- pillow (image processing)
-- jinja2 (template rendering for tool instructions)
-
-Optional dependencies:
-
-- `docker` - Docker sandbox support
-- `web` - Web tools (tavily-python, firecrawl-py, markitdown)
-- `document` - Document processing (pymupdf, markitdown)
+- Formatter: `ruff` with line length `120`
+- Type checking: `pyright` in standard mode
+- Target Python: `3.11`
+- Imports stay at module top level except `TYPE_CHECKING` blocks for cycle avoidance
+- Tests use standalone functions such as `def test_xxx()`
 
 ## Environment Configuration
 
-API keys and settings are loaded from environment variables or `.env` file via `pydantic-settings`. See `.env.example` for all available variables.
+Environment variables are loaded via `pydantic-settings` from the process environment or `.env` files.
 
-**Important**: When adding or modifying environment variables, always update `.env.example` as the single source of truth.
+- Repository example env file: `.env.example`
+- Example runtime env file: `examples/.env.example`
 
-## Architecture Reference
+Keep `.env.example` updated when environment variables change.
 
-### AgentContext and Sessions
+## Documentation Map
 
-See [docs/context.md](docs/context.md) for details:
+Shared docs live in `docs/`.
 
-- Session state management (run_id, timing, user prompts)
-- Resumable sessions with `export_state()` and `with_state()`
-- Extending `AgentContext` and `ResumableState` for custom fields
-- Using `create_agent` with `state` parameter for session restoration
-
-### Streaming and Hooks
-
-See [docs/streaming.md](docs/streaming.md) for details:
-
-- `stream_agent` for real-time event streaming
-- Lifecycle hooks: `on_runtime_ready`, `on_agent_start`, `on_agent_complete`
-- Node/Event hooks: `pre_node_hook`, `post_node_hook`, `pre_event_hook`, `post_event_hook`
-- Hook context classes: `RuntimeReadyContext`, `AgentStartContext`, `AgentCompleteContext`, `NodeHookContext`, `EventHookContext`
-- Interruption and error handling
-
-### Events
-
-See [docs/events.md](docs/events.md) for details:
-
-- Lifecycle events: `AgentExecutionStartEvent`, `ModelRequestStartEvent`, `ToolCallsStartEvent`, etc.
-- Sideband events: compact, summarize, subagent, message bus events
-- Event correlation via `event_id`
-- Creating custom events
-
-### Tool Search
-
-See [docs/tool-search.md](docs/tool-search.md) for details:
-
-- `ToolSearchToolSet` wrapper for dynamic tool loading
-- `KeywordSearchStrategy` (default, zero deps) and `EmbeddingSearchStrategy` (FastEmbed)
-- Category/namespace support for tool organization
-- Per-session state management for loaded tools
-
-### Toolset Architecture
-
-See [docs/toolset.md](docs/toolset.md) for details:
-
-- Creating custom tools with `BaseTool`
-- Hook system (pre/post hooks, global hooks)
-- Error handling in post-hooks (exceptions as results)
-- Extending `Toolset` via `_call_tool_func` for timeout/retry/custom logic
-
-### Subagent System
-
-See [docs/subagent.md](docs/subagent.md) for details:
-
-- Hierarchical agent architecture and task delegation
-- Markdown configuration format (YAML frontmatter + system prompt)
-- Tool inheritance and availability rules
-- Built-in presets (debugger, explorer, searcher, code-reviewer)
-
-### Message Bus
-
-See [docs/message-bus.md](docs/message-bus.md) for details:
-
-- Inter-agent communication with one-time consumption
-- User steering during agent execution
-- Async agent systems and background process coordination
-
-### Skills System
-
-See [docs/skills.md](docs/skills.md) for details:
-
-- Markdown-based instruction files with YAML frontmatter
-- Progressive loading (frontmatter only until activation)
-- Hot reload with frontmatter change detection
-- Pre-scan hook for external skill synchronization
-
-### Environment Management
-
-See [docs/environment.md](docs/environment.md) for details:
-
-- Environment ABC: FileOperator, Shell, ResourceRegistry
-- `_setup`/`_teardown` pattern for custom environments
-- `LocalEnvironment` and `SandboxEnvironment` usage
-- `AsyncExitStack` for managing dependent context managers
-
-### Resumable Resources
-
-See [docs/resumable-resources.md](docs/resumable-resources.md) for details:
-
-- `Resource` protocol (requires `close()`) and `ResumableResource` protocol (adds `export_state`/`restore_state`)
-- `BaseResource` abstract base class with async `close()` and default export/restore
-- Factory-based resource creation and lazy initialization
-- State export/restore for session persistence across restarts
-
-### Model Configuration
-
-See [docs/model.md](docs/model.md) for details:
-
-- Native pydantic-ai model strings (direct provider connection)
-- Gateway mode (route requests through unified gateway)
-- Sticky routing and extra headers
-
-### Logging
-
-See [docs/logging.md](docs/logging.md) for details:
-
-- Global log level: `YA_AGENT_LOG_LEVEL`
-- Module-specific log levels: `YA_AGENT_LOG_LEVEL_<MODULE_PATH>`
-- Use `get_logger(__name__)` to obtain logger
+- `docs/context.md`
+- `docs/streaming.md`
+- `docs/events.md`
+- `docs/tool-search.md`
+- `docs/toolset.md`
+- `docs/subagent.md`
+- `docs/message-bus.md`
+- `docs/skills.md`
+- `docs/environment.md`
+- `docs/resumable-resources.md`
+- `docs/model.md`
+- `docs/logging.md`
 
 ## Prompt Design
 
-Prompt documents should follow a **single-layer XML style** similar to the project system prompt conventions.
+Prompt documents follow a single-layer XML style.
 
-### Rules
+Rules:
 
-- Use one clear top-level tag per logical block (no deep nesting by default).
-- Avoid unnecessary tags; add tags only when they provide clear structural value.
-- Prefer semantic, stable tag names (e.g., `<identity>`, `<tool_usage>`, `<safety>`).
-- Keep each block focused on one concern and keep instructions concise.
-- Use Markdown lists and short paragraphs inside tags instead of creating many micro-tags.
-- Do not encode presentation details in tags; tags are for meaning, not styling.
+- Use one clear top-level tag per logical block
+- Prefer stable semantic tag names such as `<identity>` and `<tool_usage>`
+- Keep each block focused on one concern
+- Use Markdown lists inside tags instead of deeply nested XML
+- Use tags for meaning and structure
 
-## Examples
+## Notes For Repository Changes
 
-| Example                                     | Description                                                               |
-| ------------------------------------------- | ------------------------------------------------------------------------- |
-| [general.py](examples/general.py)           | Complete production pattern with streaming, HITL, and session persistence |
-| [deepresearch.py](examples/deepresearch.py) | Autonomous research agent with web search and content extraction          |
-| [browser_use.py](examples/browser_use.py)   | Browser automation with Docker-based headless Chrome sandbox              |
+When editing workspace metadata, keep these files aligned:
 
-## Quick Start
-
-```python
-from ya_agent_sdk.agents import create_agent
-
-async with create_agent("openai:gpt-4o") as runtime:
-    result = await runtime.agent.run("Hello", deps=runtime.ctx)
-    print(result.output)
-```
+- `pyproject.toml`
+- `packages/ya-agent-sdk/pyproject.toml`
+- `packages/yaacli/pyproject.toml`
+- `Makefile`
+- `.github/workflows/*.yml`
+- `README.md` and package READMEs

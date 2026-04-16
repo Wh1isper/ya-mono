@@ -1,130 +1,63 @@
-# Ya Agent SDK
+# ya-mono
 
-> Yet Another Agent SDK
+Workspace-first monorepo for the Yet Another Agents project.
 
-[![Release](https://img.shields.io/github/v/release/wh1isper/ya-agent-sdk)](https://img.shields.io/github/v/release/wh1isper/ya-agent-sdk)
-[![Build status](https://img.shields.io/github/actions/workflow/status/wh1isper/ya-agent-sdk/main.yml?branch=main)](https://github.com/wh1isper/ya-agent-sdk/actions/workflows/main.yml?query=branch%3Amain)
-[![codecov](https://codecov.io/gh/wh1isper/ya-agent-sdk/branch/main/graph/badge.svg)](https://codecov.io/gh/wh1isper/ya-agent-sdk)
-[![Commit activity](https://img.shields.io/github/commit-activity/m/wh1isper/ya-agent-sdk)](https://img.shields.io/github/commit-activity/m/wh1isper/ya-agent-sdk)
-[![License](https://img.shields.io/github/license/wh1isper/ya-agent-sdk)](https://img.shields.io/github/license/wh1isper/ya-agent-sdk)
+[![Release](https://img.shields.io/github/v/release/wh1isper/ya-mono)](https://github.com/wh1isper/ya-mono/releases)
+[![Build status](https://img.shields.io/github/actions/workflow/status/wh1isper/ya-mono/main.yml?branch=main)](https://github.com/wh1isper/ya-mono/actions/workflows/main.yml?query=branch%3Amain)
+[![codecov](https://codecov.io/gh/wh1isper/ya-mono/branch/main/graph/badge.svg)](https://codecov.io/gh/wh1isper/ya-mono)
+[![License](https://img.shields.io/github/license/wh1isper/ya-mono)](https://github.com/wh1isper/ya-mono/blob/main/LICENSE)
 
-Yet Another Agent SDK for building AI agents with [Pydantic AI](https://ai.pydantic.dev/). Used at my homelab for research and prototyping.
+## Packages
 
-## Key Features
+- [`packages/ya-agent-sdk`](packages/ya-agent-sdk) — Python SDK for building AI agents with Pydantic AI
+- [`packages/yaacli`](packages/yaacli) — TUI reference implementation built on top of `ya-agent-sdk`
 
-- **Environment-based Architecture**: Protocol-based design for file operations, shell access, and resources. Built-in `LocalEnvironment` and `SandboxEnvironment`, easily extensible for custom backends (SSH, S3, cloud VMs, etc.)
-- **Fully Typed**: Complete type annotations validated with pyright (standard mode). Enjoy full IDE autocompletion and catch errors before runtime
-- **Resumable Sessions**: Export and restore `AgentContext` state for multi-turn conversations across restarts
-- **Hierarchical Agents**: Subagent system with task delegation, tool inheritance, and markdown-based configuration
-- **Tool Search**: Dynamic tool discovery for large tool libraries -- agents find and load only the tools they need, reducing context bloat by 85%+ while maintaining accuracy across hundreds of tools
-- **Skills System**: Markdown-based instruction files with hot reload and progressive loading
-- **Human-in-the-Loop**: Built-in approval workflows for sensitive tool operations
-- **Toolset Architecture**: Extensible tool system with pre/post hooks for logging, validation, and error handling
-- **Event System**: Lifecycle and sideband events for execution tracking, with streaming support for real-time monitoring
-- **Media Upload**: Pluggable media upload (S3, custom backends) with automatic binary-to-URL conversion for images and videos
-- **Message Bus**: Inter-agent communication with subscriber-based delivery, supporting multimodal content and user steering
-- **Resumable Resources**: Export and restore resource states (like browser sessions) across process restarts
-- **Browser Automation**: Docker-based headless Chrome sandbox for safe browser automation
-- **Streaming Support**: Real-time streaming of agent responses and tool executions
+## Repository Layout
 
-## Installation
-
-```bash
-# Recommended: install with all optional dependencies
-pip install ya-agent-sdk[all]
-uv add ya-agent-sdk[all]
-
-# Or install individual extras as needed
-pip install ya-agent-sdk[docker]       # Docker sandbox support
-pip install ya-agent-sdk[web]          # Web tools (tavily, firecrawl, markitdown)
-pip install ya-agent-sdk[document]     # Document processing (pymupdf, markitdown)
-pip install ya-agent-sdk[s3]           # S3 media upload (boto3)
-pip install ya-agent-sdk[tool-search]  # Semantic tool search (fastembed)
-```
-
-## Project Structure
-
-This repository contains:
-
-- **ya_agent_sdk/** - Core SDK with environment abstraction, toolsets, and session management
-- **yaacli/** - Reference CLI implementation with TUI for interactive agent sessions
-- **examples/** - Code examples demonstrating SDK features
-- **docs/** - Documentation for SDK architecture and APIs
+- [`packages/`](packages/) — publishable workspace members
+- [`docs/`](docs/) — shared documentation used by the SDK and skill bundle
+- [`examples/`](examples/) — runnable SDK examples
+- [`scripts/`](scripts/) — repository automation scripts
+- [`.github/`](.github/) — CI and release workflows
 
 ## Quick Start
 
-### Using the SDK
-
-```python
-from ya_agent_sdk.agents import create_agent, stream_agent
-
-# create_agent returns AgentRuntime (not a context manager)
-runtime = create_agent("openai:gpt-4o")
-
-# stream_agent manages runtime lifecycle automatically
-async with stream_agent(runtime, "Hello") as streamer:
-    async for event in streamer:
-        print(event)
+```bash
+git clone git@github.com:YOUR_NAME/ya-mono.git
+cd ya-mono
+uv sync --all-packages
 ```
 
-### Using YAACLI CLI
-
-For a ready-to-use terminal interface, try [yaacli](yaacli/README.md) - a TUI reference implementation built on top of ya-agent-sdk:
+Run checks:
 
 ```bash
-# Run directly with uvx (no installation needed)
-uvx yaacli
-
-# Or install globally
-uv tool install yaacli
-pip install yaacli
+make check
+make test
 ```
 
-Features:
+Run the CLI:
 
-- Rich terminal UI with syntax highlighting and streaming output
-- Built-in tool approval workflows (human-in-the-loop)
-- Session management with conversation history
-- Browser automation support via Docker sandbox
-- MCP (Model Context Protocol) server integration
+```bash
+make cli
+```
 
-## Examples
+## Package Guides
 
-Check out the [examples/](examples/) directory:
+- [ya-agent-sdk README](packages/ya-agent-sdk/README.md)
+- [yaacli README](packages/yaacli/README.md)
+- [Contributing Guide](CONTRIBUTING.md)
 
-| Example                                     | Description                                                             |
-| ------------------------------------------- | ----------------------------------------------------------------------- |
-| [general.py](examples/general.py)           | Complete pattern with streaming, HITL approval, and session persistence |
-| [deepresearch.py](examples/deepresearch.py) | Autonomous research agent with web search and content extraction        |
-| [browser_use.py](examples/browser_use.py)   | Browser automation with Docker-based headless Chrome sandbox            |
+## Workspace Commands
 
-## For Agent Users
+| Command          | Description                                                      |
+| ---------------- | ---------------------------------------------------------------- |
+| `make install`   | Sync the workspace and install pre-commit hooks                  |
+| `make lint`      | Run pre-commit hooks across the repository                       |
+| `make check`     | Run lock validation, lint, pyright, and deptry for both packages |
+| `make test`      | Run SDK and CLI tests                                            |
+| `make build`     | Build the `ya-agent-sdk` distribution                            |
+| `make build-all` | Build distributions for all workspace packages                   |
 
-If you're using an AI agent (e.g., Claude, Cursor) that supports skills:
+## License
 
-- **Clone this repo**: The [SKILL.md](SKILL.md) file in the repository root provides comprehensive guidance for agents
-- **Download release package**: Get the latest `SKILL.zip` from the [Releases](https://github.com/wh1isper/ya-agent-sdk/releases) page (automatically built during each release)
-
-## Configuration
-
-Copy `examples/.env.example` to `examples/.env` and configure your API keys.
-
-## Documentation
-
-- [AgentContext & Sessions](docs/context.md) - Session state, resumable sessions, extending context
-- [Streaming & Hooks](docs/streaming.md) - Real-time streaming, lifecycle hooks, event handling
-- [Events](docs/events.md) - Lifecycle events, sideband events, event correlation, custom events
-- [Toolset Architecture](docs/toolset.md) - Create tools, use hooks, handle errors, extend Toolset
-- [Tool Search](docs/tool-search.md) - Dynamic tool discovery with keyword and embedding search strategies
-- [Subagent System](docs/subagent.md) - Hierarchical agents, builtin presets, markdown configuration
-- [Skills System](docs/skills.md) - Markdown-based skills, hot reload, pre-scan hooks
-- [Message Bus](docs/message-bus.md) - Inter-agent communication, multimodal messages, user steering
-- [Media Upload](docs/media.md) - S3 media upload, custom backends, history filter integration
-- [Custom Environments](docs/environment.md) - Environment lifecycle, resource management
-- [Resumable Resources](docs/resumable-resources.md) - Export and restore resource states across restarts
-- [Model Configuration](docs/model.md) - Provider setup, gateway mode
-- [Logging Configuration](docs/logging.md) - Configure SDK logging levels
-
-## Development
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+BSD 3-Clause License. See [LICENSE](LICENSE).

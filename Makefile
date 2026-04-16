@@ -1,75 +1,80 @@
 .PHONY: install
-install: ## Install the virtual environment and install the pre-commit hooks
-	@echo "🚀 Creating virtual environment using uv"
+install: ## Install the workspace virtual environment and pre-commit hooks
+	@echo "Creating workspace environment using uv"
 	@uv sync --all-packages
 	@uv run pre-commit install
 
 .PHONY: lint
 lint: ## Lint the code
-	@echo "🚀 Checking lock file consistency with 'pyproject.toml'"
+	@echo "Checking lock file consistency with pyproject.toml"
 	@uv lock --locked
-	@echo "🚀 Linting code: Running pre-commit"
+	@echo "Running pre-commit"
 	@uv run pre-commit run -a
 
 .PHONY: cli
 cli: ## Run the CLI
-	@echo "🚀 Running yaacli CLI"
+	@echo "Running yaacli"
 	@./scripts/sync-skills.sh
-	@rm -f yaacli.log && YAACLI_PERF=1 uv run yaacli -v
+	@rm -f yaacli.log && YAACLI_PERF=1 uv run --package yaacli yaacli -v
 
 .PHONY: check
-check: ## Run code quality tools.
-	@echo "🚀 Checking lock file consistency with 'pyproject.toml'"
+check: ## Run code quality tools for all packages
+	@echo "Checking lock file consistency with pyproject.toml"
 	@uv lock --locked
-	@echo "🚀 Linting code: Running pre-commit"
+	@echo "Running pre-commit"
 	@uv run pre-commit run -a
-	@echo "🚀 Static type checking: Running pyright"
+	@echo "Running pyright"
 	@uv run pyright
-	@echo "🚀 Checking for obsolete dependencies: Running deptry"
-	@uv run deptry ya_agent_sdk
+	@echo "Running deptry for ya-agent-sdk"
+	@(cd packages/ya-agent-sdk && uv run --package ya-agent-sdk deptry ya_agent_sdk)
+	@echo "Running deptry for yaacli"
+	@(cd packages/yaacli && uv run --package yaacli deptry yaacli)
 
 .PHONY: test
-test: ## Test the code with pytest
-	@echo "🚀 Testing code: Running pytest"
-	@uv run python -m pytest tests -n auto -vv --inline-snapshot=disable --cov --cov-config=pyproject.toml --cov-report term-missing
+test: ## Run SDK and CLI tests
+	@echo "Running pytest for workspace packages"
+	@uv run python -m pytest packages/ya-agent-sdk/tests packages/yaacli/tests -n auto -vv --inline-snapshot=disable --cov --cov-config=pyproject.toml --cov-report term-missing
+
+.PHONY: test-sdk
+test-sdk: ## Run SDK tests
+	@echo "Running SDK pytest"
+	@uv run python -m pytest packages/ya-agent-sdk/tests -n auto -vv --inline-snapshot=disable --cov --cov-config=pyproject.toml --cov-report term-missing
 
 .PHONY: test-cli
-test-cli: ## Test cli
-	@echo "🚀 Testing code: Running pytest"
-	@uv run python -m pytest yaacli/tests -n auto -vv --inline-snapshot=disable
-
+test-cli: ## Run CLI tests
+	@echo "Running CLI pytest"
+	@uv run python -m pytest packages/yaacli/tests -n auto -vv --inline-snapshot=disable
 
 .PHONY: test-fix
-test-fix: ## Test and auto-fix inline snapshots
-	@echo "🚀 Testing code with inline-snapshot fix: Running pytest"
-	@uv run python -m pytest tests -vv --inline-snapshot=fix
+test-fix: ## Run pytest with inline snapshot updates
+	@echo "Running pytest with inline snapshot updates"
+	@uv run python -m pytest packages/ya-agent-sdk/tests packages/yaacli/tests -vv --inline-snapshot=fix
 
 .PHONY: build
-build: clean-build ## Build wheel file for ya-agent-sdk only
-	@echo "🚀 Creating wheel file"
-	@uvx --from build pyproject-build --installer uv
+build: clean-build ## Build ya-agent-sdk distribution
+	@echo "Building ya-agent-sdk"
+	@uv build --package ya-agent-sdk -o dist
 
 .PHONY: build-all
-build-all: clean-build ## Build wheel files for all packages in monorepo
-	@echo "🚀 Creating wheel files for all packages"
-	@uv build --all-packages
+build-all: clean-build ## Build distributions for all packages
+	@echo "Building workspace packages"
+	@uv build --all-packages -o dist
 
 .PHONY: clean-build
 clean-build: ## Clean build artifacts
-	@echo "🚀 Removing build artifacts"
-	@uv run python -c "import shutil; import os; shutil.rmtree('dist') if os.path.exists('dist') else None"
+	@echo "Removing build artifacts"
+	@uv run python -c "from pathlib import Path; import shutil; [shutil.rmtree(path) for path in map(Path, ['dist', 'packages/ya-agent-sdk/dist', 'packages/yaacli/dist']) if path.exists()]"
 
 .PHONY: publish
-publish: ## Publish a release to PyPI.
-	@echo "🚀 Publishing."
-	@uvx twine upload --repository-url https://upload.pypi.org/legacy/ dist/*
+publish: ## Publish built distributions to PyPI
+	@echo "Publishing distributions"
+	@uv publish dist/*
 
 .PHONY: build-and-publish
 build-and-publish: build publish ## Build and publish.
 
 .PHONY: help
 help:
-	@uv run python -c "import re; \
-	[[print(f'\033[36m{m[0]:<20}\033[0m {m[1]}') for m in re.findall(r'^([a-zA-Z_-]+):.*?## (.*)$$', open(makefile).read(), re.M)] for makefile in ('$(MAKEFILE_LIST)').strip().split()]"
+	@uv run python -c "import re; [[print(f'\033[36m{m[0]:<20}\033[0m {m[1]}') for m in re.findall(r'^([a-zA-Z_-]+):.*?## (.*)$$', open(makefile).read(), re.M)] for makefile in ('$(MAKEFILE_LIST)').strip().split()]"
 
 .DEFAULT_GOAL := help

@@ -15,6 +15,7 @@ resolution-markers = [
 [manifest]
 members = [
     "ya-agent-sdk",
+    "ya-mono",
     "yaacli",
 ]
 
@@ -504,14 +505,14 @@ name = "cohere"
 version = "5.21.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "fastavro" },
-    { name = "httpx" },
-    { name = "pydantic" },
-    { name = "pydantic-core" },
-    { name = "requests" },
-    { name = "tokenizers" },
-    { name = "types-requests" },
-    { name = "typing-extensions" },
+    { name = "fastavro", marker = "python_full_version >= '3.13' or sys_platform != 'emscripten'" },
+    { name = "httpx", marker = "python_full_version >= '3.13' or sys_platform != 'emscripten'" },
+    { name = "pydantic", marker = "python_full_version >= '3.13' or sys_platform != 'emscripten'" },
+    { name = "pydantic-core", marker = "python_full_version >= '3.13' or sys_platform != 'emscripten'" },
+    { name = "requests", marker = "python_full_version >= '3.13' or sys_platform != 'emscripten'" },
+    { name = "tokenizers", marker = "python_full_version >= '3.13' or sys_platform != 'emscripten'" },
+    { name = "types-requests", marker = "python_full_version >= '3.13' or sys_platform != 'emscripten'" },
+    { name = "typing-extensions", marker = "python_full_version >= '3.13' or sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d2/75/4c346f6e2322e545f8452692304bd4eca15a2a0209ab9af6a0d1a7810b67/cohere-5.21.1.tar.gz", hash = "sha256:e5ade4423b928b01ff2038980e1b62b2a5bb412c8ab83e30882753b810a5509f", size = 191272 }
 wheels = [
@@ -3751,7 +3752,7 @@ name = "types-requests"
 version = "2.33.0.20260408"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "urllib3" },
+    { name = "urllib3", marker = "python_full_version >= '3.13' or sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/69/6a/749dc53a54a3f35842c1f8197b3ca6b54af6d7458a1bfc75f6629b6da666/types_requests-2.33.0.20260408.tar.gz", hash = "sha256:95b9a86376807a216b2fb412b47617b202091c3ea7c078f47cc358d5528ccb7b", size = 23882 }
 wheels = [
@@ -4058,7 +4059,7 @@ wheels = [
 
 [[package]]
 name = "ya-agent-sdk"
-source = { editable = "." }
+source = { editable = "packages/ya-agent-sdk" }
 dependencies = [
     { name = "anyio" },
     { name = "cdp-use" },
@@ -4210,8 +4211,13 @@ dev = [
 ]
 
 [[package]]
+name = "ya-mono"
+version = "0.0.0"
+source = { virtual = "." }
+
+[[package]]
 name = "yaacli"
-source = { editable = "yaacli" }
+source = { editable = "packages/yaacli" }
 dependencies = [
     { name = "click" },
     { name = "pydantic" },
@@ -4228,7 +4234,7 @@ requires-dist = [
     { name = "pydantic-ai" },
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "y-agent-environment", specifier = ">=0.1.0" },
-    { name = "ya-agent-sdk", extras = ["all"], editable = "." },
+    { name = "ya-agent-sdk", extras = ["all"], editable = "packages/ya-agent-sdk" },
 ]
 
 [[package]]
