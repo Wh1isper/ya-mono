@@ -14,23 +14,23 @@ The sync flow is:
 
 ## Contents
 
-| File | Purpose |
-| --- | --- |
-| [`SKILL.md`](SKILL.md) | Main skill instructions |
-| [`context.md`](context.md) | Agent context and session reference |
-| [`streaming.md`](streaming.md) | Streaming and lifecycle hooks |
-| [`events.md`](events.md) | Event model and sideband events |
-| [`toolset.md`](toolset.md) | Toolset architecture |
-| [`tool-search.md`](tool-search.md) | Dynamic tool search |
-| [`subagent.md`](subagent.md) | Subagent architecture |
-| [`message-bus.md`](message-bus.md) | Message bus behavior |
-| [`skills.md`](skills.md) | SDK skill system internals |
-| [`environment.md`](environment.md) | Environment abstractions |
-| [`resumable-resources.md`](resumable-resources.md) | Resumable resources |
-| [`model.md`](model.md) | Model configuration |
-| [`logging.md`](logging.md) | Logging configuration |
-| [`media.md`](media.md) | Media upload |
-| [`tool-proxy.md`](tool-proxy.md) | Tool proxy |
+| File                                               | Purpose                             |
+| -------------------------------------------------- | ----------------------------------- |
+| [`SKILL.md`](SKILL.md)                             | Main skill instructions             |
+| [`context.md`](context.md)                         | Agent context and session reference |
+| [`streaming.md`](streaming.md)                     | Streaming and lifecycle hooks       |
+| [`events.md`](events.md)                           | Event model and sideband events     |
+| [`toolset.md`](toolset.md)                         | Toolset architecture                |
+| [`tool-search.md`](tool-search.md)                 | Dynamic tool search                 |
+| [`subagent.md`](subagent.md)                       | Subagent architecture               |
+| [`message-bus.md`](message-bus.md)                 | Message bus behavior                |
+| [`skills.md`](skills.md)                           | SDK skill system internals          |
+| [`environment.md`](environment.md)                 | Environment abstractions            |
+| [`resumable-resources.md`](resumable-resources.md) | Resumable resources                 |
+| [`model.md`](model.md)                             | Model configuration                 |
+| [`logging.md`](logging.md)                         | Logging configuration               |
+| [`media.md`](media.md)                             | Media upload                        |
+| [`tool-proxy.md`](tool-proxy.md)                   | Tool proxy                          |
 
 ## Examples
 

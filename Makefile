@@ -4,6 +4,16 @@ install: ## Install the workspace virtual environment and pre-commit hooks
 	@uv sync --all-packages
 	@uv run pre-commit install
 
+.PHONY: install-skills
+install-skills: ## Install bundled skills into ~/.agents/skills
+	@echo "Installing skills into $$HOME/.agents/skills"
+	@rm -rf "$$HOME/.agents/skills/agent-builder"
+	@mkdir -p "$$HOME/.agents/skills/agent-builder"
+	@cp -R skills/agent-builder/. "$$HOME/.agents/skills/agent-builder/"
+	@mkdir -p "$$HOME/.agents/skills/agent-builder/examples"
+	@cp -R examples/* "$$HOME/.agents/skills/agent-builder/examples/"
+	@cp examples/.env.example "$$HOME/.agents/skills/agent-builder/examples/"
+
 .PHONY: lint
 lint: ## Lint the code
 	@echo "Checking lock file consistency with pyproject.toml"

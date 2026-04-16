@@ -54,14 +54,15 @@ make cli
 
 ## Workspace Commands
 
-| Command          | Description                                                      |
-| ---------------- | ---------------------------------------------------------------- |
-| `make install`   | Sync the workspace and install pre-commit hooks                  |
-| `make lint`      | Run pre-commit hooks across the repository                       |
-| `make check`     | Run lock validation, lint, pyright, and deptry for both packages |
-| `make test`      | Run SDK and CLI tests                                            |
-| `make build`     | Build the `ya-agent-sdk` distribution                            |
-| `make build-all` | Build distributions for all workspace packages                   |
+| Command               | Description                                                       |
+| --------------------- | ----------------------------------------------------------------- |
+| `make install`        | Sync the workspace and install pre-commit hooks                   |
+| `make install-skills` | Install the `agent-builder` skill bundle into `~/.agents/skills/` |
+| `make lint`           | Run pre-commit hooks across the repository                        |
+| `make check`          | Run lock validation, lint, pyright, and deptry for both packages  |
+| `make test`           | Run SDK and CLI tests                                             |
+| `make build`          | Build the `ya-agent-sdk` distribution                             |
+| `make build-all`      | Build distributions for all workspace packages                    |
 
 ## License
 
