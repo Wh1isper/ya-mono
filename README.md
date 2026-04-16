@@ -24,22 +24,62 @@
 
 - [`skills/agent-builder/`](skills/agent-builder) — source of truth for the `agent-builder` skill bundled into YAACLI
 
-## Quick Start
+## Installation
+
+Prerequisites:
+
+- Python 3.11+
+- [`uv`](https://docs.astral.sh/uv/)
+- `make`
+
+Clone the repository and install the workspace environment:
 
 ```bash
-git clone git@github.com:YOUR_NAME/ya-mono.git
+git clone https://github.com/wh1isper/ya-mono.git
 cd ya-mono
-uv sync --all-packages
+make install
 ```
 
-Run checks:
+Install the bundled `agent-builder` skill into `~/.agents/skills`:
 
 ```bash
+make install-skills
+```
+
+## Getting Started
+
+Use the repository skill source directly or install the bundled skill and point your agent at it.
+
+Recommended starting points:
+
+- Read [`skills/agent-builder/SKILL.md`](skills/agent-builder/SKILL.md) for the main agent-building workflow
+- Read [`skills/agent-builder/README.md`](skills/agent-builder/README.md) for the skill file map
+- Run examples from [`examples/`](examples/) for end-to-end usage patterns
+
+A practical flow for agent setup is:
+
+1. Run `make install`.
+2. Run `make install-skills`.
+3. Tell your agent to read `skills/agent-builder/SKILL.md` in this repository, or read the installed copy under `~/.agents/skills/agent-builder/SKILL.md`.
+4. Start from `examples/general.py`, `examples/deepresearch.py`, or `examples/browser_use.py` depending on the workflow.
+
+When you want to run the local CLI with the latest bundled skills, use:
+
+```bash
+make cli
+```
+
+## Development
+
+Run repository checks:
+
+```bash
+make lint
 make check
 make test
 ```
 
-Run the CLI:
+Run the CLI locally:
 
 ```bash
 make cli
@@ -54,15 +94,23 @@ make cli
 
 ## Workspace Commands
 
-| Command               | Description                                                       |
-| --------------------- | ----------------------------------------------------------------- |
-| `make install`        | Sync the workspace and install pre-commit hooks                   |
-| `make install-skills` | Install the `agent-builder` skill bundle into `~/.agents/skills/` |
-| `make lint`           | Run pre-commit hooks across the repository                        |
-| `make check`          | Run lock validation, lint, pyright, and deptry for both packages  |
-| `make test`           | Run SDK and CLI tests                                             |
-| `make build`          | Build the `ya-agent-sdk` distribution                             |
-| `make build-all`      | Build distributions for all workspace packages                    |
+| Command                  | Description                                                      |
+| ------------------------ | ---------------------------------------------------------------- |
+| `make install`           | Install the workspace environment and pre-commit hooks           |
+| `make install-skills`    | Install the `agent-builder` skill bundle into `~/.agents/skills` |
+| `make lint`              | Check lock consistency and run pre-commit hooks                  |
+| `make cli`               | Sync skill assets and launch `yaacli`                            |
+| `make check`             | Run lock validation, lint, pyright, and deptry for both packages |
+| `make test`              | Run SDK and CLI tests                                            |
+| `make test-sdk`          | Run SDK tests only                                               |
+| `make test-cli`          | Run CLI tests only                                               |
+| `make test-fix`          | Run tests with inline snapshot updates                           |
+| `make build`             | Build the `ya-agent-sdk` distribution                            |
+| `make build-all`         | Build distributions for all workspace packages                   |
+| `make clean-build`       | Remove build artifacts                                           |
+| `make publish`           | Publish built distributions in `dist/` to PyPI                   |
+| `make build-and-publish` | Build and publish distributions                                  |
+| `make help`              | Print available make targets                                     |
 
 ## License
 
