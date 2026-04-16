@@ -19,6 +19,20 @@ jobs:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install web dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Set up the environment
         uses: ./.github/actions/setup-python-env
 
@@ -58,7 +72,7 @@ jobs:
         run: make test
 
       - name: Check typing
-        run: uv run pyright
+        run: uv run python -m pyright
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5

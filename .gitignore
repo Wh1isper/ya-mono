@@ -146,3 +146,8 @@ ya_agent_sdk/sandbox/shell/templates/public
 
 # Sync automaticlly
 yaacli/yaacli/skills/building-agents
+
+# Frontend
+node_modules/
+apps/*/dist/
+*.tsbuildinfo
