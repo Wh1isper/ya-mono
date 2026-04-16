@@ -1,0 +1,338 @@
+# AgentContext and Session Management
+
+Session state management, resumable sessions, and extending for custom use cases.
+
+## Overview
+
+- **Session State**: Run ID, timing, user prompts, handoff messages
+- **Model Configuration**: Context window, capabilities, and model settings
+- **Tool Configuration**: API keys and tool-specific settings
+- **Resumable Sessions**: Export/restore state for session persistence
+
+```mermaid
+flowchart TB
+    subgraph Environment["Environment (long-lived)"]
+        FileOp[FileOperator]
+        Shell[Shell]
+        Resources[ResourceRegistry]
+    end
+
+    subgraph Context["AgentContext (short-lived)"]
+        State[Session State]
+        ModelCfg[ModelConfig]
+        ToolCfg[ToolConfig]
+    end
+
+    subgraph Resumable["ResumableState"]
+        SerializedHistory[Serialized History]
+        Usages[Extra Usages]
+    end
+
+    Environment --> Context
+    Context -->|export_state| Resumable
+    Resumable -->|restore| Context
+```
+
+## Basic Usage
+
+### Recommended: create_agent + stream_agent
+
+```python
+from ya_agent_sdk.agents import create_agent, stream_agent
+
+runtime = create_agent("openai:gpt-4")
+async with stream_agent(runtime, "Hello") as streamer:
+    async for event in streamer:
+        print(event)
+```
+
+### System Prompt Templates
+
+`create_agent` supports Jinja2 templating for system prompts:
+
+```python
+# Template string with variables
+runtime = create_agent(
+    "openai:gpt-4",
+    system_prompt="You are a {{ role }}. {{ instructions | default('') }}",
+    system_prompt_template_vars={"role": "code reviewer"},
+)
+
+# Default template file (prompts/main.md) with variables
+runtime = create_agent(
+    "openai:gpt-4",
+    system_prompt_template_vars={"project_name": "my-project"},
+)
+```
+
+Templates are always rendered with Jinja2, supporting conditionals and default values even when `template_vars` is empty.
+
+### Manual Context Management
+
+```python
+from ya_agent_sdk.environment import LocalEnvironment
+from ya_agent_sdk.context import AgentContext, ModelConfig, ToolConfig
+
+async with LocalEnvironment() as env:
+    async with AgentContext(
+        env=env,
+        model_cfg=ModelConfig(context_window=200000),
+        tool_config=ToolConfig(tavily_api_key="..."),
+    ) as ctx:
+        await ctx.file_operator.read_file("test.txt")
+```
+
+## Resumable Sessions
+
+Export and restore session state for multi-turn conversations across restarts.
+
+```python
+# Export
+state = ctx.export_state()
+with open("session.json", "w") as f:
+    f.write(state.model_dump_json())
+
+# Restore
+from ya_agent_sdk.context import ResumableState
+state = ResumableState.model_validate_json(Path("session.json").read_text())
+runtime = create_agent("openai:gpt-4", state=state)
+```
+
+### Export Options
+
+```python
+# Default: include subagent history, exclude extra_usages
+state = ctx.export_state()
+
+# Exclude subagent history (smaller state)
+state = ctx.export_state(include_subagent=False)
+
+# Include extra_usages for crash recovery scenarios
+state = ctx.export_state(include_extra_usages=True)
+```
+
+**Note on extra_usages**: By default, `extra_usages` is not included in exported state.
+This is because `extra_usages` is per-run billing data that callers typically handle
+after each run. Set `include_extra_usages=True` only for crash recovery scenarios
+where you need to preserve usage data from an interrupted run.
+
+The `with_state` method accepts `None` for conditional restoration:
+
+```python
+async with AgentContext(...).with_state(maybe_state) as ctx:
+    ...
+```
+
+## Configuration Classes
+
+### ModelConfig
+
+```python
+ModelConfig(
+    context_window=200000,
+    has_image_capability=True,
+    has_video_capability=False,
+)
+```
+
+### ToolConfig
+
+```python
+ToolConfig(
+    tavily_api_key="tvly-xxx",
+    firecrawl_api_key="fc-xxx",
+)
+```
+
+### Model Wrapper
+
+The `model_wrapper` field enables instrumentation of all LLM calls for observability,
+caching, rate limiting, or cost tracking. The `wrapper_metadata` field and
+`get_wrapper_metadata()` method allow customizing the context passed to the wrapper.
+
+```python
+from ya_agent_sdk.context import AgentContext, ModelWrapper
+from pydantic_ai.models import Model
+
+# Sync wrapper (recommended for create_agent)
+def my_wrapper(model: Model, agent_name: str, context: dict[str, Any]) -> Model:
+    """Wrap model with custom instrumentation.
+
+    Args:
+        model: The pydantic-ai Model to wrap.
+        agent_name: Identifier ('main', 'debugger', 'video-understanding', etc.)
+        context: From ctx.get_wrapper_metadata(). Contains built-in + custom fields.
+    """
+    return LangfuseModel(
+        model,
+        name=agent_name,
+        trace_id=context.get("run_id"),
+        span_id=context.get("agent_id"),
+        parent_span_id=context.get("parent_run_id"),
+        user_id=context.get("user_id"),
+    )
+
+# Usage with custom wrapper_metadata
+runtime = create_agent(
+    "openai:gpt-4",
+    model_wrapper=my_wrapper,
+    extra_context_kwargs={
+        "wrapper_metadata": {
+            "user_id": "user_456",
+            "tags": ["production"],
+        },
+    },
+)
+
+# Runtime modification
+ctx.wrapper_metadata["request_id"] = current_request.id
+```
+
+**Built-in context fields from `get_wrapper_metadata()`:**
+
+| Field           | Description                                          |
+| --------------- | ---------------------------------------------------- |
+| `run_id`        | Current session identifier                           |
+| `agent_id`      | Current agent identifier ("main" or "debugger-a7b9") |
+| `parent_run_id` | Parent session ID (None for main, set for subagents) |
+
+**Customizing wrapper context:**
+
+```python
+# Option 1: Set wrapper_metadata field (simple)
+ctx.wrapper_metadata = {"trace_id": "abc", "user_id": "123"}
+
+# Option 2: Override get_wrapper_metadata (advanced)
+class MyContext(AgentContext):
+    session_metadata: dict = Field(default_factory=dict)
+
+    def get_wrapper_metadata(self) -> dict[str, Any]:
+        return {
+            **super().get_wrapper_metadata(),
+            "timestamp": datetime.now().isoformat(),
+            "session": self.session_metadata,
+        }
+```
+
+**Agent name conventions:**
+
+| Context             | agent_name                                 |
+| ------------------- | ------------------------------------------ |
+| Main agent          | `"main"` or user-specified                 |
+| Subagents           | Subagent name (`"debugger"`, `"searcher"`) |
+| Video understanding | `"video-understanding"`                    |
+| Image understanding | `"image-understanding"`                    |
+| Compact filter      | `"compact"`                                |
+
+**Notes:**
+
+- `model_wrapper` and `wrapper_metadata` are excluded from serialization (not resumable)
+- In `create_agent` (sync), only sync wrappers are supported
+- In async contexts (compact, subagent, video/image), both sync and async wrappers work
+- Subagent contexts inherit `wrapper_metadata` but have their own `run_id` and `agent_id`
+
+## Extending ModelConfig and ToolConfig
+
+Both `ModelConfig` and `ToolConfig` support extension for custom settings.
+
+### Option 1: Inheritance (Recommended)
+
+For full type safety, inherit from the config class and override the field in `AgentContext`:
+
+```python
+from pydantic import Field
+from ya_agent_sdk.context import AgentContext, ToolConfig, ModelConfig
+
+class MyToolConfig(ToolConfig):
+    """Custom tool configuration with additional API keys."""
+    my_service_api_key: str | None = None
+    my_custom_setting: int = 100
+
+class MyModelConfig(ModelConfig):
+    """Custom model configuration."""
+    custom_threshold: float = 0.8
+
+class MyContext(AgentContext):
+    tool_config: MyToolConfig = Field(default_factory=MyToolConfig)
+    model_cfg: MyModelConfig = Field(default_factory=MyModelConfig)
+
+# Usage with create_agent
+runtime = create_agent(
+    "openai:gpt-4o",
+    context_type=MyContext,
+    tool_config=MyToolConfig(my_service_api_key="xxx"),
+    model_cfg=MyModelConfig(custom_threshold=0.9),
+)
+```
+
+### Option 2: Extra Attributes (Quick Prototyping)
+
+Both classes have `extra="allow"`, enabling arbitrary attributes without subclassing:
+
+```python
+# Extra attributes are accepted but not type-checked
+config = ToolConfig(
+    tavily_api_key="tvly-xxx",
+    my_custom_key="value",  # Extra attribute
+)
+
+# Access via attribute or model_extra
+config.my_custom_key  # Works at runtime
+config.model_extra["my_custom_key"]  # Also works
+```
+
+> **Note**: Option 1 is recommended for production code as it provides IDE autocomplete and type checking. Option 2 is useful for quick experiments or dynamic configuration.
+
+## ResumableState Fields
+
+| Field                       | Type                     | Description                                  |
+| --------------------------- | ------------------------ | -------------------------------------------- |
+| `subagent_history`          | `dict[str, list[dict]]`  | Serialized conversation history per subagent |
+| `extra_usages`              | `list[ExtraUsageRecord]` | Token usage records from tools/filters       |
+| `user_prompts`              | `list[str]`              | Collected user prompts                       |
+| `handoff_message`           | `str \| None`            | Context handoff message                      |
+| `context_manage_tool_names` | `list[str]`              | Active context management tool names         |
+| `need_user_approve_tools`   | `list[str]`              | Tool names requiring user approval           |
+
+### ExtraUsageRecord Fields
+
+| Field      | Type       | Description                                                           |
+| ---------- | ---------- | --------------------------------------------------------------------- |
+| `uuid`     | `str`      | Unique identifier (tool_call_id or generated UUID)                    |
+| `agent`    | `str`      | Agent name (e.g., 'compact', 'image_understanding', 'search')         |
+| `model_id` | `str`      | Model identifier (e.g., 'openai:gpt-4o', 'anthropic:claude-sonnet-4') |
+| `usage`    | `RunUsage` | Token usage from this call                                            |
+
+## Extending AgentContext
+
+Extend `AgentContext` and `ResumableState` for custom fields:
+
+```python
+class MyContext(AgentContext):
+    custom_field: str = ""
+
+    def export_state(self) -> "MyState":
+        base = super().export_state()
+        return MyState(**base.model_dump(), custom_field=self.custom_field)
+
+class MyState(ResumableState):
+    custom_field: str = ""
+
+    def restore(self, ctx: "MyContext") -> None:
+        super().restore(ctx)
+        ctx.custom_field = self.custom_field
+```
+
+> Full examples: `ya_agent_sdk/context.py`
+
+## ToolIdWrapper
+
+Normalizes tool call IDs across different model providers (OpenAI `call_`, Anthropic `toolu_`, etc.) for consistent session resumption and HITL flows.
+
+Used automatically by the SDK streaming infrastructure.
+
+## See Also
+
+- [environment.md](environment.md) - FileOperator, Shell, and ResourceRegistry
+- [toolset.md](toolset.md) - Creating and using tools
+- [y-agent-environment](https://github.com/wh1isper/y-agent-environment) - Base protocol definitions

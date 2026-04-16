@@ -1,5 +1,5 @@
 #!/bin/bash
-# Sync docs and .env.example to yaacli/yaacli/skills/building-agents
+# Sync canonical skill sources into the CLI skill bundle.
 
 set -e
 
@@ -8,14 +8,14 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
 
-SKILL_DIR="yaacli/yaacli/skills/building-agents"
+SOURCE_DIR="skills/agent-builder"
+TARGET_DIR="packages/yaacli/yaacli/skills/building-agents"
 
-rm -rf "$SKILL_DIR"
-mkdir -p "$SKILL_DIR/docs" "$SKILL_DIR/examples"
-cp -r docs/* "$SKILL_DIR/docs/"
-cp -r examples/* "$SKILL_DIR/examples/"
-cp examples/.env.example "$SKILL_DIR/examples/"
-cp README.md "$SKILL_DIR/"
-cp SKILL.md "$SKILL_DIR/"
+rm -rf "$TARGET_DIR"
+mkdir -p "$TARGET_DIR"
+cp -R "$SOURCE_DIR"/. "$TARGET_DIR"/
+mkdir -p "$TARGET_DIR/examples"
+cp -R examples/* "$TARGET_DIR/examples/"
+cp examples/.env.example "$TARGET_DIR/examples/"
 
-echo "Synced docs, examples, SKILL.md and .env.example to $SKILL_DIR"
+echo "Synced $SOURCE_DIR and repository examples into $TARGET_DIR"

@@ -1,126 +1,71 @@
-# Contributing to `ya-agent-sdk`
+# Contributing to `ya-mono`
 
-Contributions are welcome, and they are greatly appreciated!
-Every little bit helps, and credit will always be given.
-
-You can contribute in many ways:
-
-# Types of Contributions
+Contributions are welcome.
 
 ## Report Bugs
 
-Report bugs at https://github.com/wh1isper/ya-agent-sdk/issues
+Report bugs at https://github.com/wh1isper/ya-mono/issues
 
-If you are reporting a bug, please include:
+Include:
 
-- Your operating system name and version.
-- Any details about your local setup that might be helpful in troubleshooting.
-- Detailed steps to reproduce the bug.
+- operating system and version
+- local setup details that affect reproduction
+- clear reproduction steps
 
-## Fix Bugs
+## Implement Changes
 
-Look through the GitHub issues for bugs.
-Anything tagged with "bug" and "help wanted" is open to whoever wants to implement a fix for it.
+Open issues tagged `bug`, `enhancement`, or `help wanted` are good starting points.
 
-## Implement Features
+## Update References
 
-Look through the GitHub issues for features.
-Anything tagged with "enhancement" and "help wanted" is open to whoever wants to implement it.
+Repository reference material lives in `skills/agent-builder/`, package READMEs, and in-code docstrings.
 
-## Write Documentation
+## Local Setup
 
-ya-agent-sdk could always use more documentation, whether as part of the official docs, in docstrings, or even on the web in blog posts, articles, and such.
-
-## Submit Feedback
-
-The best way to send feedback is to file an issue at https://github.com/wh1isper/ya-agent-sdk/issues.
-
-If you are proposing a new feature:
-
-- Explain in detail how it would work.
-- Keep the scope as narrow as possible, to make it easier to implement.
-- Remember that this is a volunteer-driven project, and that contributions
-  are welcome :)
-
-# Get Started!
-
-Ready to contribute? Here's how to set up `ya-agent-sdk` for local development.
-Please note this documentation assumes you already have `uv` and `Git` installed and ready to go.
-
-1. Fork the `ya-agent-sdk` repo on GitHub.
-
-2. Clone your fork locally:
+1. Fork `ya-mono` on GitHub.
+2. Clone your fork.
 
 ```bash
-cd <directory_in_which_repo_should_be_created>
-git clone git@github.com:YOUR_NAME/ya-agent-sdk.git
+cd <directory>
+git clone git@github.com:YOUR_NAME/ya-mono.git
+cd ya-mono
 ```
 
-3. Now we need to install the environment. Navigate into the directory
+3. Sync the full workspace.
 
 ```bash
-cd ya-agent-sdk
+uv sync --all-packages
 ```
 
-Then, install and activate the environment with:
-
-```bash
-uv sync
-```
-
-4. Install pre-commit to run linters/formatters at commit time:
+4. Install pre-commit hooks.
 
 ```bash
 uv run pre-commit install
 ```
 
-5. Create a branch for local development:
+5. Create a branch.
 
 ```bash
-git checkout -b name-of-your-bugfix-or-feature
+git checkout -b name-of-your-change
 ```
 
-Now you can make your changes locally.
+## Validation
 
-6. Don't forget to add test cases for your added functionality to the `tests` directory.
-
-7. When you're done making changes, check that your changes pass the formatting tests.
+Run the repository checks before opening a pull request.
 
 ```bash
 make check
-```
-
-Now, validate that all unit tests are passing:
-
-```bash
 make test
 ```
 
-9. Before raising a pull request you should also run tox.
-   This will run the tests across different versions of Python:
+Package locations:
 
-```bash
-tox
-```
+- SDK: `packages/ya-agent-sdk`
+- CLI: `packages/yaacli`
+- Skill source: `skills/agent-builder`
 
-This requires you to have multiple versions of python installed.
-This step is also triggered in the CI/CD pipeline, so you could also choose to skip this step locally.
+## Pull Request Guidelines
 
-10. Commit your changes and push your branch to GitHub:
-
-```bash
-git add .
-git commit -m "Your detailed description of your changes."
-git push origin name-of-your-bugfix-or-feature
-```
-
-11. Submit a pull request through the GitHub website.
-
-# Pull Request Guidelines
-
-Before you submit a pull request, check that it meets these guidelines:
-
-1. The pull request should include tests.
-
-2. If the pull request adds functionality, the docs should be updated.
-   Put your new functionality into a function with a docstring, and add the feature to the list in `README.md`.
+1. Include tests for behavior changes.
+2. Update `skills/agent-builder/` and package READMEs when behavior or references change.
+3. Keep package metadata and workspace references aligned.
