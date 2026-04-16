@@ -18,7 +18,7 @@ This package initializes the backend service for a complete agent platform:
 ```text
 packages/ya-agent-platform/
 ├── README.md
-├── dev/
+├── infra/
 │   ├── dev.env
 │   └── docker-compose.dev.yml
 ├── pyproject.toml
@@ -43,7 +43,7 @@ From the workspace root:
 ```bash
 uv sync --all-packages
 make platform-infra-up
-set -a && source packages/ya-agent-platform/dev/dev.env && set +a
+set -a && source packages/ya-agent-platform/infra/dev.env && set +a
 uv run --package ya-agent-platform ya-agent-platform serve --reload
 ```
 
@@ -87,7 +87,7 @@ make platform-infra-status
 make platform-infra-down
 ```
 
-Default development URLs live in `packages/ya-agent-platform/dev/dev.env`.
+Default development URLs live in `packages/ya-agent-platform/infra/dev.env`.
 
 ## Combined Docker Image
 

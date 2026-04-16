@@ -62,17 +62,17 @@ platform-db-migrate: ## Generate a YA Agent Platform migration (MSG required)
 .PHONY: platform-infra-up
 platform-infra-up: ## Start YA Agent Platform dev PostgreSQL and Redis
 	@echo "Starting ya-agent-platform development infrastructure"
-	@docker compose -f packages/ya-agent-platform/dev/docker-compose.dev.yml up -d
+	@docker compose -f packages/ya-agent-platform/infra/docker-compose.dev.yml up -d
 
 .PHONY: platform-infra-down
 platform-infra-down: ## Stop YA Agent Platform dev PostgreSQL and Redis
 	@echo "Stopping ya-agent-platform development infrastructure"
-	@docker compose -f packages/ya-agent-platform/dev/docker-compose.dev.yml down
+	@docker compose -f packages/ya-agent-platform/infra/docker-compose.dev.yml down
 
 .PHONY: platform-infra-status
 platform-infra-status: ## Show YA Agent Platform dev infrastructure status
 	@echo "Showing ya-agent-platform development infrastructure status"
-	@docker compose -f packages/ya-agent-platform/dev/docker-compose.dev.yml ps
+	@docker compose -f packages/ya-agent-platform/infra/docker-compose.dev.yml ps
 
 .PHONY: web-install
 web-install: ## Install web app dependencies with corepack pnpm
