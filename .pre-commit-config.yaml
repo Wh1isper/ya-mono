@@ -21,6 +21,13 @@ repos:
         exclude: ^(packages/ya-agent-sdk/.*\.md|examples/.*\.md|packages/yaacli/.*\.md|packages/yaacli/yaacli/skills/)$
         additional_dependencies:
           [mdformat-gfm, mdformat-front-matters, mdformat-footnote]
+  - repo: local
+    hooks:
+      - id: prettier-web
+        name: prettier web files
+        entry: bash -lc 'apps/ya-agent-platform-web/node_modules/.bin/prettier --write "$@"' --
+        language: system
+        files: ^apps/ya-agent-platform-web/.*\.(ts|tsx|css|html|md)$
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: "v0.15.10"
     hooks:

@@ -1,7 +1,9 @@
 .PHONY: install
-install: ## Install the workspace virtual environment and pre-commit hooks
+install: ## Install Python, web dependencies, and pre-commit hooks
 	@echo "Creating workspace environment using uv"
 	@uv sync --all-packages
+	@echo "Installing web dependencies with corepack pnpm"
+	@corepack pnpm install
 	@uv run pre-commit install
 
 .PHONY: install-skills
@@ -27,23 +29,64 @@ cli: ## Run the CLI
 	@./scripts/sync-skills.sh
 	@rm -f yaacli.log && YAACLI_PERF=1 uv run --package yaacli yaacli -v
 
+.PHONY: run-platform
+run-platform: ## Run the YA Agent Platform backend locally
+	@echo "Running ya-agent-platform"
+	@uv run --package ya-agent-platform ya-agent-platform serve --reload
+
+.PHONY: web-install
+web-install: ## Install web app dependencies with corepack pnpm
+	@echo "Installing ya-agent-platform-web dependencies"
+	@corepack pnpm install
+
+.PHONY: web-dev
+web-dev: ## Run the YA Agent Platform web app locally
+	@echo "Running ya-agent-platform-web"
+	@corepack pnpm --dir apps/ya-agent-platform-web dev
+
+.PHONY: web-lint
+web-lint: ## Run ESLint for the platform web app
+	@echo "Running ya-agent-platform-web lint"
+	@corepack pnpm --dir apps/ya-agent-platform-web exec eslint .
+
+.PHONY: web-build
+web-build: ## Run TypeScript and Vite build checks for the platform web app
+	@echo "Running ya-agent-platform-web build"
+	@corepack pnpm --dir apps/ya-agent-platform-web build
+
+.PHONY: docker-build-platform
+docker-build-platform: ## Build the combined YA Agent Platform Docker image
+	@echo "Building ya-agent-platform Docker image"
+	@docker build -t ya-agent-platform:dev .
+
+.PHONY: docker-run-platform
+docker-run-platform: ## Run the combined YA Agent Platform Docker image
+	@echo "Running ya-agent-platform Docker image"
+	@docker run --rm -p 9042:9042 ya-agent-platform:dev
+
 .PHONY: check
 check: ## Run code quality tools for all packages
 	@echo "Checking lock file consistency with pyproject.toml"
 	@uv lock --locked
 	@echo "Running pre-commit"
 	@uv run pre-commit run -a
+	@echo "Running web lint"
+	@$(MAKE) web-lint
+	@echo "Running web build"
+	@$(MAKE) web-build
 	@echo "Running pyright"
-	@uv run pyright
+	@uv run python -m pyright
 	@echo "Running deptry for ya-agent-sdk"
-	@(cd packages/ya-agent-sdk && uv run --package ya-agent-sdk deptry ya_agent_sdk)
+	@(cd packages/ya-agent-sdk && uvx deptry ya_agent_sdk)
 	@echo "Running deptry for yaacli"
-	@(cd packages/yaacli && uv run --package yaacli deptry yaacli)
+	@(cd packages/yaacli && uvx deptry yaacli)
+	@echo "Running deptry for ya-agent-platform"
+	@(cd packages/ya-agent-platform && uvx deptry ya_agent_platform)
 
 .PHONY: test
-test: ## Run SDK and CLI tests
+test: ## Run SDK, CLI, and platform tests
 	@echo "Running pytest for workspace packages"
-	@uv run python -m pytest packages/ya-agent-sdk/tests packages/yaacli/tests -n auto -vv --inline-snapshot=disable --cov --cov-config=pyproject.toml --cov-report term-missing
+	@uv run python -m pytest packages/ya-agent-sdk/tests packages/yaacli/tests packages/ya-agent-platform/tests -n auto -vv --inline-snapshot=disable --cov --cov-config=pyproject.toml --cov-report term-missing
 
 .PHONY: test-sdk
 test-sdk: ## Run SDK tests
@@ -55,15 +98,25 @@ test-cli: ## Run CLI tests
 	@echo "Running CLI pytest"
 	@uv run python -m pytest packages/yaacli/tests -n auto -vv --inline-snapshot=disable
 
+.PHONY: test-platform
+test-platform: ## Run YA Agent Platform tests
+	@echo "Running platform pytest"
+	@uv run python -m pytest packages/ya-agent-platform/tests -n auto -vv --inline-snapshot=disable --cov --cov-config=pyproject.toml --cov-report term-missing
+
 .PHONY: test-fix
 test-fix: ## Run pytest with inline snapshot updates
 	@echo "Running pytest with inline snapshot updates"
-	@uv run python -m pytest packages/ya-agent-sdk/tests packages/yaacli/tests -vv --inline-snapshot=fix
+	@uv run python -m pytest packages/ya-agent-sdk/tests packages/yaacli/tests packages/ya-agent-platform/tests -vv --inline-snapshot=fix
 
 .PHONY: build
 build: clean-build ## Build ya-agent-sdk distribution
 	@echo "Building ya-agent-sdk"
 	@uv build --package ya-agent-sdk -o dist
+
+.PHONY: build-platform
+build-platform: clean-build ## Build ya-agent-platform distribution
+	@echo "Building ya-agent-platform"
+	@uv build --package ya-agent-platform -o dist
 
 .PHONY: build-all
 build-all: clean-build ## Build distributions for all packages
@@ -73,7 +126,7 @@ build-all: clean-build ## Build distributions for all packages
 .PHONY: clean-build
 clean-build: ## Clean build artifacts
 	@echo "Removing build artifacts"
-	@uv run python -c "from pathlib import Path; import shutil; [shutil.rmtree(path, ignore_errors=True) for path in (Path('dist'), Path('packages/ya-agent-sdk/dist'), Path('packages/yaacli/dist'))]"
+	@uv run python -c "from pathlib import Path; import shutil; [shutil.rmtree(path, ignore_errors=True) for path in (Path('dist'), Path('packages/ya-agent-sdk/dist'), Path('packages/yaacli/dist'), Path('packages/ya-agent-platform/dist'))]"
 
 .PHONY: publish
 publish: ## Publish built distributions to PyPI
