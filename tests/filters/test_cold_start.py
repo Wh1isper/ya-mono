@@ -215,3 +215,36 @@ async def test_trim_naive_timestamp(tmp_path: Path) -> None:
             result = cold_start_trim(_make_ctx_mock(ctx), history)
             tool_return = result[2].parts[0]
             assert "truncated" in tool_return.content
+
+
+async def test_trim_preserves_messages_after_last_model_response(tmp_path: Path) -> None:
+    """Pending tool results after the last model response should stay intact."""
+    async with LocalEnvironment(allowed_paths=[tmp_path], default_path=tmp_path, tmp_base_dir=tmp_path) as env:
+        async with AgentContext(env=env, model_cfg=ModelConfig(cold_start_trim_seconds=60)) as ctx:
+            old_ts = datetime.now(tz=UTC) - timedelta(minutes=5)
+            old_content = "J" * 1200
+            pending_content = "K" * 1200
+            history = [
+                ModelRequest(parts=[UserPromptPart(content="step 1")]),
+                ModelResponse(
+                    parts=[ToolCallPart(tool_name="view", args="{}", tool_call_id="c1")],
+                    model_name="m",
+                    timestamp=old_ts,
+                ),
+                ModelRequest(
+                    parts=[ToolReturnPart(tool_name="view", content=old_content, tool_call_id="c1")],
+                ),
+                ModelResponse(
+                    parts=[ToolCallPart(tool_name="grep", args="{}", tool_call_id="c2")],
+                    model_name="m",
+                    timestamp=old_ts,
+                ),
+                ModelRequest(
+                    parts=[ToolReturnPart(tool_name="grep", content=pending_content, tool_call_id="c2")],
+                ),
+            ]
+
+            result = cold_start_trim(_make_ctx_mock(ctx), history)
+
+            assert "truncated" in result[2].parts[0].content
+            assert result[4].parts[0].content == pending_content
