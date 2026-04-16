@@ -25,8 +25,9 @@ repos:
     hooks:
       - id: prettier-web
         name: prettier web files
-        entry: bash -lc 'apps/ya-agent-platform-web/node_modules/.bin/prettier --write "$@"' --
-        language: system
+        entry: prettier --write
+        language: node
+        additional_dependencies: [prettier@3.6.2]
         files: ^apps/ya-agent-platform-web/.*\.(ts|tsx|css|html|md)$
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: "v0.15.10"
