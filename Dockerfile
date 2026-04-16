@@ -34,6 +34,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     YA_PLATFORM_ENVIRONMENT=production \
     YA_PLATFORM_HOST=0.0.0.0 \
     YA_PLATFORM_PORT=9042 \
+    YA_PLATFORM_AUTO_MIGRATE=true \
     YA_PLATFORM_WEB_DIST_DIR=/srv/ya-agent-platform/web-dist
 
 RUN apt-get update \
@@ -49,6 +50,8 @@ RUN sdk_wheel=$(ls /tmp/dist/ya_agent_sdk-*.whl) \
     && rm -rf /tmp/dist
 
 COPY --from=frontend-builder /workspace/apps/ya-agent-platform-web/dist ./web-dist
+COPY packages/ya-agent-platform/start.sh ./start.sh
+RUN chmod +x ./start.sh
 
 EXPOSE 9042
 
@@ -56,4 +59,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9042/healthz')"
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["ya-agent-platform", "serve"]
+CMD ["/srv/ya-agent-platform/start.sh"]

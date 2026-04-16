@@ -1,21 +1,34 @@
+from __future__ import annotations
+
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from ya_agent_platform.app import create_app
 from ya_agent_platform.config import get_settings
 
-client = TestClient(create_app())
+
+@pytest.fixture(autouse=True)
+def clear_platform_settings(monkeypatch) -> None:
+    for env_name in ("YA_PLATFORM_DATABASE_URL", "YA_PLATFORM_REDIS_URL", "YA_PLATFORM_WEB_DIST_DIR"):
+        monkeypatch.delenv(env_name, raising=False)
+
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 def test_healthz() -> None:
-    response = client.get("/healthz")
+    with TestClient(create_app()) as client:
+        response = client.get("/healthz")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json() == {"status": "ok", "postgres": "unavailable", "redis": "unavailable"}
 
 
 def test_platform_info() -> None:
-    response = client.get("/api/v1/platform/info")
+    with TestClient(create_app()) as client:
+        response = client.get("/api/v1/platform/info")
 
     assert response.status_code == 200
     payload = response.json()
@@ -24,7 +37,8 @@ def test_platform_info() -> None:
 
 
 def test_index_without_frontend_bundle() -> None:
-    response = client.get("/")
+    with TestClient(create_app()) as client:
+        response = client.get("/")
 
     assert response.status_code == 200
     assert response.json()["name"] == "YA Agent Platform"
@@ -41,12 +55,10 @@ def test_serves_frontend_bundle(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("YA_PLATFORM_WEB_DIST_DIR", str(web_dist_dir))
     get_settings.cache_clear()
 
-    app = create_app()
-    app_client = TestClient(app)
-
-    root_response = app_client.get("/")
-    asset_response = app_client.get("/assets/app.js")
-    spa_response = app_client.get("/chat")
+    with TestClient(create_app()) as app_client:
+        root_response = app_client.get("/")
+        asset_response = app_client.get("/assets/app.js")
+        spa_response = app_client.get("/chat")
 
     assert root_response.status_code == 200
     assert "platform shell" in root_response.text

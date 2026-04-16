@@ -34,6 +34,46 @@ run-platform: ## Run the YA Agent Platform backend locally
 	@echo "Running ya-agent-platform"
 	@uv run --package ya-agent-platform ya-agent-platform serve --reload
 
+.PHONY: platform-db-upgrade
+platform-db-upgrade: ## Run YA Agent Platform DB migrations to latest
+	@echo "Upgrading ya-agent-platform database"
+	@uv run --package ya-agent-platform ya-agent-platform db upgrade
+
+.PHONY: platform-db-downgrade
+platform-db-downgrade: ## Roll back YA Agent Platform DB by one migration
+	@echo "Downgrading ya-agent-platform database"
+	@uv run --package ya-agent-platform ya-agent-platform db downgrade
+
+.PHONY: platform-db-current
+platform-db-current: ## Show current YA Agent Platform DB revision
+	@echo "Showing ya-agent-platform database revision"
+	@uv run --package ya-agent-platform ya-agent-platform db current
+
+.PHONY: platform-db-history
+platform-db-history: ## Show YA Agent Platform migration history
+	@echo "Showing ya-agent-platform migration history"
+	@uv run --package ya-agent-platform ya-agent-platform db history
+
+.PHONY: platform-db-migrate
+platform-db-migrate: ## Generate a YA Agent Platform migration (MSG required)
+	@echo "Generating ya-agent-platform migration"
+	@uv run --package ya-agent-platform ya-agent-platform db migrate "$(MSG)"
+
+.PHONY: platform-infra-up
+platform-infra-up: ## Start YA Agent Platform dev PostgreSQL and Redis
+	@echo "Starting ya-agent-platform development infrastructure"
+	@docker compose -f packages/ya-agent-platform/dev/docker-compose.dev.yml up -d
+
+.PHONY: platform-infra-down
+platform-infra-down: ## Stop YA Agent Platform dev PostgreSQL and Redis
+	@echo "Stopping ya-agent-platform development infrastructure"
+	@docker compose -f packages/ya-agent-platform/dev/docker-compose.dev.yml down
+
+.PHONY: platform-infra-status
+platform-infra-status: ## Show YA Agent Platform dev infrastructure status
+	@echo "Showing ya-agent-platform development infrastructure status"
+	@docker compose -f packages/ya-agent-platform/dev/docker-compose.dev.yml ps
+
 .PHONY: web-install
 web-install: ## Install web app dependencies with corepack pnpm
 	@echo "Installing ya-agent-platform-web dependencies"
