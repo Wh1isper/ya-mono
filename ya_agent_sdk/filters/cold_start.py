@@ -2,7 +2,7 @@
 
 When resuming a session after a long gap (e.g., > 1 hour), the provider's KV
 cache is likely expired and the full message history must be re-encoded from
-scratch.  Truncating large tool return content before sending reduces input
+scratch. Truncating large tool return content before sending reduces input
 token cost significantly, since the model already analyzed these results in
 previous turns and its own reasoning is preserved in ModelResponse parts.
 
@@ -17,12 +17,7 @@ from dataclasses import replace
 from datetime import datetime
 
 from pydantic_ai import RunContext
-from pydantic_ai.messages import (
-    ModelMessage,
-    ModelRequest,
-    ModelResponse,
-    ToolReturnPart,
-)
+from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, ToolReturnPart
 
 from ya_agent_sdk._logger import get_logger
 from ya_agent_sdk.context import AgentContext
@@ -47,12 +42,21 @@ def _truncate_tool_content(content: str) -> str:
     return f"{head}\n[... {truncated_count} chars truncated ...]\n{tail}"
 
 
+def _get_last_response(message_history: list[ModelMessage]) -> tuple[int, ModelResponse] | None:
+    """Get the index and value of the last ModelResponse in the history."""
+    for idx in range(len(message_history) - 1, -1, -1):
+        message = message_history[idx]
+        if isinstance(message, ModelResponse):
+            return idx, message
+    return None
+
+
 def _get_last_response_timestamp(message_history: list[ModelMessage]) -> datetime | None:
     """Get the timestamp of the last ModelResponse in the history."""
-    for msg in reversed(message_history):
-        if isinstance(msg, ModelResponse):
-            return msg.timestamp
-    return None
+    last_response = _get_last_response(message_history)
+    if last_response is None:
+        return None
+    return last_response[1].timestamp
 
 
 def _get_idle_seconds(message_history: list[ModelMessage]) -> float | None:
@@ -65,22 +69,34 @@ def _get_idle_seconds(message_history: list[ModelMessage]) -> float | None:
 
 
 def _trim_tool_returns(message_history: list[ModelMessage]) -> int:
-    """Truncate large ToolReturnPart content in-place. Returns count of trimmed parts."""
+    """Truncate large ToolReturnPart content before the last model response.
+
+    The last model response and any later messages stay intact so the newest
+    turn keeps its full context, including pending tool results that the model
+    has not processed yet.
+    """
     trimmed_count = 0
-    for idx, message in enumerate(message_history):
+    last_response = _get_last_response(message_history)
+    trim_end = last_response[0] if last_response is not None else len(message_history)
+
+    for idx in range(trim_end):
+        message = message_history[idx]
         if not isinstance(message, ModelRequest):
             continue
 
         new_parts = list(message.parts)
         parts_modified = False
-        for i, part in enumerate(new_parts):
+        for part_idx, part in enumerate(new_parts):
             if not isinstance(part, ToolReturnPart):
                 continue
+
             content_str = part.model_response_str()
-            if len(content_str) > _MAX_TOOL_RETURN_CHARS:
-                new_parts[i] = replace(part, content=_truncate_tool_content(content_str))
-                parts_modified = True
-                trimmed_count += 1
+            if len(content_str) <= _MAX_TOOL_RETURN_CHARS:
+                continue
+
+            new_parts[part_idx] = replace(part, content=_truncate_tool_content(content_str))
+            parts_modified = True
+            trimmed_count += 1
 
         if parts_modified:
             message_history[idx] = replace(message, parts=new_parts)
@@ -92,23 +108,27 @@ def cold_start_trim(
     ctx: RunContext[AgentContext],
     message_history: list[ModelMessage],
 ) -> list[ModelMessage]:
-    """Trim tool results when KV cache is likely expired.
+    """Trim older tool results when KV cache is likely expired.
 
     When the gap between the last model response and now exceeds the
-    configured threshold (``cold_start_trim_seconds``), truncate all
-    ``ToolReturnPart`` content in the history to save input token cost
-    on the cold re-encoding.
+    configured threshold (``cold_start_trim_seconds``), truncate older
+    ``ToolReturnPart`` content in the history to save input token cost on the
+    cold re-encoding.
+
+    The last model response and any later messages stay intact so the newest
+    turn keeps full fidelity.
 
     After the first model response in the new session the gap naturally
-    becomes very small, so this filter only fires on the first request
-    after a cold start -- no extra bookkeeping needed.
+    becomes very small, so this filter only fires on the first request after a
+    cold start -- no extra bookkeeping needed.
 
     Args:
         ctx: Runtime context containing AgentContext.
         message_history: Current message history to potentially trim.
 
     Returns:
-        The (possibly mutated) message history with large tool results truncated.
+        The (possibly mutated) message history with older large tool results
+        truncated.
     """
     if not message_history:
         return message_history
