@@ -164,32 +164,32 @@ Start from the browser example and environment references:
 
 All paths below are local paths relative to this file.
 
-| Topic | Local path | Read when |
-| --- | --- | --- |
-| Context and sessions | [`./context.md`](./context.md) | You need session state, message history, or restore behavior |
-| Streaming and hooks | [`./streaming.md`](./streaming.md) | You need streaming output, lifecycle hooks, or interactive runs |
-| Events | [`./events.md`](./events.md) | You need the event model or sideband event handling |
-| Toolsets | [`./toolset.md`](./toolset.md) | You need tools, toolsets, hooks, retries, or approval settings |
-| Tool search | [`./tool-search.md`](./tool-search.md) | You need discovery across a large or dynamic tool library |
-| Subagents | [`./subagent.md`](./subagent.md) | You need delegation, subagent configs, or unified subagent tools |
-| Environment | [`./environment.md`](./environment.md) | You need custom environments or sandbox-backed execution |
-| Resumable resources | [`./resumable-resources.md`](./resumable-resources.md) | You need long-lived browser or external resource state |
-| Skills system | [`./skills.md`](./skills.md) | You need SDK skill loading, reload, or skill integration details |
-| Message bus | [`./message-bus.md`](./message-bus.md) | You need agent coordination or user steering through messages |
-| Model configuration | [`./model.md`](./model.md) | You need model selection, model settings, or configuration details |
-| Logging | [`./logging.md`](./logging.md) | You need runtime logging, diagnostics, or instrumentation setup |
-| Media upload | [`./media.md`](./media.md) | You need image, audio, video, or file media handling |
-| Tool proxy | [`./tool-proxy.md`](./tool-proxy.md) | You need wrapped, remote, or proxy-style tools |
+| Topic                | Local path                                             | Read when                                                          |
+| -------------------- | ------------------------------------------------------ | ------------------------------------------------------------------ |
+| Context and sessions | [`./context.md`](./context.md)                         | You need session state, message history, or restore behavior       |
+| Streaming and hooks  | [`./streaming.md`](./streaming.md)                     | You need streaming output, lifecycle hooks, or interactive runs    |
+| Events               | [`./events.md`](./events.md)                           | You need the event model or sideband event handling                |
+| Toolsets             | [`./toolset.md`](./toolset.md)                         | You need tools, toolsets, hooks, retries, or approval settings     |
+| Tool search          | [`./tool-search.md`](./tool-search.md)                 | You need discovery across a large or dynamic tool library          |
+| Subagents            | [`./subagent.md`](./subagent.md)                       | You need delegation, subagent configs, or unified subagent tools   |
+| Environment          | [`./environment.md`](./environment.md)                 | You need custom environments or sandbox-backed execution           |
+| Resumable resources  | [`./resumable-resources.md`](./resumable-resources.md) | You need long-lived browser or external resource state             |
+| Skills system        | [`./skills.md`](./skills.md)                           | You need SDK skill loading, reload, or skill integration details   |
+| Message bus          | [`./message-bus.md`](./message-bus.md)                 | You need agent coordination or user steering through messages      |
+| Model configuration  | [`./model.md`](./model.md)                             | You need model selection, model settings, or configuration details |
+| Logging              | [`./logging.md`](./logging.md)                         | You need runtime logging, diagnostics, or instrumentation setup    |
+| Media upload         | [`./media.md`](./media.md)                             | You need image, audio, video, or file media handling               |
+| Tool proxy           | [`./tool-proxy.md`](./tool-proxy.md)                   | You need wrapped, remote, or proxy-style tools                     |
 
 ## Example Programs
 
 Use these examples when you need a full application flow:
 
-| Scenario | Repository source | Bundled CLI skill |
-| --- | --- | --- |
-| General production pattern | `../../examples/general.py` | `./examples/general.py` |
-| Autonomous research agent | `../../examples/deepresearch.py` | `./examples/deepresearch.py` |
-| Browser automation | `../../examples/browser_use.py` | `./examples/browser_use.py` |
+| Scenario                   | Repository source                | Bundled CLI skill            |
+| -------------------------- | -------------------------------- | ---------------------------- |
+| General production pattern | `../../examples/general.py`      | `./examples/general.py`      |
+| Autonomous research agent  | `../../examples/deepresearch.py` | `./examples/deepresearch.py` |
+| Browser automation         | `../../examples/browser_use.py`  | `./examples/browser_use.py`  |
 
 ## Workspace Context
 

@@ -156,6 +156,8 @@ skills/
 - normalized IM bridge protocol for external channels
 - backend execution model built on `ya-agent-sdk`
 - cloud-ready deployment assumptions with durable storage and messaging
+- `ya-agent-platform` persistence scaffold uses packaged Alembic assets inside the Python package, PostgreSQL via SQLAlchemy + psycopg, Redis via `redis.asyncio`, and `YA_PLATFORM_AUTO_MIGRATE=true` as the default startup behavior
+- development infrastructure for `ya-agent-platform` lives under `packages/ya-agent-platform/infra/` with PostgreSQL and Redis compose assets plus matching env defaults
 
 ## Development Workflow
 

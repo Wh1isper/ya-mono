@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -9,8 +11,41 @@ from fastapi.responses import FileResponse
 from ya_agent_platform.api.health import router as health_router
 from ya_agent_platform.api.platform import router as platform_router
 from ya_agent_platform.config import PlatformSettings, get_settings
+from ya_agent_platform.db.engine import create_engine
+from ya_agent_platform.redis import create_redis_client
 
 _RESERVED_FRONTEND_PATHS = ("api", "docs", "redoc", "openapi.json", "healthz")
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+
+    app.state.db_engine = None
+    app.state.redis = None
+
+    if settings.database_url:
+        app.state.db_engine = create_engine(
+            settings.database_url,
+            echo=settings.database_echo,
+            pool_size=settings.database_pool_size,
+            max_overflow=settings.database_max_overflow,
+            pool_recycle=settings.database_pool_recycle_seconds,
+        )
+
+    if settings.redis_url:
+        app.state.redis = create_redis_client(settings.redis_url)
+
+    try:
+        yield
+    finally:
+        redis_client = app.state.redis
+        if redis_client is not None:
+            await redis_client.aclose()
+
+        db_engine = app.state.db_engine
+        if db_engine is not None:
+            await db_engine.dispose()
 
 
 def _resolve_frontend_target(web_dist_dir: Path, requested_path: str) -> Path:
@@ -65,6 +100,7 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         version="0.1.0",
         description="Cloud-ready agent platform backend built on top of ya-agent-sdk.",
+        lifespan=_lifespan,
     )
     app.state.settings = settings
 

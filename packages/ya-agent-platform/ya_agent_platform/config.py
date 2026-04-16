@@ -27,6 +27,16 @@ class PlatformSettings(BaseSettings):
     web_dist_dir: Path | None = None
     allow_origins: list[str] = Field(default_factory=lambda: ["http://127.0.0.1:5173", "http://localhost:5173"])
 
+    database_url: str | None = None
+    database_echo: bool = False
+    database_pool_size: int = 5
+    database_max_overflow: int = 10
+    database_pool_recycle_seconds: int = 3600
+
+    redis_url: str | None = None
+
+    auto_migrate: bool = True
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> PlatformSettings:
