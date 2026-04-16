@@ -1,6 +1,6 @@
 # ya-mono
 
-Workspace-first monorepo for the Yet Another Agents project.
+> Yet Another Agents
 
 [![Release](https://img.shields.io/github/v/release/wh1isper/ya-mono)](https://github.com/wh1isper/ya-mono/releases)
 [![Build status](https://img.shields.io/github/actions/workflow/status/wh1isper/ya-mono/main.yml?branch=main)](https://github.com/wh1isper/ya-mono/actions/workflows/main.yml?query=branch%3Amain)
@@ -15,10 +15,14 @@ Workspace-first monorepo for the Yet Another Agents project.
 ## Repository Layout
 
 - [`packages/`](packages/) — publishable workspace members
-- [`docs/`](docs/) — shared documentation used by the SDK and skill bundle
+- [`skills/`](skills/) — canonical skill sources and reference material
 - [`examples/`](examples/) — runnable SDK examples
 - [`scripts/`](scripts/) — repository automation scripts
 - [`.github/`](.github/) — CI and release workflows
+
+## Primary Skill Source
+
+- [`skills/agent-builder/`](skills/agent-builder) — source of truth for the `agent-builder` skill bundled into YAACLI
 
 ## Quick Start
 
@@ -45,6 +49,7 @@ make cli
 
 - [ya-agent-sdk README](packages/ya-agent-sdk/README.md)
 - [yaacli README](packages/yaacli/README.md)
+- [agent-builder skill](skills/agent-builder/SKILL.md)
 - [Contributing Guide](CONTRIBUTING.md)
 
 ## Workspace Commands

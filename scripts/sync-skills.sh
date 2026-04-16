@@ -1,5 +1,5 @@
 #!/bin/bash
-# Sync shared docs and SDK skill assets into the CLI skill bundle.
+# Sync canonical skill sources into the CLI skill bundle.
 
 set -e
 
@@ -8,15 +8,14 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
 
-SKILL_DIR="packages/yaacli/yaacli/skills/building-agents"
-SDK_DIR="packages/ya-agent-sdk"
+SOURCE_DIR="skills/agent-builder"
+TARGET_DIR="packages/yaacli/yaacli/skills/building-agents"
 
-rm -rf "$SKILL_DIR"
-mkdir -p "$SKILL_DIR/docs" "$SKILL_DIR/examples"
-cp -r docs/* "$SKILL_DIR/docs/"
-cp -r examples/* "$SKILL_DIR/examples/"
-cp examples/.env.example "$SKILL_DIR/examples/"
-cp "$SDK_DIR/README.md" "$SKILL_DIR/"
-cp "$SDK_DIR/SKILL.md" "$SKILL_DIR/"
+rm -rf "$TARGET_DIR"
+mkdir -p "$TARGET_DIR"
+cp -R "$SOURCE_DIR"/. "$TARGET_DIR"/
+mkdir -p "$TARGET_DIR/examples"
+cp -R examples/* "$TARGET_DIR/examples/"
+cp examples/.env.example "$TARGET_DIR/examples/"
 
-echo "Synced docs, examples, SDK README, SDK SKILL.md, and .env.example to $SKILL_DIR"
+echo "Synced $SOURCE_DIR and repository examples into $TARGET_DIR"

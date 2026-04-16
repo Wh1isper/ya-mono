@@ -16,9 +16,9 @@ Include:
 
 Open issues tagged `bug`, `enhancement`, or `help wanted` are good starting points.
 
-## Write Documentation
+## Update References
 
-Documentation lives in `docs/`, package READMEs, and in-code docstrings.
+Repository reference material lives in `skills/agent-builder/`, package READMEs, and in-code docstrings.
 
 ## Local Setup
 
@@ -62,9 +62,10 @@ Package locations:
 
 - SDK: `packages/ya-agent-sdk`
 - CLI: `packages/yaacli`
+- Skill source: `skills/agent-builder`
 
 ## Pull Request Guidelines
 
 1. Include tests for behavior changes.
-2. Update docs when functionality changes.
-3. Keep package metadata and workspace docs aligned.
+2. Update `skills/agent-builder/` and package READMEs when behavior or references change.
+3. Keep package metadata and workspace references aligned.

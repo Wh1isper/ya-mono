@@ -9,8 +9,8 @@ Workspace members:
 
 Shared repository areas:
 
-- `docs/` — shared documentation referenced by the SDK package and skill bundle
-- `examples/` — runnable examples for the SDK
+- `skills/` — canonical skill sources and reference material
+- `examples/` — runnable SDK examples
 - `scripts/` — repository automation scripts
 - `.github/` — CI and release workflows
 
@@ -28,7 +28,6 @@ Most architecture work in this repository targets `packages/ya-agent-sdk`.
 packages/ya-agent-sdk/
 ├── pyproject.toml
 ├── README.md
-├── SKILL.md
 ├── tests/
 │   ├── agents/
 │   ├── environment/
@@ -77,7 +76,30 @@ packages/yaacli/
     ├── mcp.py
     ├── runtime.py
     ├── session.py
+    ├── skills/
     └── usage.py
+```
+
+## Skill Source Structure
+
+```text
+skills/
+└── agent-builder/
+    ├── SKILL.md
+    ├── README.md
+    ├── context.md
+    ├── environment.md
+    ├── events.md
+    ├── logging.md
+    ├── media.md
+    ├── message-bus.md
+    ├── model.md
+    ├── resumable-resources.md
+    ├── skills.md
+    ├── streaming.md
+    ├── subagent.md
+    ├── tool-proxy.md
+    └── tool-search.md
 ```
 
 ## Key SDK Features
@@ -131,22 +153,24 @@ Environment variables are loaded via `pydantic-settings` from the process enviro
 
 Keep `.env.example` updated when environment variables change.
 
-## Documentation Map
+## Reference Map
 
-Shared docs live in `docs/`.
+Canonical reference material for agent building lives in `skills/agent-builder/`.
 
-- `docs/context.md`
-- `docs/streaming.md`
-- `docs/events.md`
-- `docs/tool-search.md`
-- `docs/toolset.md`
-- `docs/subagent.md`
-- `docs/message-bus.md`
-- `docs/skills.md`
-- `docs/environment.md`
-- `docs/resumable-resources.md`
-- `docs/model.md`
-- `docs/logging.md`
+- `skills/agent-builder/context.md`
+- `skills/agent-builder/streaming.md`
+- `skills/agent-builder/events.md`
+- `skills/agent-builder/tool-search.md`
+- `skills/agent-builder/toolset.md`
+- `skills/agent-builder/subagent.md`
+- `skills/agent-builder/message-bus.md`
+- `skills/agent-builder/skills.md`
+- `skills/agent-builder/environment.md`
+- `skills/agent-builder/resumable-resources.md`
+- `skills/agent-builder/model.md`
+- `skills/agent-builder/logging.md`
+- `skills/agent-builder/media.md`
+- `skills/agent-builder/tool-proxy.md`
 
 ## Prompt Design
 
@@ -170,3 +194,5 @@ When editing workspace metadata, keep these files aligned:
 - `Makefile`
 - `.github/workflows/*.yml`
 - `README.md` and package READMEs
+- `skills/agent-builder/*`
+- `scripts/sync-skills.sh`

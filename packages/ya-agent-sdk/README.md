@@ -58,8 +58,8 @@ This package lives in the [`ya-mono`](https://github.com/wh1isper/ya-mono) works
 
 - CLI package: [`packages/yaacli`](https://github.com/wh1isper/ya-mono/tree/main/packages/yaacli)
 - Examples: [`examples/`](https://github.com/wh1isper/ya-mono/tree/main/examples)
-- Docs: [`docs/`](https://github.com/wh1isper/ya-mono/tree/main/docs)
-- Agent skill: [`packages/ya-agent-sdk/SKILL.md`](https://github.com/wh1isper/ya-mono/tree/main/packages/ya-agent-sdk/SKILL.md)
+- Skill source: [`skills/agent-builder/`](https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder)
+- agent-builder skill: [`skills/agent-builder/SKILL.md`](https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/SKILL.md)
 
 ## Examples
 
@@ -69,21 +69,22 @@ This package lives in the [`ya-mono`](https://github.com/wh1isper/ya-mono) works
 | [`deepresearch.py`](https://github.com/wh1isper/ya-mono/tree/main/examples/deepresearch.py) | Autonomous research agent with web search and content extraction |
 | [`browser_use.py`](https://github.com/wh1isper/ya-mono/tree/main/examples/browser_use.py) | Browser automation with Docker-based headless Chrome sandbox |
 
-## Documentation
+## Reference Files
 
-- [AgentContext & Sessions](https://github.com/wh1isper/ya-mono/tree/main/docs/context.md)
-- [Streaming & Hooks](https://github.com/wh1isper/ya-mono/tree/main/docs/streaming.md)
-- [Events](https://github.com/wh1isper/ya-mono/tree/main/docs/events.md)
-- [Toolset Architecture](https://github.com/wh1isper/ya-mono/tree/main/docs/toolset.md)
-- [Tool Search](https://github.com/wh1isper/ya-mono/tree/main/docs/tool-search.md)
-- [Subagent System](https://github.com/wh1isper/ya-mono/tree/main/docs/subagent.md)
-- [Skills System](https://github.com/wh1isper/ya-mono/tree/main/docs/skills.md)
-- [Message Bus](https://github.com/wh1isper/ya-mono/tree/main/docs/message-bus.md)
-- [Media Upload](https://github.com/wh1isper/ya-mono/tree/main/docs/media.md)
-- [Custom Environments](https://github.com/wh1isper/ya-mono/tree/main/docs/environment.md)
-- [Resumable Resources](https://github.com/wh1isper/ya-mono/tree/main/docs/resumable-resources.md)
-- [Model Configuration](https://github.com/wh1isper/ya-mono/tree/main/docs/model.md)
-- [Logging Configuration](https://github.com/wh1isper/ya-mono/tree/main/docs/logging.md)
+- [AgentContext & Sessions](https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/context.md)
+- [Streaming & Hooks](https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/streaming.md)
+- [Events](https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/events.md)
+- [Toolset Architecture](https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/toolset.md)
+- [Tool Search](https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/tool-search.md)
+- [Subagent System](https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/subagent.md)
+- [Skills System](https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/skills.md)
+- [Message Bus](https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/message-bus.md)
+- [Media Upload](https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/media.md)
+- [Custom Environments](https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/environment.md)
+- [Resumable Resources](https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/resumable-resources.md)
+- [Model Configuration](https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/model.md)
+- [Logging Configuration](https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/logging.md)
+- [Tool Proxy](https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/tool-proxy.md)
 
 ## Development
 

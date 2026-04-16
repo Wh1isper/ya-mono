@@ -27,18 +27,20 @@ pip install ya-agent-sdk[all]
 
 | Topic | Link |
 | --- | --- |
-| Context and sessions | https://github.com/wh1isper/ya-mono/tree/main/docs/context.md |
-| Streaming and hooks | https://github.com/wh1isper/ya-mono/tree/main/docs/streaming.md |
-| Events | https://github.com/wh1isper/ya-mono/tree/main/docs/events.md |
-| Toolsets | https://github.com/wh1isper/ya-mono/tree/main/docs/toolset.md |
-| Tool search | https://github.com/wh1isper/ya-mono/tree/main/docs/tool-search.md |
-| Subagents | https://github.com/wh1isper/ya-mono/tree/main/docs/subagent.md |
-| Environment | https://github.com/wh1isper/ya-mono/tree/main/docs/environment.md |
-| Resumable resources | https://github.com/wh1isper/ya-mono/tree/main/docs/resumable-resources.md |
-| Skills | https://github.com/wh1isper/ya-mono/tree/main/docs/skills.md |
-| Message bus | https://github.com/wh1isper/ya-mono/tree/main/docs/message-bus.md |
-| Model configuration | https://github.com/wh1isper/ya-mono/tree/main/docs/model.md |
-| Logging | https://github.com/wh1isper/ya-mono/tree/main/docs/logging.md |
+| Context and sessions | https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/context.md |
+| Streaming and hooks | https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/streaming.md |
+| Events | https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/events.md |
+| Toolsets | https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/toolset.md |
+| Tool search | https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/tool-search.md |
+| Subagents | https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/subagent.md |
+| Environment | https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/environment.md |
+| Resumable resources | https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/resumable-resources.md |
+| Skills system | https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/skills.md |
+| Message bus | https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/message-bus.md |
+| Model configuration | https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/model.md |
+| Logging | https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/logging.md |
+| Media upload | https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/media.md |
+| Tool proxy | https://github.com/wh1isper/ya-mono/tree/main/skills/agent-builder/tool-proxy.md |
 
 ## Task Guide
 
@@ -114,4 +116,4 @@ See the browser example:
 
 ## Workspace Context
 
-This skill is sourced from `packages/ya-agent-sdk` in the `ya-mono` workspace and copied into the CLI skill bundle via `scripts/sync-skills.sh`.
+This skill is sourced from `skills/agent-builder/` in the `ya-mono` workspace and copied into the CLI skill bundle via `scripts/sync-skills.sh`.
