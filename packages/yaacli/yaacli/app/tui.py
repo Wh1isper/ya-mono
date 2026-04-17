@@ -284,6 +284,9 @@ class TUIApp:
     # Background task completion tracking
     _pending_bus_check_needed: bool = field(default=False, init=False)
 
+    # Deferred screen recovery scheduling
+    _screen_recovery_scheduled: bool = field(default=False, init=False)
+
     @property
     def mode(self) -> TUIMode:
         """Current agent mode."""
@@ -351,6 +354,44 @@ class TUIApp:
                 logger.debug("Managed task ended with exception during shutdown: %s", _safe_exception_str(result))
 
         self._managed_tasks.clear()
+
+    def _recover_tui_screen(self) -> None:
+        """Force-clear and fully redraw the TUI after terminal corruption."""
+        self._screen_recovery_scheduled = False
+
+        if not self._app:
+            return
+
+        try:
+            self._app.renderer.clear()
+        except Exception:
+            logger.debug("Failed to clear TUI renderer during recovery", exc_info=True)
+
+        try:
+            self._app.reset()
+        except Exception:
+            logger.debug("Failed to reset TUI application during recovery", exc_info=True)
+
+        try:
+            self._app._redraw()
+        except Exception:
+            logger.debug("Failed to redraw TUI during recovery", exc_info=True)
+
+        try:
+            self._app.invalidate()
+        except Exception:
+            logger.debug("Failed to invalidate TUI during recovery", exc_info=True)
+
+    def _schedule_tui_recovery(self, loop: asyncio.AbstractEventLoop | None = None) -> None:
+        """Schedule screen recovery on the next event-loop tick."""
+        if self._screen_recovery_scheduled:
+            return
+
+        if loop is None:
+            loop = asyncio.get_running_loop()
+
+        self._screen_recovery_scheduled = True
+        loop.call_soon(self._recover_tui_screen)
 
     # =========================================================================
     # Lifecycle
@@ -2907,15 +2948,14 @@ class TUIApp:
                     logger.debug(
                         "Suppressed asyncio cleanup error: %s%s", _safe_exception_str(exception), detail_suffix
                     )
-                    if self._app:
-                        self._app.invalidate()
+                    self._schedule_tui_recovery(loop)
                     return
-                logger.error("asyncio: %s%s: %s", message, detail_suffix, exception, exc_info=exception)
+                logger.error("asyncio: %s%s: %s", message, detail_suffix, exception)
             else:
                 logger.error("asyncio: %s%s", message, detail_suffix)
-            # Trigger TUI redraw instead of "Press ENTER to continue..."
-            if self._app:
-                self._app.invalidate()
+            # Recover on the next loop tick so redraw does not interleave with
+            # the current exception handling output.
+            self._schedule_tui_recovery(loop)
 
         self._app._handle_exception = _quiet_exception_handler  # type: ignore[assignment]
 
