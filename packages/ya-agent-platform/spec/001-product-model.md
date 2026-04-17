@@ -4,55 +4,36 @@
 
 YA Agent Platform exposes one product with multiple role-aware surfaces.
 
-| Surface               | Primary Users                                     | Core Jobs                                                                           |
-| --------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Chat Web UI           | end users, operators                              | talk to agents, review runs, upload files, approve tools, inspect results           |
-| Tenant Admin Console  | tenant owners, tenant admins, workspace operators | manage members, workspaces, agent profiles, environment profiles, bridges, policies |
-| Platform Admin Portal | platform operators                                | manage tenants, regions, runtime pools, support access, incidents, global policy    |
-| Bridge Gateway        | bridge workers and channel adapters               | deliver normalized inbound events and receive outbound deliveries                   |
-| Public API            | automation, SDK clients, internal apps            | integrate with control plane and chat surfaces programmatically                     |
+| Surface        | Primary Users                                  | Core Jobs                                                                                         |
+| -------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Chat Web UI    | users                                          | talk to agents, review runs, choose `project_ids`, upload files, approve tools, inspect results   |
+| Admin Console  | admins and scoped users with management grants | manage tenants, cost centers, profiles, bridges, policies, quotas, and provider-facing operations |
+| Bridge Gateway | bridge workers and channel adapters            | deliver normalized inbound events and receive outbound deliveries                                 |
+| Public API     | automation, SDK clients, internal apps         | integrate with control plane and chat surfaces programmatically                                   |
 
 The first-party web application can ship as one codebase with role-aware navigation and route guards.
 
 ## Primary Personas
 
-### Platform Admin
+### Admin
 
-Owns service-wide operations:
+Owns global operations:
 
-- tenant provisioning and suspension
-- region enablement
-- runtime pool health and isolation settings
-- support access and audit review
-- global auth and security policy
+- create and inspect tenants
+- create and inspect cost centers
+- manage runtime pools and regions
+- review audit trails and incident state
+- tune global auth, policy, and provider configuration
 
-### Tenant Owner / Tenant Admin
+### User
 
-Owns customer configuration:
+Works inside assigned scopes:
 
-- invite members and assign roles
-- create workspaces
-- manage agent profiles and environment profiles
-- install channel bridges
-- define tenant secrets, quotas, and policies
-
-### Workspace Operator
-
-Owns workspace execution quality:
-
-- choose profiles for a workspace
-- inspect conversations and session history
-- review failures, approvals, and artifacts
-- tune bridge routing and workspace-specific instructions
-
-### End User
-
-Consumes the product through chat:
-
-- start or continue conversations
-- upload content and receive outputs
-- trigger approvals when policy requires them
-- use browser chat or external channels
+- chat with agents inside allowed tenants
+- provide `project_ids` for a run when the business flow requires project context
+- manage profiles and bridges when granted
+- inspect conversations, artifacts, and failures in assigned scopes
+- review cost and usage for assigned cost centers when granted
 
 ### Bridge Service
 
@@ -67,59 +48,63 @@ Acts as a machine identity:
 ```mermaid
 flowchart TB
     PLATFORM[Platform]
-    PLATFORM --> TENANT[Tenant]
-    TENANT --> MEMBER[Tenant Members]
-    TENANT --> WORKSPACE[Workspace]
+    PLATFORM --> COST[Cost Centers]
+    PLATFORM --> TENANT[Tenants]
+    PLATFORM --> ADMIN[Admins]
+    PLATFORM --> WSP[WorkspaceProvider]
+
     TENANT --> AP[Agent Profiles]
     TENANT --> ENV[Environment Profiles]
     TENANT --> BRIDGE[Bridge Installations]
     TENANT --> POLICY[Tenant Policies]
     TENANT --> SECRET[Tenant Secrets]
+    TENANT --> CONV[Conversations]
 
-    WORKSPACE --> CONV[Conversations]
-    WORKSPACE --> ART[Artifacts]
-    WORKSPACE --> DATA[Workspace Resources]
-    WORKSPACE --> WSPOL[Workspace Policy Overrides]
+    COST --> BUDGET[Quota and Reporting Rules]
+    COST --> USAGE[Usage Views]
 
     CONV --> SESS[Sessions]
+    SESS --> PB[Project Bindings]
     SESS --> DELIV[Deliveries]
     SESS --> EVENTS[Event Streams]
 ```
 
+A tenant is an isolation boundary.
+A cost center is a budgeting and reporting boundary.
+`WorkspaceProvider` is a deployment-level adapter that turns `project_ids` into environment bindings.
+
 ## Ownership Model
 
-### Tenant-owned resources
+### Tenant-scoped resources
 
-- members and service principals
-- workspaces
 - agent profiles
 - environment profiles
 - bridge installations
 - secrets and policies
 - conversations, sessions, artifacts, and deliveries
 
-### Platform-owned resources
+### Platform-scoped resources
 
-- platform admins
+- admins and user identities
+- cost centers
 - runtime pools
 - regions
+- the configured `WorkspaceProvider`
 - global auth connectors
-- support access policies
-- global audit and observability configuration
+- audit and observability configuration
 
-## Workspace Model
+## Project Binding Model
 
-A workspace is the operational unit where conversations happen.
+The platform has no built-in project-container resource.
 
-A workspace can reference:
+Project context enters the system through session requests:
 
-- one default agent profile
-- one default environment profile
-- zero or more project/resource bindings
-- zero or more bridge routing rules
-- workspace-level instructions, secrets, and quotas
+- callers send an ordered `project_ids` list
+- callers can optionally send provider-specific input
+- the configured `WorkspaceProvider` resolves those values into one project binding snapshot
+- the session stores that snapshot for restore, replay, and audit
 
-This gives each workspace a stable execution identity while still allowing per-request overrides inside policy boundaries.
+This keeps higher-level business composition outside the platform while preserving a stable runtime contract.
 
 ## Agent Profile vs Environment Profile
 
@@ -144,8 +129,8 @@ Describes the execution side of the agent:
 - runtime pool selector
 - filesystem and shell capability
 - browser capability
+- provider binding policy
 - network egress rules
-- workspace materialization rules
 - secret projection rules
 - timeout, concurrency, and isolation settings
 
@@ -153,21 +138,24 @@ This split lets one agent profile run in different environments under policy con
 
 ## Surface Capability Matrix
 
-| Capability                  | Chat Web UI | Tenant Admin Console | Platform Admin Portal | Bridge Gateway |
-| --------------------------- | ----------- | -------------------- | --------------------- | -------------- |
-| Start conversation          | Yes         | Yes                  | Yes                   | Via API        |
-| View session stream         | Yes         | Yes                  | Yes                   | Via API        |
-| Manage agent profiles       | Scoped      | Yes                  | Yes                   | No             |
-| Manage environment profiles | Scoped      | Yes                  | Yes                   | No             |
-| Manage members              | No          | Tenant scoped        | Platform wide         | No             |
-| Manage runtime pools        | No          | No                   | Yes                   | No             |
-| Manage bridge installations | Scoped      | Yes                  | Yes                   | Bootstrap only |
-| Review audits and incidents | Limited     | Tenant scoped        | Platform wide         | No             |
+| Capability                     | Chat Web UI | Admin Console     | Bridge Gateway   |
+| ------------------------------ | ----------- | ----------------- | ---------------- |
+| Start conversation             | Yes         | Yes               | Via API          |
+| View session stream            | Yes         | Yes               | Via API          |
+| Supply `project_ids` for a run | Yes         | Yes               | Via route policy |
+| Manage agent profiles          | Scoped      | Scoped or global  | No               |
+| Manage environment profiles    | Scoped      | Scoped or global  | No               |
+| Manage cost centers            | No          | Global or granted | No               |
+| Inspect provider capabilities  | Limited     | Yes               | Limited          |
+| Manage runtime pools           | No          | Global admin      | No               |
+| Manage bridge installations    | Scoped      | Scoped or global  | Bootstrap only   |
+| Review audits and incidents    | Limited     | Scoped or global  | No               |
 
 ## Product Rules
 
-1. every conversation belongs to exactly one workspace
-2. every workspace belongs to exactly one tenant
-3. every session resolves one agent profile and one environment profile at execution time
-4. bridge installations are tenant-owned and can optionally pin to one workspace
-5. platform admins can inspect all tenants through audited support access
+1. every conversation belongs to exactly one tenant
+2. every session resolves one agent profile and one environment profile at execution time
+3. every session resolves one effective cost center for quotas and reporting
+4. every session snapshots one project binding resolved from `project_ids`
+5. bridge installations are tenant-owned
+6. admins can inspect all tenants and cost centers through audited access

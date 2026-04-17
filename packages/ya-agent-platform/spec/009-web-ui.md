@@ -4,98 +4,95 @@
 
 `apps/ya-agent-platform-web` is the first-party browser surface for the platform.
 
-It serves three experiences from one codebase:
+It serves two connected experiences from one codebase:
 
-- chat for end users
-- tenant administration for customer operators
-- platform administration for service operators
+- chat for everyday agent use
+- administration for global and scoped management workflows
 
 The UI is role-aware and route-aware.
+
+The first-party Web UI is the platform's own interaction surface. Business-specific products can also call the same APIs directly and render their own frontend experience.
 
 ## Navigation Model
 
 ```mermaid
 flowchart TB
     ROOT[App Shell] --> CHAT[Chat]
-    ROOT --> WORKSPACES[Workspaces]
+    ROOT --> CONV[Conversations]
     ROOT --> AGENTS[Agent Profiles]
     ROOT --> ENV[Environment Profiles]
     ROOT --> BRIDGES[Bridge Installations]
-    ROOT --> MEMBERS[Members]
-    ROOT --> AUDIT[Audit and Usage]
-    ROOT --> PLATFORM[Platform Admin]
+    ROOT --> USAGE[Usage]
+    ROOT --> AUDIT[Audit]
+    ROOT --> ADMIN[Admin]
 
-    PLATFORM --> TENANTS[Tenants]
-    PLATFORM --> POOLS[Runtime Pools]
-    PLATFORM --> INCIDENTS[Operational Views]
+    ADMIN --> TENANTS[Tenants]
+    ADMIN --> COST[Cost Centers]
+    ADMIN --> USERS[Users and Grants]
+    ADMIN --> PROVIDER[Workspace Provider]
+    ADMIN --> POOLS[Runtime Pools]
+    ADMIN --> INCIDENTS[Operational Views]
 ```
 
 ## Chat Experience
 
-The chat surface is the default landing experience for workspace members.
+The chat surface is the default landing experience for users.
 
 Core features:
 
 - conversation list and search
 - session streaming with reasoning and tool cards
+- project selector backed by the configured `WorkspaceProvider` or by the calling business flow
 - file and artifact upload
 - approval prompts and result submission
 - environment-aware affordances such as file browser or shell visibility when the chosen environment supports them
 - conversation fork and async follow-up visibility
+- usage and cost-center attribution for the current conversation when policy allows
 
 The UI renders the normalized event stream and uses AG-UI-compatible message blocks for chat content.
 
-## Tenant Admin Experience
+## Admin Experience
 
-Tenant admins need full control over their operating surface.
-
-Pages:
-
-| Page                 | Purpose                                             |
-| -------------------- | --------------------------------------------------- |
-| Tenant Overview      | usage, health, limits, recent incidents             |
-| Members              | invite, role binding, service principals            |
-| Workspaces           | create and configure workspaces                     |
-| Agent Profiles       | define models, prompts, tools, subagents            |
-| Environment Profiles | choose executor kind, capability, network policy    |
-| Bridges              | install and route external channels                 |
-| Policies and Secrets | manage quotas, approvals, secret references         |
-| Audit                | inspect tenant-scoped changes and execution history |
-
-## Platform Admin Experience
-
-Platform admins operate the service.
+The admin surface supports both global admins and scoped users with management grants.
 
 Pages:
 
-| Page           | Purpose                                        |
-| -------------- | ---------------------------------------------- |
-| Tenants        | lifecycle, health, region policy, suspension   |
-| Runtime Pools  | capacity, health, draining, affinity           |
-| Support Access | view and approve operator access flows         |
-| Global Audit   | search all control-plane actions               |
-| Operations     | scheduler health, queue depth, delivery health |
+| Page                 | Purpose                                                       |
+| -------------------- | ------------------------------------------------------------- |
+| Tenants              | create and inspect isolation boundaries                       |
+| Cost Centers         | define budget and reporting groups                            |
+| Users and Grants     | bind users to tenants and cost centers                        |
+| Agent Profiles       | define models, prompts, tools, and subagents                  |
+| Environment Profiles | choose executor kind, capability, and provider-binding policy |
+| Workspace Provider   | inspect provider capabilities and integration status          |
+| Bridges              | install and route external channels                           |
+| Usage                | inspect usage by tenant, profile, and cost center             |
+| Audit                | inspect configuration changes and sensitive operations        |
+| Runtime Pools        | inspect capacity, health, and draining state                  |
 
 ## Role-Aware Visibility
 
-| Capability                  | Workspace Member | Workspace Operator | Tenant Admin | Platform Admin |
-| --------------------------- | ---------------- | ------------------ | ------------ | -------------- |
-| Chat                        | Yes              | Yes                | Yes          | Yes            |
-| View workspace sessions     | Scoped           | Yes                | Yes          | Yes            |
-| Manage workspaces           | No               | Scoped             | Yes          | Yes            |
-| Manage agent profiles       | No               | Scoped             | Yes          | Yes            |
-| Manage environment profiles | No               | Scoped             | Yes          | Yes            |
-| Manage bridges              | No               | Scoped             | Yes          | Yes            |
-| Manage tenants              | No               | No                 | No           | Yes            |
-| Manage runtime pools        | No               | No                 | No           | Yes            |
+| Capability                           | User                          | Admin |
+| ------------------------------------ | ----------------------------- | ----- |
+| Chat                                 | Yes                           | Yes   |
+| View assigned conversation sessions  | Yes                           | Yes   |
+| Supply `project_ids` for a run       | Scoped grant or business flow | Yes   |
+| Manage assigned agent profiles       | Scoped grant                  | Yes   |
+| Manage assigned environment profiles | Scoped grant                  | Yes   |
+| Manage assigned bridges              | Scoped grant                  | Yes   |
+| View assigned usage and cost centers | Scoped grant                  | Yes   |
+| Inspect provider capabilities        | Limited                       | Yes   |
+| Manage tenants                       | No                            | Yes   |
+| Manage runtime pools                 | No                            | Yes   |
+| Manage global grants                 | No                            | Yes   |
 
 ## UI Design Rules
 
 1. chat remains the most polished and fastest path for everyday use
-2. tenant admin pages expose effective config and policy resolution clearly
-3. platform admin pages favor operational density and live status visibility
+2. admin pages expose effective config, grants, provider behavior, and policy resolution clearly
+3. cost-center attribution stays visible wherever usage or quota matters
 4. every mutating action links back to audit history
-5. feature visibility depends on both role and environment capabilities
+5. feature visibility depends on role, grants, provider capabilities, and environment capabilities
 
 ## Streaming Model In The Browser
 
@@ -106,17 +103,17 @@ Expected behavior:
 - open stream when a session is queued or running
 - resume with last event id after transient disconnects
 - fall back to committed replay for completed sessions
-- surface queue, assignment, approval, and failure states inline in the conversation view
+- surface queue, assignment, provider resolution, failure, and cost attribution states inline in the conversation view
 
-## Workspace Resource Browsing
+## Provider-Backed Resource Browsing
 
-Workspace resource browsing is API-backed.
+Resource browsing is API-backed.
 
 The UI does not assume the browser talks to a local filesystem.
 
-When the resolved environment profile exposes filesystem access, the UI can show:
+When the resolved environment profile and project binding expose filesystem access, the UI can show:
 
-- resource tree
+- project tree
 - file preview
 - artifact list
 - session outputs
@@ -127,8 +124,8 @@ When the environment does not expose filesystem access, the chat experience rema
 ## Initial Build Order For The Web App
 
 1. auth shell and actor context
-2. workspace and conversation list
-3. live chat view with session streaming
-4. tenant admin pages for workspaces and profiles
-5. bridge installation pages
-6. platform admin pages for tenants and runtime pools
+2. conversation list and chat run flow with `project_ids`
+3. live chat view with session streaming and usage attribution
+4. admin pages for profiles, bridges, and provider status
+5. cost-center and usage pages
+6. admin pages for tenants, users, grants, and runtime pools

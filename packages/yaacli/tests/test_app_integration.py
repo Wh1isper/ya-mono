@@ -87,6 +87,10 @@ class _RaisingTask:
         return _raise().__await__()
 
 
+async def _sleep_forever() -> None:
+    await asyncio.sleep(3600)
+
+
 # =============================================================================
 # TUIMode/TUIState Tests
 # =============================================================================
@@ -749,6 +753,22 @@ async def test_tui_app_cancel_agent_task_suppresses_benign_contextvar_cleanup_er
 
     assert task.cancel_called is True
     assert app._agent_task is None
+
+
+@pytest.mark.asyncio
+async def test_tui_app_cancel_managed_tasks_cleans_up_fire_and_forget_tasks():
+    """Shutdown should cancel tracked fire-and-forget tasks."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+
+    app = TUIApp(config=config, config_manager=config_manager)
+    task = app._track_managed_task(asyncio.create_task(_sleep_forever()))
+
+    await asyncio.sleep(0)
+    await app._cancel_managed_tasks()
+
+    assert task.cancelled() is True
+    assert app._managed_tasks == set()
 
 
 @pytest.mark.asyncio

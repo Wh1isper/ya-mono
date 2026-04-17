@@ -26,21 +26,25 @@ Immutable sessions provide:
 
 ## Conversation
 
-A conversation belongs to exactly one tenant and one workspace.
+A conversation belongs to exactly one tenant.
+
+The platform does not bind a conversation to a built-in project-container resource.
+Project context is supplied at run time through `project_ids` and resolved per session.
 
 Key fields:
 
-| Field                            | Description                               |
-| -------------------------------- | ----------------------------------------- |
-| `conversation_id`                | primary identifier                        |
-| `tenant_id`                      | tenant scope                              |
-| `workspace_id`                   | workspace scope                           |
-| `surface_kind`                   | `web_chat`, `admin_chat`, `bridge`, `api` |
-| `owner_actor_id`                 | initiating actor or route owner           |
-| `default_agent_profile_id`       | default profile for new sessions          |
-| `default_environment_profile_id` | default execution environment             |
-| `status`                         | active, archived, suspended               |
-| `metadata`                       | surface- and app-specific metadata        |
+| Field                            | Description                                                |
+| -------------------------------- | ---------------------------------------------------------- |
+| `conversation_id`                | primary identifier                                         |
+| `tenant_id`                      | tenant scope                                               |
+| `surface_kind`                   | `web_chat`, `admin_chat`, `bridge`, `api`                  |
+| `owner_actor_id`                 | initiating actor or route owner                            |
+| `default_agent_profile_id`       | default profile for new sessions                           |
+| `default_environment_profile_id` | default execution environment                              |
+| `default_cost_center_id`         | default cost center for new sessions                       |
+| `business_key`                   | optional opaque identifier from the calling business layer |
+| `status`                         | active, archived, suspended                                |
+| `metadata`                       | surface- and app-specific metadata                         |
 
 ## Session
 
@@ -48,25 +52,28 @@ A session records one execution request and its committed result.
 
 Key fields:
 
-| Field                    | Description                                                 |
-| ------------------------ | ----------------------------------------------------------- |
-| `session_id`             | immutable session id                                        |
-| `tenant_id`              | tenant scope                                                |
-| `workspace_id`           | workspace scope                                             |
-| `conversation_id`        | parent conversation                                         |
-| `parent_session_id`      | previous snapshot when continuing or forking                |
-| `session_type`           | `agent`, `async_subagent`, `bridge_followup`, `system_task` |
-| `origin`                 | `web`, `bridge`, `api`, `admin`                             |
-| `agent_profile_id`       | resolved agent profile                                      |
-| `environment_profile_id` | resolved environment profile                                |
-| `runtime_pool_id`        | pool chosen for execution                                   |
-| `status`                 | lifecycle state                                             |
-| `input_parts`            | normalized user or system input                             |
-| `final_message`          | final user-facing text or summary                           |
-| `run_summary`            | usage, timings, and outcome metadata                        |
-| `state_ref`              | object-store reference for SDK state                        |
-| `display_ref`            | object-store reference for replayable display events        |
-| `artifact_refs`          | produced files and assets                                   |
+| Field                      | Description                                                 |
+| -------------------------- | ----------------------------------------------------------- |
+| `session_id`               | immutable session id                                        |
+| `tenant_id`                | tenant scope                                                |
+| `conversation_id`          | parent conversation                                         |
+| `parent_session_id`        | previous snapshot when continuing or forking                |
+| `session_type`             | `agent`, `async_subagent`, `bridge_followup`, `system_task` |
+| `origin`                   | `web`, `bridge`, `api`, `admin`                             |
+| `agent_profile_id`         | resolved agent profile                                      |
+| `environment_profile_id`   | resolved environment profile                                |
+| `effective_cost_center_id` | resolved cost center for quota and reporting                |
+| `project_ids`              | ordered project identifiers supplied for this run           |
+| `workspace_provider_input` | optional provider-specific input supplied for this run      |
+| `project_binding_ref`      | stored snapshot of the resolved project binding             |
+| `runtime_pool_id`          | pool chosen for execution                                   |
+| `status`                   | lifecycle state                                             |
+| `input_parts`              | normalized user or system input                             |
+| `final_message`            | final user-facing text or summary                           |
+| `run_summary`              | usage, timings, and outcome metadata                        |
+| `state_ref`                | object-store reference for SDK state                        |
+| `display_ref`              | object-store reference for replayable display events        |
+| `artifact_refs`            | produced files and assets                                   |
 
 ## Session Lifecycle
 
@@ -105,14 +112,16 @@ sequenceDiagram
     participant Client as Client or Bridge
     participant API as API Layer
     participant Resolver as Config Resolver
+    participant Provider as WorkspaceProvider
     participant Scheduler as Scheduler
     participant Worker as Runtime Worker
     participant SDK as ya-agent-sdk
     participant Store as PG / Redis / Object Storage
 
     Client->>API: create session request
-    API->>Resolver: resolve workspace + profiles + policy
-    Resolver-->>API: resolved config
+    API->>Resolver: resolve tenant + profiles + policy + cost center
+    API->>Provider: resolve project_ids + provider input
+    Provider-->>API: project binding
     API->>Store: persist queued session
     API->>Scheduler: enqueue session
     Scheduler->>Worker: assign lease
@@ -132,6 +141,18 @@ sequenceDiagram
 | fork             | chosen historical session            | new conversation id |
 | async subagent   | spawner session or prior async child | same conversation   |
 
+## Project Binding Rules
+
+Project binding is a session concern.
+
+Rules:
+
+- callers supply ordered `project_ids` at run time when project context is needed
+- the configured `WorkspaceProvider` resolves those ids into one project binding snapshot
+- continuation can inherit the previous binding when the caller omits new `project_ids`
+- the platform stores the resolved binding for restore, replay, and audit
+- higher-level conversation-to-project semantics belong to the calling business layer
+
 ## Async Subagents
 
 Async subagents remain a platform feature.
@@ -139,7 +160,7 @@ Async subagents remain a platform feature.
 Rules:
 
 - async subagents run as their own sessions
-- they inherit tenant, workspace, and conversation scope from the parent
+- they inherit tenant, conversation, effective cost-center scope, and project binding scope from the parent
 - they can resolve a different agent profile and environment profile if policy allows
 - their outcomes are delivered through the conversation mailbox and event stream
 
@@ -159,16 +180,16 @@ The next continuation request creates a new queued attempt using the same parent
 
 - one active primary `agent` session per conversation by default
 - multiple async subagent sessions can exist concurrently
-- workspace and tenant policies can cap concurrent sessions
+- tenant and cost-center policies can cap concurrent sessions
 - runtime pools can reject assignment when capacity or policy is exceeded
 
 ## Storage Split
 
-| Store          | Contents                                                 |
-| -------------- | -------------------------------------------------------- |
-| PostgreSQL     | queryable metadata, status, usage, ownership, routing    |
-| Object Storage | SDK resumable state, event replay blobs, large artifacts |
-| Redis          | ephemeral fan-out, queues, locks, live stream buffers    |
+| Store          | Contents                                                                                        |
+| -------------- | ----------------------------------------------------------------------------------------------- |
+| PostgreSQL     | queryable metadata, status, usage, ownership, routing, effective cost center, and `project_ids` |
+| Object Storage | SDK resumable state, project binding snapshot, event replay blobs, large artifacts              |
+| Redis          | ephemeral fan-out, queues, locks, live stream buffers                                           |
 
 ## Failure Model
 

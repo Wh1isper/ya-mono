@@ -14,17 +14,19 @@ The conversation model stays shared.
 - normalized inbound envelopes make routing deterministic
 - outbound delivery is durable and retryable
 - bridge credentials are installation-scoped
-- one installation belongs to one tenant and optionally one workspace route
+- one installation belongs to one tenant
+- route resolution can supply default `project_ids` for a session run
 
 ## Bridge Installation Model
 
 A bridge installation stores:
 
 - `tenant_id`
-- optional default `workspace_id`
 - `bridge_kind` such as `discord`, `slack`, `telegram`, `wecom`, `email`
 - auth material reference
 - route rules
+- optional default `project_ids`
+- optional provider-default input
 - mention and thread behavior
 - outbound delivery policy
 - health metadata and last heartbeat
@@ -38,7 +40,6 @@ A bridge installation stores:
   "bridge_kind": "discord",
   "bridge_installation_id": "bridge_discord_acme_prod",
   "tenant_id": "tenant_acme",
-  "workspace_id": "ws_support",
   "route": {
     "channel_id": "discord_channel_123",
     "thread_id": "discord_thread_456",
@@ -67,14 +68,14 @@ Bridge routing resolves in this order:
 
 1. explicit route override on the installation
 2. route mapping based on channel or thread rules
-3. workspace default route on the installation
-4. tenant default bridge route
+3. installation default `project_ids` or provider-default input
+4. tenant default route policy
 
 The result selects:
 
 - tenant
-- workspace
 - target conversation or conversation creation policy
+- default `project_ids` when the bridge route defines project context
 - default agent and environment profiles if configured
 
 ## Outbound Delivery Envelope
@@ -84,7 +85,6 @@ The result selects:
   "delivery_id": "dlv_01J...",
   "bridge_installation_id": "bridge_discord_acme_prod",
   "tenant_id": "tenant_acme",
-  "workspace_id": "ws_support",
   "session_id": "sess_456",
   "route": {
     "channel_id": "discord_channel_123",
@@ -150,8 +150,8 @@ The platform core never requires channel credentials to be embedded in session d
 Inbound attachments can be:
 
 - passed as URLs when safe and policy allows
-- ingested into object storage and attached as workspace artifacts
-- promoted into the session input as file references
+- ingested into object storage and attached as artifacts
+- promoted into the session input as provider-visible file references
 
 Outbound attachments are produced from committed artifacts or signed object-store URLs.
 
@@ -167,5 +167,5 @@ Outbound attachments are produced from committed artifacts or signed object-stor
 ## Product Rule
 
 Bridge adapters translate channel behavior.
-They do not own conversation state, identity policy, or retry policy.
+They do not own conversation state, identity policy, provider resolution, or retry policy.
 Those belong to the platform.

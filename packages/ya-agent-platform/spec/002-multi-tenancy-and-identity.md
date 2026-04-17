@@ -6,16 +6,29 @@ YA Agent Platform is tenant-native.
 
 Every durable business resource is scoped by `tenant_id`, except platform-owned operator resources.
 
+A tenant is an isolation mechanism for data, policy, secrets, and execution.
+An application built on top of YA Agent Platform can map its own customer or organizational model onto one or more tenants.
+
 ```mermaid
 flowchart LR
     PLATFORM[Platform] --> TENANT_A[Tenant A]
     PLATFORM --> TENANT_B[Tenant B]
-    TENANT_A --> WA[Workspace A1]
-    TENANT_A --> WB[Workspace A2]
-    TENANT_B --> WC[Workspace B1]
+    TENANT_A --> CONV_A[Conversations A]
+    TENANT_B --> CONV_B[Conversations B]
 ```
 
-The platform never depends on process-level single ownership assumptions.
+## Cost-Center Model
+
+A cost center is the primary grouping for:
+
+- quota policy
+- usage reporting
+- budget attribution
+- chargeback or showback in higher-level systems
+
+A cost center can span multiple tenants.
+A tenant can declare a default cost center.
+A session always resolves one effective cost center.
 
 ## Isolation Boundaries
 
@@ -23,43 +36,52 @@ The platform never depends on process-level single ownership assumptions.
 
 - PostgreSQL rows include `tenant_id`
 - object storage uses tenant-prefixed paths
-- Redis keys include tenant and workspace prefixes where business data is involved
+- Redis keys include tenant prefixes where business data is involved
 
 ### Identity isolation
 
-- human users authenticate into one tenant context at a time unless they have multi-tenant memberships
-- service principals and bridge tokens belong to exactly one tenant
-- platform admins operate above tenants with audited access
+- users authenticate once and receive scoped access to assigned tenants and cost centers
+- machine identities and bridge tokens belong to exactly one tenant
+- admins can inspect all tenants with audited actions
 
 ### Execution isolation
 
 - runtime pool selection is tenant-aware
 - environment profiles declare allowed executor kinds and capabilities
-- secrets are projected into runs according to tenant and workspace scope
-- quotas and concurrency limits are enforced per tenant, workspace, and profile
+- `WorkspaceProvider` resolves `project_ids` inside tenant-aware policy boundaries
+- secrets are projected into runs according to tenant scope
+- quotas and concurrency limits are enforced per tenant, profile, and effective cost center
 
 ## Role Model
 
-### Platform roles
+YA Agent Platform uses a simple top-level role model.
 
-| Role                | Scope    | Permissions                                                       |
-| ------------------- | -------- | ----------------------------------------------------------------- |
-| `platform_admin`    | platform | full service control, tenant lifecycle, runtime pool management   |
-| `platform_operator` | platform | operations, support, incident handling, limited policy management |
-| `platform_auditor`  | platform | read-only access to audit, health, usage, and config metadata     |
+| Role      | Scope    | Permissions                                                                                                 |
+| --------- | -------- | ----------------------------------------------------------------------------------------------------------- |
+| `admin`   | platform | full visibility across all tenants, cost centers, runtime pools, policies, provider status, and audit views |
+| `user`    | scoped   | access limited to assigned tenants, cost centers, and granted management actions                            |
+| `service` | scoped   | API-based integrations, bridges, automation, and runtime registration                                       |
 
-### Tenant roles
+Top-level roles stay simple. Fine-grained access comes from scoped grants.
 
-| Role                 | Scope               | Permissions                                                                 |
-| -------------------- | ------------------- | --------------------------------------------------------------------------- |
-| `tenant_owner`       | tenant              | full tenant control including billing-facing settings and member management |
-| `tenant_admin`       | tenant              | manage workspaces, profiles, bridges, policies, and members                 |
-| `workspace_operator` | workspace or tenant | operate workspaces, inspect runs, manage workspace routing                  |
-| `workspace_member`   | workspace or tenant | chat, upload files, review own or allowed conversations                     |
-| `workspace_viewer`   | workspace or tenant | read-only access to conversations and artifacts                             |
-| `service_principal`  | tenant              | API-based integrations, bridges, automation                                 |
+## Scoped Grants
 
-Role bindings can be direct on the tenant or narrowed to specific workspaces.
+A user or service identity can receive grants at these scopes:
+
+- tenant
+- cost center
+
+Common grant families:
+
+- `chat`
+- `manage_profiles`
+- `manage_bridges`
+- `view_audit`
+- `view_usage`
+- `manage_cost_center`
+- `use_provider`
+
+Project-level authorization belongs to the business layer and `WorkspaceProvider` implementation, not to a built-in platform project-container resource.
 
 ## Authentication Methods
 
@@ -69,9 +91,8 @@ Primary human auth is OIDC.
 
 Supported modes:
 
-- platform-managed OIDC for SaaS login
-- tenant-specific SSO connectors for enterprise tenants
-- email/password bootstrap only for development or break-glass scenarios
+- platform-managed OIDC for hosted deployments
+- email/password bootstrap for development or break-glass scenarios
 
 ### Machine authentication
 
@@ -90,7 +111,6 @@ Use cases:
 
 - initial bootstrap
 - database recovery
-- tenant lockout recovery
 - emergency operator access
 
 All break-glass usage is audited.
@@ -99,23 +119,25 @@ All break-glass usage is audited.
 
 Authorization evaluates four dimensions:
 
-1. actor identity
-2. tenant membership or platform role
-3. workspace scope if the resource is workspace-bound
-4. action policy including quotas, approvals, and support-access state
+1. actor role
+2. actor grants and bound scopes
+3. tenant ownership of the target resource
+4. action policy including quotas, approvals, provider rules, and cost-center rules
 
-The enforcement model is deny-by-default with explicit grants through role bindings and policy rules.
+The enforcement model is deny-by-default with explicit grants through scoped bindings and policy rules.
 
-## Support Access
+## Admin Access
 
-Platform operators often need tenant support access. The model is explicit and auditable.
+Admins can inspect all tenants directly.
 
-### Support session rules
+The platform records:
 
-- support access can require tenant approval
-- access can be time-bounded
-- all read and write actions carry `acting_as` and `approved_by` metadata
-- sensitive secret material stays redacted unless the policy explicitly grants reveal access
+- actor identity
+- target tenant
+- target cost center when resolved
+- action type and outcome
+
+Optional impersonation sessions can exist for support workflows. Every impersonation event is audited.
 
 ## Tenant Lifecycle
 
@@ -132,24 +154,24 @@ stateDiagram-v2
 | State          | Meaning                                                        |
 | -------------- | -------------------------------------------------------------- |
 | `provisioning` | tenant record exists and baseline resources are being created  |
-| `active`       | tenant can authenticate and execute workloads                  |
+| `active`       | tenant can be used for access and execution                    |
 | `suspended`    | access and new execution are blocked while data remains intact |
 | `deleted`      | tenant is tombstoned or scheduled for retention-based purge    |
 
 ## Identity Objects
 
-| Object               | Purpose                                   |
-| -------------------- | ----------------------------------------- |
-| User                 | human identity record                     |
-| Membership           | tenant or workspace role binding          |
-| Service Principal    | non-human identity for integrations       |
-| API Token            | bearer token or signed token for services |
-| Auth Session         | browser or API session state              |
-| Support Access Grant | audited operator elevation into a tenant  |
+| Object                | Purpose                                                |
+| --------------------- | ------------------------------------------------------ |
+| User                  | human identity record                                  |
+| Scope Binding         | grant binding to a tenant or cost center               |
+| Service Identity      | non-human identity for integrations                    |
+| API Token             | bearer token or signed token for services              |
+| Auth Session          | browser or API session state                           |
+| Impersonation Session | audited admin-as-user session when support requires it |
 
 ## Rules That Shape the API
 
-1. the authenticated context resolves `platform_role`, `tenant_id`, and `workspace_scope`
+1. the authenticated context resolves `role`, `grants`, `tenant_scope`, and `cost_center_scope`
 2. write APIs require idempotency keys for retriable external clients when side effects matter
 3. resource lookups avoid cross-tenant leakage in error messages and pagination
-4. every audit record stores actor, acting scope, tenant, target resource, action, and outcome
+4. every audit record stores actor, target scope, tenant, effective cost center, action, and outcome

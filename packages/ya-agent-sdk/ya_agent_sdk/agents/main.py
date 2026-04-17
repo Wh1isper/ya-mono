@@ -84,6 +84,37 @@ class AgentInterrupted(Exception):
     pass
 
 
+def _suspend_current_task_cancellation() -> tuple[asyncio.Task[Any] | None, int]:
+    """Temporarily clear cancellation requests on the current task.
+
+    During Ctrl+C handling, the consumer task enters `stream_agent` cleanup
+    while already marked as cancelling. Any await inside the cleanup path will
+    immediately raise `CancelledError`, which abandons internal task teardown
+    and leaves pydantic-ai cleanup running in orphaned tasks.
+
+    We temporarily drain the cancellation counter, perform cleanup, then restore
+    the same number of cancellation requests before returning to the caller.
+    """
+    current_task = asyncio.current_task()
+    if current_task is None:
+        return None, 0
+
+    cleared = 0
+    while current_task.cancelling():
+        current_task.uncancel()
+        cleared += 1
+    return current_task, cleared
+
+
+def _restore_task_cancellation(task: asyncio.Task[Any] | None, count: int) -> None:
+    """Restore previously cleared cancellation requests to a task."""
+    if task is None or count <= 0:
+        return
+
+    for _ in range(count):
+        task.cancel()
+
+
 # =============================================================================
 # Type Variables
 # =============================================================================
@@ -1271,50 +1302,66 @@ async def stream_agent(  # noqa: C901
             if not task.done():
                 task.cancel()
 
-        # Wait for tasks to complete and capture any exception.
-        # We do NOT re-cancel tasks during this wait: doing so would interrupt
-        # pydantic-ai's internal ContextVar cleanup (set_current_run_context's
-        # finally block), causing "was created in a different Context" errors.
-        # A single cancel() is sufficient; the deadline guards against hangs.
-        gather_interrupt: BaseException | None = None
-        cleanup_deadline = time.perf_counter() + 5.0
-        while any(not t.done() for t in [main_task, poll_task]):
-            if time.perf_counter() > cleanup_deadline:
-                logger.warning("Cleanup deadline exceeded (5s), abandoning remaining tasks")
-                break
-            not_done = [t for t in [main_task, poll_task] if not t.done()]
-            try:
-                await asyncio.gather(*not_done, return_exceptions=True)
-            except BaseException as gather_exc:
-                logger.debug("gather interrupted during cleanup: %s", type(gather_exc).__name__)
-                gather_interrupt = gather_exc
-                # Do NOT re-cancel tasks here.  The initial cancel() is already
-                # in flight; re-cancelling would interrupt the internal cleanup
-                # of pydantic-ai's wrap_task (ContextVar token reset).
+        # When the caller is already cancelling, any await in this cleanup path
+        # would immediately raise CancelledError and abandon the internal teardown.
+        # Temporarily clear the cancellation count, finish cleanup, then restore it.
+        current_task, cleared_cancellations = _suspend_current_task_cancellation()
+        try:
+            # Wait for tasks to complete and capture any exception.
+            # We do NOT re-cancel tasks during this wait: doing so would interrupt
+            # pydantic-ai's internal ContextVar cleanup (set_current_run_context's
+            # finally block), causing "was created in a different Context" errors.
+            # A single cancel() is sufficient; the deadline guards against hangs.
+            gather_interrupt: BaseException | None = None
+            cleanup_deadline = time.perf_counter() + 5.0
+            while any(not t.done() for t in [main_task, poll_task]):
+                if time.perf_counter() > cleanup_deadline:
+                    logger.warning("Cleanup deadline exceeded (5s), abandoning remaining tasks")
+                    break
+                not_done = [t for t in [main_task, poll_task] if not t.done()]
+                try:
+                    await asyncio.gather(*not_done, return_exceptions=True)
+                except BaseException as gather_exc:
+                    logger.debug("gather interrupted during cleanup: %s", type(gather_exc).__name__)
+                    gather_interrupt = gather_exc
+                    if isinstance(gather_exc, asyncio.CancelledError):
+                        # A fresh cancellation request arrived while we were cleaning up.
+                        # Clear it too so we can keep draining the inner tasks.
+                        _task, newly_cleared = _suspend_current_task_cancellation()
+                        if current_task is None:
+                            current_task = _task
+                        cleared_cancellations += newly_cleared
+                    # Do NOT re-cancel tasks here. The initial cancel() is already
+                    # in flight; re-cancelling would interrupt the internal cleanup
+                    # of pydantic-ai's wrap_task (ContextVar token reset).
 
-        # Collect results from completed tasks.
-        results: list[BaseException | None] = []
-        for task in [main_task, poll_task]:
-            if task.done():
-                if task.cancelled():
-                    results.append(asyncio.CancelledError())
+            # Collect results from completed tasks.
+            results: list[BaseException | None] = []
+            for task in [main_task, poll_task]:
+                if task.done():
+                    if task.cancelled():
+                        results.append(asyncio.CancelledError())
+                    else:
+                        results.append(task.exception())
                 else:
-                    results.append(task.exception())
-            else:
-                logger.warning("Task %s still running after cleanup deadline, will self-cleanup", task)
-                results.append(asyncio.CancelledError())
+                    logger.warning("Task %s still running after cleanup deadline, will self-cleanup", task)
+                    results.append(asyncio.CancelledError())
 
-        # Find first real exception (non-CancelledError)
-        exceptions = [r for r in results if isinstance(r, BaseException) and not isinstance(r, asyncio.CancelledError)]
+            # Find first real exception (non-CancelledError)
+            exceptions = [
+                r for r in results if isinstance(r, BaseException) and not isinstance(r, asyncio.CancelledError)
+            ]
 
-        if streamer._interrupted:
-            streamer.exception = AgentInterrupted("Agent execution was interrupted")
-        elif exceptions:
-            streamer.exception = exceptions[0]
+            if streamer._interrupted:
+                streamer.exception = AgentInterrupted("Agent execution was interrupted")
+            elif exceptions:
+                streamer.exception = exceptions[0]
 
-        # Re-raise gather interrupt only if cleanup failed (tasks still running)
-        # or if the interrupt was not a simple CancelledError (e.g., KeyboardInterrupt).
-        if gather_interrupt is not None:
-            still_running = any(not t.done() for t in [main_task, poll_task])
-            if still_running or not isinstance(gather_interrupt, asyncio.CancelledError):
-                raise gather_interrupt
+            # Re-raise gather interrupt only if cleanup failed (tasks still running)
+            # or if the interrupt was not a simple CancelledError (e.g., KeyboardInterrupt).
+            if gather_interrupt is not None:
+                still_running = any(not t.done() for t in [main_task, poll_task])
+                if still_running or not isinstance(gather_interrupt, asyncio.CancelledError):
+                    raise gather_interrupt
+        finally:
+            _restore_task_cancellation(current_task, cleared_cancellations)

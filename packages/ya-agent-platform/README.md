@@ -6,9 +6,10 @@ Cloud-ready agent platform package for the `ya-mono` workspace.
 
 This package initializes the backend service for a complete agent platform:
 
-- multi-tenant control plane for tenants, workspaces, profiles, bridges, policies, and secrets
+- multi-tenant control plane for tenants, cost centers, profiles, bridges, policies, and secrets
+- a single configurable `WorkspaceProvider` that maps `project_ids` into agent environments
 - chat-facing API for the first-party Web UI and programmatic clients
-- role-aware admin surfaces for tenant admins and platform admins
+- role-aware administration for admins and scoped users
 - bridge-facing API surface for IM connectors and future channel adapters
 - runtime orchestration built on `ya-agent-sdk` with environment-aware scheduling
 - persistence scaffold with PostgreSQL, Redis, packaged Alembic migrations, and startup auto-migration
@@ -58,7 +59,7 @@ Use the package CLI directly:
 uv run --package ya-agent-platform ya-agent-platform migrate
 uv run --package ya-agent-platform ya-agent-platform db current
 uv run --package ya-agent-platform ya-agent-platform db history
-uv run --package ya-agent-platform ya-agent-platform db migrate "add workspace tables"
+uv run --package ya-agent-platform ya-agent-platform db migrate "add workspace provider tables"
 ```
 
 Use the workspace Makefile wrappers:
@@ -67,7 +68,7 @@ Use the workspace Makefile wrappers:
 make platform-db-upgrade
 make platform-db-current
 make platform-db-history
-make platform-db-migrate MSG="add workspace tables"
+make platform-db-migrate MSG="add workspace provider tables"
 ```
 
 ## Auto Migration
@@ -121,7 +122,7 @@ The container serves the combined application on `http://127.0.0.1:9042`.
 
 ## Specification Set
 
-The spec has been rebuilt around a multi-tenant, cloud-ready platform model.
+The spec is organized around a multi-tenant, cloud-ready platform model with simple admin/user roles, first-class cost centers, and one configurable `WorkspaceProvider`.
 
 Primary documents:
 
@@ -138,13 +139,11 @@ Primary documents:
 - [`spec/009-web-ui.md`](spec/009-web-ui.md)
 - [`spec/010-deployment-topology.md`](spec/010-deployment-topology.md)
 - [`spec/011-data-model.md`](spec/011-data-model.md)
-- [`spec/012-migration-from-netherbrain.md`](spec/012-migration-from-netherbrain.md)
-
-Compatibility pointer documents remain in `spec/001-system-architecture.md`, `spec/002-bridge-contract.md`, and `spec/003-http-api.md` so older links still resolve.
 
 ## Next Build Phase
 
-1. add multi-tenant persistence models and auth context
-2. add control-plane CRUD for tenants, workspaces, agent profiles, environment profiles, and bridges
-3. add runtime scheduling, session orchestration, and durable replay storage
-4. connect the Web UI to live tenant, chat, and admin endpoints
+1. add multi-tenant persistence models, cost centers, and auth context
+2. add `WorkspaceProvider` integration and provider-aware runtime resolution
+3. add control-plane CRUD for tenants, agent profiles, environment profiles, bridges, and grants
+4. add runtime scheduling, session orchestration, and durable replay storage
+5. connect the Web UI to live chat, admin, usage, and audit endpoints
