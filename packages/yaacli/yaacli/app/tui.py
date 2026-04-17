@@ -220,6 +220,7 @@ class TUIApp:
 
     # Agent execution
     _agent_task: asyncio.Task[None] | None = field(default=None, init=False)
+    _managed_tasks: set[asyncio.Task[Any]] = field(default_factory=set, init=False, repr=False)
     _last_run: Any | None = field(default=None, init=False)  # AgentRun from last execution
     _message_history: list[Any] | None = field(default=None, init=False)  # Conversation history
 
@@ -300,6 +301,12 @@ class TUIApp:
             raise RuntimeError("TUIApp not entered. Use 'async with app:' first.")
         return self._runtime
 
+    def _track_managed_task(self, task: asyncio.Task[Any]) -> asyncio.Task[Any]:
+        """Track a fire-and-forget task so it can be cancelled on shutdown."""
+        self._managed_tasks.add(task)
+        task.add_done_callback(self._managed_tasks.discard)
+        return task
+
     async def _cancel_agent_task(self) -> None:
         """Cancel and await the current agent task."""
         task = self._agent_task
@@ -319,6 +326,31 @@ class TUIApp:
                 raise
         finally:
             self._agent_task = None
+
+    async def _cancel_managed_tasks(self) -> None:
+        """Cancel and await fire-and-forget UI tasks created by the TUI."""
+        tasks = [task for task in self._managed_tasks if not task.done()]
+        if not tasks:
+            self._managed_tasks.clear()
+            return
+
+        for task in tasks:
+            task.cancel()
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                if isinstance(result, asyncio.CancelledError):
+                    continue
+                if _is_benign_contextvar_cleanup_error(result):
+                    logger.debug(
+                        "Suppressed ContextVar cleanup error during managed task shutdown: %s",
+                        _safe_exception_str(result),
+                    )
+                    continue
+                logger.debug("Managed task ended with exception during shutdown: %s", _safe_exception_str(result))
+
+        self._managed_tasks.clear()
 
     # =========================================================================
     # Lifecycle
@@ -393,8 +425,9 @@ class TUIApp:
         if bg_monitor:
             bg_monitor.set_completion_callback(None)
 
-        # Cancel any running agent task
+        # Cancel any running agent task and tracked fire-and-forget tasks
         await self._cancel_agent_task()
+        await self._cancel_managed_tasks()
 
         # Give event loop a chance to process pending cleanups
         await asyncio.sleep(0)
@@ -1955,10 +1988,10 @@ class TUIApp:
                         input_area.buffer.reset()
                         # Handle slash commands
                         if text.startswith("/"):
-                            asyncio.create_task(self._handle_command(text))  # noqa: RUF006
+                            self._track_managed_task(asyncio.create_task(self._handle_command(text)))
                         # Handle shell commands
                         elif text.startswith("!"):
-                            asyncio.create_task(self._execute_shell_command(text[1:]))  # noqa: RUF006
+                            self._track_managed_task(asyncio.create_task(self._execute_shell_command(text[1:])))
                         else:
                             self._append_user_input(text)
                             self._agent_task = asyncio.create_task(self._run_agent(text))
@@ -2859,15 +2892,27 @@ class TUIApp:
         def _quiet_exception_handler(loop: asyncio.AbstractEventLoop, context: dict[str, object]) -> None:
             message = context.get("message", "Unhandled asyncio exception")
             exception = context.get("exception")
+            task = context.get("task") or context.get("future")
+            handle = context.get("handle")
+
+            details: list[str] = []
+            if task is not None:
+                details.append(f"task={task!r}")
+            if handle is not None:
+                details.append(f"handle={handle!r}")
+            detail_suffix = f" ({', '.join(details)})" if details else ""
+
             if isinstance(exception, BaseException):
                 if _is_benign_contextvar_cleanup_error(exception):
-                    logger.debug("Suppressed asyncio cleanup error: %s", _safe_exception_str(exception))
+                    logger.debug(
+                        "Suppressed asyncio cleanup error: %s%s", _safe_exception_str(exception), detail_suffix
+                    )
                     if self._app:
                         self._app.invalidate()
                     return
-                logger.error("asyncio: %s: %s", message, exception, exc_info=exception)
+                logger.error("asyncio: %s%s: %s", message, detail_suffix, exception, exc_info=exception)
             else:
-                logger.error("asyncio: %s", message)
+                logger.error("asyncio: %s%s", message, detail_suffix)
             # Trigger TUI redraw instead of "Press ENTER to continue..."
             if self._app:
                 self._app.invalidate()
@@ -2885,6 +2930,7 @@ class TUIApp:
             self._app._handle_exception = original_handle_exception  # type: ignore[assignment]
             # Log performance report on shutdown
             perf_log_report()
-            # Ensure agent task is fully cancelled and awaited before __aexit__
-            # This prevents async generator cleanup issues with MCP servers
+            # Ensure agent task and tracked fire-and-forget tasks are fully cancelled
+            # and awaited before __aexit__.
             await self._cancel_agent_task()
+            await self._cancel_managed_tasks()
