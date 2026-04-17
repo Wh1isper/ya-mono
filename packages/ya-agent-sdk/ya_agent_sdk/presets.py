@@ -395,6 +395,7 @@ def _anthropic_adaptive_settings(
         "max_tokens": max_tokens,
         "anthropic_thinking": {
             "type": "adaptive",
+            "display": "summarized",
         },
         "anthropic_effort": effort,
         "anthropic_cache_instructions": True,
