@@ -771,6 +771,40 @@ async def test_tui_app_cancel_managed_tasks_cleans_up_fire_and_forget_tasks():
     assert app._managed_tasks == set()
 
 
+def test_tui_app_recover_tui_screen_resets_redraws_and_invalidates() -> None:
+    """TUI recovery should clear terminal artifacts, reset layout, redraw, and invalidate."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+
+    app = TUIApp(config=config, config_manager=config_manager)
+    app._screen_recovery_scheduled = True
+    app._app = MagicMock()
+    app._app.renderer = MagicMock()
+
+    app._recover_tui_screen()
+
+    assert app._screen_recovery_scheduled is False
+    app._app.renderer.clear.assert_called_once_with()
+    app._app.reset.assert_called_once_with()
+    app._app._redraw.assert_called_once_with()
+    app._app.invalidate.assert_called_once_with()
+
+
+def test_tui_app_schedule_tui_recovery_schedules_once() -> None:
+    """TUI recovery should be deferred and coalesced."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+
+    app = TUIApp(config=config, config_manager=config_manager)
+    loop = MagicMock()
+
+    app._schedule_tui_recovery(loop)
+    app._schedule_tui_recovery(loop)
+
+    assert app._screen_recovery_scheduled is True
+    loop.call_soon.assert_called_once_with(app._recover_tui_screen)
+
+
 @pytest.mark.asyncio
 async def test_tui_app_run_agent_reports_saved_recovery_session():
     """Agent errors should surface recovery guidance when session data is saved."""
