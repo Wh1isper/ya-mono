@@ -607,8 +607,10 @@ class TUIApp:
         self._streaming_text = initial_content
         self._streaming_line_index = len(self._output_lines)
         self._last_stream_render_time = 0.0  # Reset throttle for new block
-        # Add placeholder that will be updated
-        self._append_block(initial_content)
+        if initial_content:
+            # Add placeholder that will be updated.
+            # Empty text blocks should not create a visible blank line.
+            self._append_block(initial_content)
 
     def _update_streaming_text(self, delta: str) -> None:
         """Update the current streaming text block with delta.
@@ -625,14 +627,17 @@ class TUIApp:
         self._last_stream_render_time = now
 
         # Re-render markdown for the complete text so far
-        if self._streaming_line_index is not None and self._streaming_line_index < len(self._output_lines):
+        if self._streaming_line_index is not None:
             with perf_timer("stream_render_markdown"):
                 rendered = self._renderer.render_markdown(
                     self._streaming_text,
                     code_theme=self._get_code_theme(),
                     width=self._get_terminal_width(),
                 ).rstrip("\n")
-            self._update_block(self._streaming_line_index, rendered)
+            if self._streaming_line_index < len(self._output_lines):
+                self._update_block(self._streaming_line_index, rendered)
+            elif rendered:
+                self._append_block(rendered)
             if self._state == TUIState.RUNNING:
                 self._scroll_to_bottom()
             self._throttled_invalidate()
@@ -648,6 +653,8 @@ class TUIApp:
             ).rstrip("\n")
             if self._streaming_line_index < len(self._output_lines):
                 self._update_block(self._streaming_line_index, rendered)
+            elif rendered:
+                self._append_block(rendered)
         self._streaming_text = ""
         self._streaming_line_index = None
 
@@ -2716,7 +2723,8 @@ class TUIApp:
         self._append_output(self._renderer.render(title).rstrip())
         self._append_output(f"Model: {self.config.general.model}")
         self._append_output(f"Mode: {self._mode.value.upper()}")
-        self._append_output(f"Config: {self.config_manager.config_dir}")
+        self._append_output(f"Config dir: {self.config_manager.config_dir}")
+        self._append_output("This is the global YAACLI config directory.")
         self._append_output("")  # blank line before help
         self._show_help()
 
