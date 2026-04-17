@@ -1082,6 +1082,7 @@ class ModelConfigPreset(StrEnum):
 
     # Anthropic models
     CLAUDE_200K = "claude_200k"
+    CLAUDE_400K = "claude_400k"
     CLAUDE_1M = "claude_1m"
 
     # OpenAI models (GPT-5 series with 270k context)
@@ -1097,6 +1098,16 @@ _MODEL_CFG_REGISTRY: dict[str, dict[str, Any]] = {
     # Anthropic Claude models (vision, no video support)
     ModelConfigPreset.CLAUDE_200K.value: {
         "context_window": 200_000,
+        "max_images": 20,
+        "max_videos": 0,  # Claude doesn't support video
+        "support_gif": True,
+        "split_large_images": True,
+        "image_split_max_height": 4096,
+        "image_split_overlap": 50,
+        "capabilities": {ModelCapability.vision, ModelCapability.document_understanding},
+    },
+    ModelConfigPreset.CLAUDE_400K.value: {
+        "context_window": 400_000,
         "max_images": 20,
         "max_videos": 0,  # Claude doesn't support video
         "support_gif": True,
@@ -1163,6 +1174,7 @@ _MODEL_CFG_REGISTRY: dict[str, dict[str, Any]] = {
 _MODEL_CFG_ALIASES: dict[str, str] = {
     "claude": ModelConfigPreset.CLAUDE_1M.value,
     "anthropic": ModelConfigPreset.CLAUDE_1M.value,
+    "anthropic_400k": ModelConfigPreset.CLAUDE_400K.value,
     "gpt5": ModelConfigPreset.GPT5_270K.value,
     "openai": ModelConfigPreset.GPT5_270K.value,
     "gemini": ModelConfigPreset.GEMINI_200K.value,
@@ -1191,6 +1203,7 @@ def get_model_cfg(preset: str | ModelConfigPreset) -> dict[str, Any]:
 
         # By alias
         cfg = get_model_cfg("claude")  # -> claude_1m
+        cfg = get_model_cfg("anthropic_400k")  # -> claude_400k
     """
     name = preset.value if isinstance(preset, ModelConfigPreset) else preset
 

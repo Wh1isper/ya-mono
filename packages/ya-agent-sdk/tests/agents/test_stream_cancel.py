@@ -13,7 +13,13 @@ import contextvars
 from pathlib import Path
 from unittest.mock import patch
 
-from ya_agent_sdk.agents.main import AgentInterrupted, create_agent, stream_agent
+from ya_agent_sdk.agents.main import (
+    AgentInterrupted,
+    _restore_task_cancellation,
+    _suspend_current_task_cancellation,
+    create_agent,
+    stream_agent,
+)
 from ya_agent_sdk.environment.local import LocalEnvironment
 
 
@@ -189,3 +195,43 @@ async def test_cancel_with_external_cancellation(tmp_path: Path) -> None:
 
             assert streamer.exception is None
             assert len(events) > 0
+
+
+async def test_suspend_current_task_cancellation_allows_cleanup_waits() -> None:
+    """Temporarily clearing cancellation should let cleanup awaits finish.
+
+    This mirrors stream_agent's Ctrl+C path: the current task is already
+    cancelling, cleanup needs to await inner tasks, and the cancellation
+    request must still be restored afterward.
+    """
+    current_task = asyncio.current_task()
+    assert current_task is not None
+
+    worker_finished = False
+
+    async def worker() -> None:
+        nonlocal worker_finished
+        await asyncio.sleep(0.01)
+        worker_finished = True
+
+    current_task.cancel()
+
+    try:
+        await asyncio.sleep(0)
+    except asyncio.CancelledError:
+        task, cleared = _suspend_current_task_cancellation()
+        assert task is current_task
+        assert cleared >= 1
+        try:
+            await asyncio.gather(worker())
+        finally:
+            _restore_task_cancellation(task, cleared)
+
+    assert worker_finished is True
+
+    with contextlib.suppress(asyncio.CancelledError):
+        await asyncio.sleep(0)
+
+    _task, cleared_after_restore = _suspend_current_task_cancellation()
+    assert _task is current_task
+    assert cleared_after_restore >= 1

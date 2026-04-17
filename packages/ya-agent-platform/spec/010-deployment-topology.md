@@ -18,6 +18,7 @@ flowchart TB
     subgraph Control[Control Plane]
         AUTH[Auth + Admin APIs]
         RESOLVE[Config Resolver]
+        PROVIDER[WorkspaceProvider Adapter]
         SCHED[Scheduler]
         BRIDGE[Bridge API]
     end
@@ -43,6 +44,7 @@ flowchart TB
     WEB --> API
     API --> AUTH
     API --> RESOLVE
+    API --> PROVIDER
     API --> SCHED
     API --> BRIDGE
 
@@ -51,6 +53,7 @@ flowchart TB
 
     AUTH --> PG
     RESOLVE --> PG
+    PROVIDER --> PG
     SCHED --> PG
     SCHED --> RD
     WORKERS --> PG
@@ -63,6 +66,7 @@ flowchart TB
 
     AUTH --> LOGS
     RESOLVE --> METRICS
+    PROVIDER --> TRACES
     SCHED --> TRACES
     WORKERS --> LOGS
     BRIDGE --> METRICS
@@ -88,6 +92,7 @@ Characteristics:
 
 - shared control plane
 - shared runtime pools with tenant-aware isolation
+- one configured `WorkspaceProvider` for the service instance
 - managed PostgreSQL, Redis, and object storage
 
 ### Multi-region SaaS
@@ -96,9 +101,10 @@ Multiple regions with a shared platform control layer and region-local execution
 
 Characteristics:
 
-- tenant home region or workspace region affinity
+- tenant home region affinity
 - region-local streaming and runtime placement
 - object storage replication or region pinning by policy
+- provider deployment strategy aligned with each region
 
 ### Dedicated tenant deployment
 
@@ -109,6 +115,7 @@ Characteristics:
 - strong isolation
 - custom networking
 - tenant-dedicated runtime pools and secret scopes
+- provider behavior tailored to that deployment
 
 ### Hybrid with remote runtimes
 
@@ -118,15 +125,15 @@ Characteristics:
 
 - remote runtime registration and heartbeat
 - platform-originated scheduling with tenant affinity
-- object and event exchange through the same session contract
+- provider binding and object exchange through the same session contract
 
 ## Regional Placement Rules
 
 Placement decisions consider:
 
 - tenant region policy
-- workspace override
 - environment profile pool selector
+- provider capability availability
 - data residency requirements
 - runtime capability availability
 
@@ -134,9 +141,10 @@ Placement decisions consider:
 
 - API and Web UI scale independently from runtime workers
 - runtime pools scale by executor kind and region
+- `WorkspaceProvider` can scale as an in-process adapter or as a dedicated sidecar or service
 - Redis handles short-lived fan-out and coordination, not long-term truth
 - PostgreSQL remains the source of truth for metadata and durable status
-- object storage holds session state, replay blobs, and artifacts
+- object storage holds session state, replay blobs, binding snapshots, and artifacts
 
 ## Operational Requirements
 
@@ -146,7 +154,7 @@ The platform exposes:
 
 - liveness probes
 - readiness probes
-- component health for PostgreSQL, Redis, object storage, and runtime registry
+- component health for PostgreSQL, Redis, object storage, runtime registry, and provider integration
 
 ### Draining
 
@@ -165,13 +173,15 @@ Required backups and recovery layers:
 - PostgreSQL backups and point-in-time recovery
 - object storage versioning or durable replication
 - infrastructure-as-code for runtime pools and edge services
+- provider configuration recovery procedure
 - secret recovery procedure
 
 ## Implementation Path In This Repository
 
 The package can start from the current combined backend model and grow along this path:
 
-1. monolithic FastAPI app with control-plane modules and worker loop
+1. monolithic FastAPI app with control-plane modules, provider adapter, and worker loop
 2. background scheduler and runtime worker separation inside the same deployable
 3. dedicated worker deployment for hosted runtime pools
-4. remote runtime registration for hybrid environments
+4. provider isolation or externalization when deployment needs it
+5. remote runtime registration for hybrid environments

@@ -693,6 +693,13 @@ def test_model_cfg_presets_structure() -> None:
     assert "image_split_overlap" in cfg
     assert "capabilities" in cfg
 
+    cfg_400k = get_model_cfg("claude_400k")
+    assert cfg_400k["context_window"] == 400_000
+    assert cfg_400k["max_videos"] == 0  # Claude doesn't support video
+    assert cfg_400k["split_large_images"] is True
+    assert cfg_400k["image_split_max_height"] == 4096
+    assert cfg_400k["image_split_overlap"] == 50
+
     cfg_1m = get_model_cfg("claude_1m")
     assert cfg_1m["context_window"] == 1_000_000
     assert cfg_1m["max_videos"] == 0  # Claude doesn't support video
@@ -728,6 +735,9 @@ def test_get_model_cfg_by_enum() -> None:
     cfg = get_model_cfg(ModelConfigPreset.CLAUDE_200K)
     assert cfg["context_window"] == 200_000
 
+    cfg_400k = get_model_cfg(ModelConfigPreset.CLAUDE_400K)
+    assert cfg_400k["context_window"] == 400_000
+
     cfg_gemini = get_model_cfg(ModelConfigPreset.GEMINI_1M)
     assert cfg_gemini["context_window"] == 1_000_000
     assert cfg_gemini["max_videos"] == 1  # Gemini supports video
@@ -737,6 +747,9 @@ def test_get_model_cfg_by_string() -> None:
     """Test getting model config by string name."""
     cfg = get_model_cfg("claude_200k")
     assert cfg["context_window"] == 200_000
+
+    cfg_400k = get_model_cfg("claude_400k")
+    assert cfg_400k["context_window"] == 400_000
 
     cfg_gpt = get_model_cfg("gpt5_270k")
     assert cfg_gpt["context_window"] == 270_000
@@ -750,6 +763,9 @@ def test_get_model_cfg_by_alias() -> None:
 
     cfg = get_model_cfg("anthropic")
     assert cfg["context_window"] == 1_000_000
+
+    cfg = get_model_cfg("anthropic_400k")
+    assert cfg["context_window"] == 400_000
 
     cfg = get_model_cfg("openai")
     assert cfg["context_window"] == 270_000  # GPT-5 series
@@ -791,6 +807,10 @@ def test_resolve_model_cfg_string() -> None:
     assert result is not None
     assert result["context_window"] == 200_000
 
+    result_400k = resolve_model_cfg("anthropic_400k")
+    assert result_400k is not None
+    assert result_400k["context_window"] == 400_000
+
 
 def test_list_model_cfg_presets() -> None:
     """Test list_model_cfg_presets returns all available presets."""
@@ -798,9 +818,11 @@ def test_list_model_cfg_presets() -> None:
 
     assert presets == snapshot([
         "anthropic",
+        "anthropic_400k",
         "claude",
         "claude_1m",
         "claude_200k",
+        "claude_400k",
         "gemini",
         "gemini_1m",
         "gemini_200k",

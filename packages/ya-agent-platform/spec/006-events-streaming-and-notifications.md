@@ -9,7 +9,7 @@ The platform needs one normalized event model that can serve:
 - bridge delivery and acknowledgement loops
 - usage, audit, and lifecycle notifications
 
-The design keeps AG-UI-compatible chat rendering where it helps and wraps everything in a platform envelope with tenant, workspace, and session context.
+The design keeps AG-UI-compatible chat rendering where it helps and wraps everything in a platform envelope with tenant, cost-center, project-binding, and session context.
 
 ## Event Layers
 
@@ -19,6 +19,7 @@ flowchart TB
         SDK[ya-agent-sdk events]
         SCHED[Scheduler events]
         WORKER[Worker lifecycle events]
+        PROVIDER[WorkspaceProvider events]
         BRIDGE[Bridge ingress and egress events]
     end
 
@@ -44,9 +45,10 @@ flowchart TB
   "event_id": "evt_01J...",
   "event_type": "session.message.delta",
   "tenant_id": "tenant_acme",
-  "workspace_id": "ws_support",
+  "cost_center_id": "cc_support_ops",
   "conversation_id": "conv_123",
   "session_id": "sess_456",
+  "project_binding_id": "pb_01J...",
   "sequence": 42,
   "occurred_at": "2026-04-17T03:00:00Z",
   "source": {
@@ -67,8 +69,9 @@ The envelope is stable across surfaces. The `payload` shape varies by `event_typ
 | Message streaming     | `session.message.started`, `session.message.delta`, `session.message.completed`                   |
 | Reasoning and tooling | `session.reasoning.delta`, `session.tool.called`, `session.tool.result`                           |
 | Approval and control  | `session.approval.requested`, `session.approval.resolved`, `session.cancelled`, `session.steered` |
+| Provider lifecycle    | `project_binding.resolved`, `project_binding.failed`, `workspace_provider.health_changed`         |
 | Bridge routing        | `bridge.inbound.accepted`, `bridge.delivery.queued`, `bridge.delivery.acknowledged`               |
-| Admin and policy      | `tenant.updated`, `workspace.policy.changed`, `runtime_pool.draining`                             |
+| Admin and policy      | `tenant.updated`, `cost_center.updated`, `provider.policy.changed`, `runtime_pool.draining`       |
 | Notifications         | `notification.created`, `notification.read`                                                       |
 
 ## Chat Rendering Model
@@ -81,7 +84,7 @@ For chat surfaces, the payloads can carry AG-UI-compatible content blocks so the
 - tool results
 - custom annotations such as subagent start and completion
 
-The platform event envelope adds the tenancy and routing metadata that AG-UI alone does not carry.
+The platform event envelope adds the tenancy, cost attribution, provider-binding, and routing metadata that AG-UI alone does not carry.
 
 ## Transport Model
 
@@ -117,10 +120,11 @@ Notifications are separate from raw session events.
 
 Examples:
 
-- approval requested for a workspace operator
+- approval requested for a user
 - bridge delivery repeatedly failing
+- project binding resolution failed
 - runtime pool capacity exhausted
-- support access requested or granted
+- cost-center budget threshold reached
 
 Notification records are user- or role-targeted and point back to the relevant resource ids.
 
@@ -156,6 +160,8 @@ Every event can be mirrored into metrics and traces.
 Examples:
 
 - queue latency from `session.queued` to `session.assigned`
+- provider resolution latency from request start to `project_binding.resolved`
 - run latency from `session.started` to `session.finished`
 - delivery failure rate per bridge kind
-- approval response time by tenant or workspace
+- approval response time by tenant or cost center
+- usage growth by cost center
