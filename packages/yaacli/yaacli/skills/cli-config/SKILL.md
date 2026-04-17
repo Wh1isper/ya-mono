@@ -27,8 +27,9 @@ Main configuration file for model, display, browser, and subagents.
 model = "anthropic:claude-sonnet-4-5"
 
 # Model settings preset or custom dict
-# Presets: anthropic_default, openai_default, google_default
-model_settings = "anthropic_default"
+# Presets: anthropic, anthropic_adaptive_high, anthropic_adaptive_xhigh, openai_default, gemini_thinking_level_default
+# `anthropic` resolves to adaptive thinking by default. `anthropic_adaptive_xhigh` is intended for Claude Opus 4.7.
+model_settings = "anthropic"
 
 # Model config for context management
 # Presets: claude_200k, claude_1m, gpt5_270k, gemini_1m

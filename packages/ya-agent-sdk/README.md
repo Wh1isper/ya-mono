@@ -52,6 +52,14 @@ async with stream_agent(runtime, "Hello") as streamer:
         print(event)
 ```
 
+## Model Preset Tips
+
+For Anthropic models, `anthropic` now resolves to adaptive thinking by default.
+
+- Use `anthropic` for the default adaptive preset.
+- Use `anthropic_adaptive_xhigh` for Claude Opus 4.7 long-horizon coding and agentic workloads.
+- Use `anthropic_off` when you want thinking disabled.
+
 ## Repository Context
 
 This package lives in the [`ya-mono`](https://github.com/wh1isper/ya-mono) workspace.

@@ -29,18 +29,22 @@ from ya_agent_sdk.presets import (
     ANTHROPIC_ADAPTIVE_1M_CM_HIGH,
     ANTHROPIC_ADAPTIVE_1M_CM_LOW,
     ANTHROPIC_ADAPTIVE_1M_CM_MEDIUM,
+    ANTHROPIC_ADAPTIVE_1M_CM_XHIGH,
     ANTHROPIC_ADAPTIVE_1M_DEFAULT,
     ANTHROPIC_ADAPTIVE_1M_HIGH,
     ANTHROPIC_ADAPTIVE_1M_LOW,
     ANTHROPIC_ADAPTIVE_1M_MEDIUM,
+    ANTHROPIC_ADAPTIVE_1M_XHIGH,
     ANTHROPIC_ADAPTIVE_CM_DEFAULT,
     ANTHROPIC_ADAPTIVE_CM_HIGH,
     ANTHROPIC_ADAPTIVE_CM_LOW,
     ANTHROPIC_ADAPTIVE_CM_MEDIUM,
+    ANTHROPIC_ADAPTIVE_CM_XHIGH,
     ANTHROPIC_ADAPTIVE_DEFAULT,
     ANTHROPIC_ADAPTIVE_HIGH,
     ANTHROPIC_ADAPTIVE_LOW,
     ANTHROPIC_ADAPTIVE_MEDIUM,
+    ANTHROPIC_ADAPTIVE_XHIGH,
     ANTHROPIC_CM_DEFAULT,
     ANTHROPIC_CM_DEFAULT_INTERLEAVED_THINKING,
     ANTHROPIC_CM_HIGH,
@@ -84,240 +88,159 @@ from ya_agent_sdk.presets import (
 )
 
 
+def _assert_anthropic_adaptive_preset(
+    preset: dict[str, object],
+    *,
+    effort: str,
+    has_1m_beta: bool = False,
+    has_context_management: bool = False,
+) -> None:
+    assert preset["anthropic_thinking"] == {"type": "adaptive", "display": "summarized"}
+    assert preset["anthropic_effort"] == effort
+    assert preset["anthropic_cache_instructions"] is True
+    assert preset["anthropic_cache_messages"] is True
+
+    beta_header = preset.get("extra_headers", {}).get("anthropic-beta", "")
+    assert ("context-1m" in beta_header) is has_1m_beta
+    assert ("context-management" in beta_header) is has_context_management
+    assert "interleaved-thinking" not in beta_header
+
+    if has_context_management:
+        assert "extra_body" in preset
+        assert "context_management" in preset["extra_body"]
+    else:
+        assert "extra_body" not in preset
+
+
 def test_anthropic_presets_structure() -> None:
-    """Test that Anthropic standard presets have expected structure (no beta headers)."""
-    # Standard presets should NOT have beta headers but should have caching
-    for preset in [ANTHROPIC_DEFAULT, ANTHROPIC_HIGH, ANTHROPIC_MEDIUM, ANTHROPIC_LOW]:
-        assert "extra_headers" not in preset
-        assert preset["anthropic_cache_instructions"] is True
-        assert preset["anthropic_cache_messages"] is True
+    """Test that Anthropic compatibility presets resolve to adaptive thinking."""
+    _assert_anthropic_adaptive_preset(ANTHROPIC_DEFAULT, effort="high")
+    _assert_anthropic_adaptive_preset(ANTHROPIC_HIGH, effort="high")
+    _assert_anthropic_adaptive_preset(ANTHROPIC_MEDIUM, effort="medium")
+    _assert_anthropic_adaptive_preset(ANTHROPIC_LOW, effort="low")
 
-    # Thinking presets should have thinking config
-    for preset in [ANTHROPIC_HIGH, ANTHROPIC_MEDIUM, ANTHROPIC_LOW]:
-        assert "anthropic_thinking" in preset
-        assert preset["anthropic_thinking"]["type"] == "enabled"
-        assert "budget_tokens" in preset["anthropic_thinking"]
+    assert ANTHROPIC_DEFAULT == ANTHROPIC_ADAPTIVE_DEFAULT
+    assert ANTHROPIC_HIGH == ANTHROPIC_ADAPTIVE_HIGH
+    assert ANTHROPIC_MEDIUM == ANTHROPIC_ADAPTIVE_MEDIUM
+    assert ANTHROPIC_LOW == ANTHROPIC_ADAPTIVE_LOW
 
-    # OFF should have thinking disabled
     assert ANTHROPIC_OFF["anthropic_thinking"]["type"] == "disabled"
     assert "extra_headers" not in ANTHROPIC_OFF
 
 
 def test_anthropic_1m_presets_structure() -> None:
-    """Test that Anthropic 1M presets have beta headers and caching."""
-    # All 1M presets should have beta headers and caching
-    for preset in [
-        ANTHROPIC_1M_DEFAULT,
-        ANTHROPIC_1M_HIGH,
-        ANTHROPIC_1M_MEDIUM,
-        ANTHROPIC_1M_LOW,
-    ]:
-        assert "extra_headers" in preset
-        assert "anthropic-beta" in preset["extra_headers"]
-        assert preset["anthropic_cache_instructions"] is True
-        assert preset["anthropic_cache_messages"] is True
+    """Test that Anthropic 1M compatibility presets resolve to adaptive 1M presets."""
+    _assert_anthropic_adaptive_preset(ANTHROPIC_1M_DEFAULT, effort="high", has_1m_beta=True)
+    _assert_anthropic_adaptive_preset(ANTHROPIC_1M_HIGH, effort="high", has_1m_beta=True)
+    _assert_anthropic_adaptive_preset(ANTHROPIC_1M_MEDIUM, effort="medium", has_1m_beta=True)
+    _assert_anthropic_adaptive_preset(ANTHROPIC_1M_LOW, effort="low", has_1m_beta=True)
 
-    # Thinking presets should have thinking config
-    for preset in [ANTHROPIC_1M_HIGH, ANTHROPIC_1M_MEDIUM, ANTHROPIC_1M_LOW]:
-        assert "anthropic_thinking" in preset
-        assert preset["anthropic_thinking"]["type"] == "enabled"
-        assert "budget_tokens" in preset["anthropic_thinking"]
+    assert ANTHROPIC_1M_DEFAULT == ANTHROPIC_ADAPTIVE_1M_DEFAULT
+    assert ANTHROPIC_1M_HIGH == ANTHROPIC_ADAPTIVE_1M_HIGH
+    assert ANTHROPIC_1M_MEDIUM == ANTHROPIC_ADAPTIVE_1M_MEDIUM
+    assert ANTHROPIC_1M_LOW == ANTHROPIC_ADAPTIVE_1M_LOW
 
-    # 1M OFF should have thinking disabled but still have beta headers
     assert ANTHROPIC_1M_OFF["anthropic_thinking"]["type"] == "disabled"
-    assert "extra_headers" in ANTHROPIC_1M_OFF
-    assert "anthropic-beta" in ANTHROPIC_1M_OFF["extra_headers"]
-
-
-def test_anthropic_interleaved_presets_structure() -> None:
-    """Test that Anthropic interleaved presets have only interleaved beta (no context management)."""
-    for preset in [
-        ANTHROPIC_DEFAULT_INTERLEAVED_THINKING,
-        ANTHROPIC_HIGH_INTERLEAVED_THINKING,
-        ANTHROPIC_MEDIUM_INTERLEAVED_THINKING,
-        ANTHROPIC_LOW_INTERLEAVED_THINKING,
-    ]:
-        assert "extra_headers" in preset
-        assert "anthropic-beta" in preset["extra_headers"]
-        assert "interleaved-thinking" in preset["extra_headers"]["anthropic-beta"]
-        # Should NOT have context management
-        assert "context-management" not in preset["extra_headers"]["anthropic-beta"]
-        assert "extra_body" not in preset
-        assert preset["anthropic_cache_instructions"] is True
-        assert preset["anthropic_cache_messages"] is True
-
-    # OFF should disable thinking but still include interleaved beta only
-    assert ANTHROPIC_OFF_INTERLEAVED_THINKING["anthropic_thinking"]["type"] == "disabled"
-    assert "extra_headers" in ANTHROPIC_OFF_INTERLEAVED_THINKING
-    assert "anthropic-beta" in ANTHROPIC_OFF_INTERLEAVED_THINKING["extra_headers"]
-    assert "interleaved-thinking" in ANTHROPIC_OFF_INTERLEAVED_THINKING["extra_headers"]["anthropic-beta"]
-    assert "context-management" not in ANTHROPIC_OFF_INTERLEAVED_THINKING["extra_headers"]["anthropic-beta"]
-    assert "extra_body" not in ANTHROPIC_OFF_INTERLEAVED_THINKING
+    assert "context-1m" in ANTHROPIC_1M_OFF["extra_headers"]["anthropic-beta"]
 
 
 def test_anthropic_cm_presets_structure() -> None:
-    """Test that Anthropic context management presets have beta headers and extra_body."""
-    for preset in [
-        ANTHROPIC_CM_DEFAULT,
-        ANTHROPIC_CM_HIGH,
-        ANTHROPIC_CM_MEDIUM,
-        ANTHROPIC_CM_LOW,
-    ]:
-        assert "extra_headers" in preset
-        assert "anthropic-beta" in preset["extra_headers"]
-        assert "context-management" in preset["extra_headers"]["anthropic-beta"]
-        assert "extra_body" in preset
-        assert "context_management" in preset["extra_body"]
-        cm = preset["extra_body"]["context_management"]
-        assert "edits" in cm
-        # Default: only thinking clearing with keep all
-        edit_types = [e["type"] for e in cm["edits"]]
-        assert "clear_thinking_20251015" in edit_types
-        assert cm["edits"][0]["keep"] == "all"
-        # Thinking should be enabled
-        assert preset["anthropic_thinking"]["type"] == "enabled"
+    """Test that Anthropic CM compatibility presets resolve to adaptive CM presets."""
+    _assert_anthropic_adaptive_preset(ANTHROPIC_CM_DEFAULT, effort="high", has_context_management=True)
+    _assert_anthropic_adaptive_preset(ANTHROPIC_CM_HIGH, effort="high", has_context_management=True)
+    _assert_anthropic_adaptive_preset(ANTHROPIC_CM_MEDIUM, effort="medium", has_context_management=True)
+    _assert_anthropic_adaptive_preset(ANTHROPIC_CM_LOW, effort="low", has_context_management=True)
 
-    # OFF should have thinking disabled and no clearing edits (clear_thinking defaults to False for OFF)
+    assert ANTHROPIC_CM_DEFAULT == ANTHROPIC_ADAPTIVE_CM_DEFAULT
+    assert ANTHROPIC_CM_HIGH == ANTHROPIC_ADAPTIVE_CM_HIGH
+    assert ANTHROPIC_CM_MEDIUM == ANTHROPIC_ADAPTIVE_CM_MEDIUM
+    assert ANTHROPIC_CM_LOW == ANTHROPIC_ADAPTIVE_CM_LOW
+
     assert ANTHROPIC_CM_OFF["anthropic_thinking"]["type"] == "disabled"
-    assert "extra_body" in ANTHROPIC_CM_OFF
-    cm_off = ANTHROPIC_CM_OFF["extra_body"]["context_management"]
-    # OFF uses clear_thinking=False, so no edits
-    assert len(cm_off["edits"]) == 0
+    assert "context-management" in ANTHROPIC_CM_OFF["extra_headers"]["anthropic-beta"]
+    assert len(ANTHROPIC_CM_OFF["extra_body"]["context_management"]["edits"]) == 0
 
 
 def test_anthropic_1m_cm_presets_structure() -> None:
-    """Test that Anthropic 1M + context management presets have both beta headers and extra_body."""
-    for preset in [
-        ANTHROPIC_1M_CM_DEFAULT,
-        ANTHROPIC_1M_CM_HIGH,
-        ANTHROPIC_1M_CM_MEDIUM,
-        ANTHROPIC_1M_CM_LOW,
-    ]:
-        assert "extra_headers" in preset
-        beta_header = preset["extra_headers"]["anthropic-beta"]
-        assert "context-1m" in beta_header
-        assert "context-management" in beta_header
-        assert "extra_body" in preset
-        assert "context_management" in preset["extra_body"]
-        assert preset["anthropic_thinking"]["type"] == "enabled"
+    """Test that Anthropic 1M CM compatibility presets resolve to adaptive 1M CM presets."""
+    _assert_anthropic_adaptive_preset(
+        ANTHROPIC_1M_CM_DEFAULT, effort="high", has_1m_beta=True, has_context_management=True
+    )
+    _assert_anthropic_adaptive_preset(
+        ANTHROPIC_1M_CM_HIGH, effort="high", has_1m_beta=True, has_context_management=True
+    )
+    _assert_anthropic_adaptive_preset(
+        ANTHROPIC_1M_CM_MEDIUM, effort="medium", has_1m_beta=True, has_context_management=True
+    )
+    _assert_anthropic_adaptive_preset(ANTHROPIC_1M_CM_LOW, effort="low", has_1m_beta=True, has_context_management=True)
 
-    # OFF should have both betas but thinking disabled
+    assert ANTHROPIC_1M_CM_DEFAULT == ANTHROPIC_ADAPTIVE_1M_CM_DEFAULT
+    assert ANTHROPIC_1M_CM_HIGH == ANTHROPIC_ADAPTIVE_1M_CM_HIGH
+    assert ANTHROPIC_1M_CM_MEDIUM == ANTHROPIC_ADAPTIVE_1M_CM_MEDIUM
+    assert ANTHROPIC_1M_CM_LOW == ANTHROPIC_ADAPTIVE_1M_CM_LOW
+
     assert ANTHROPIC_1M_CM_OFF["anthropic_thinking"]["type"] == "disabled"
     beta_off = ANTHROPIC_1M_CM_OFF["extra_headers"]["anthropic-beta"]
     assert "context-1m" in beta_off
     assert "context-management" in beta_off
-    assert "extra_body" in ANTHROPIC_1M_CM_OFF
 
 
-def test_anthropic_1m_interleaved_presets_structure() -> None:
-    """Test that Anthropic 1M interleaved presets include 1M + interleaved betas (no context management)."""
-    for preset in [
-        ANTHROPIC_1M_DEFAULT_INTERLEAVED_THINKING,
-        ANTHROPIC_1M_HIGH_INTERLEAVED_THINKING,
-        ANTHROPIC_1M_MEDIUM_INTERLEAVED_THINKING,
-        ANTHROPIC_1M_LOW_INTERLEAVED_THINKING,
-    ]:
-        assert "extra_headers" in preset
-        assert "anthropic-beta" in preset["extra_headers"]
-        assert "context-1m" in preset["extra_headers"]["anthropic-beta"]
-        assert "interleaved-thinking" in preset["extra_headers"]["anthropic-beta"]
-        # Should NOT have context management
-        assert "context-management" not in preset["extra_headers"]["anthropic-beta"]
-        assert "extra_body" not in preset
-        assert preset["anthropic_cache_instructions"] is True
-        assert preset["anthropic_cache_messages"] is True
+def test_anthropic_interleaved_compatibility_aliases() -> None:
+    """Test that legacy interleaved preset names resolve to adaptive presets."""
+    assert ANTHROPIC_DEFAULT_INTERLEAVED_THINKING == ANTHROPIC_ADAPTIVE_DEFAULT
+    assert ANTHROPIC_HIGH_INTERLEAVED_THINKING == ANTHROPIC_ADAPTIVE_HIGH
+    assert ANTHROPIC_MEDIUM_INTERLEAVED_THINKING == ANTHROPIC_ADAPTIVE_MEDIUM
+    assert ANTHROPIC_LOW_INTERLEAVED_THINKING == ANTHROPIC_ADAPTIVE_LOW
+    assert ANTHROPIC_OFF_INTERLEAVED_THINKING == ANTHROPIC_OFF
 
-    # OFF should disable thinking but still include 1M + interleaved betas only
-    assert ANTHROPIC_1M_OFF_INTERLEAVED_THINKING["anthropic_thinking"]["type"] == "disabled"
-    assert "extra_headers" in ANTHROPIC_1M_OFF_INTERLEAVED_THINKING
-    assert "anthropic-beta" in ANTHROPIC_1M_OFF_INTERLEAVED_THINKING["extra_headers"]
-    assert "context-1m" in ANTHROPIC_1M_OFF_INTERLEAVED_THINKING["extra_headers"]["anthropic-beta"]
-    assert "interleaved-thinking" in ANTHROPIC_1M_OFF_INTERLEAVED_THINKING["extra_headers"]["anthropic-beta"]
-    assert "context-management" not in ANTHROPIC_1M_OFF_INTERLEAVED_THINKING["extra_headers"]["anthropic-beta"]
-    assert "extra_body" not in ANTHROPIC_1M_OFF_INTERLEAVED_THINKING
+    assert ANTHROPIC_1M_DEFAULT_INTERLEAVED_THINKING == ANTHROPIC_ADAPTIVE_1M_DEFAULT
+    assert ANTHROPIC_1M_HIGH_INTERLEAVED_THINKING == ANTHROPIC_ADAPTIVE_1M_HIGH
+    assert ANTHROPIC_1M_MEDIUM_INTERLEAVED_THINKING == ANTHROPIC_ADAPTIVE_1M_MEDIUM
+    assert ANTHROPIC_1M_LOW_INTERLEAVED_THINKING == ANTHROPIC_ADAPTIVE_1M_LOW
+    assert ANTHROPIC_1M_OFF_INTERLEAVED_THINKING == ANTHROPIC_1M_OFF
 
+    assert ANTHROPIC_CM_DEFAULT_INTERLEAVED_THINKING == ANTHROPIC_ADAPTIVE_CM_DEFAULT
+    assert ANTHROPIC_CM_HIGH_INTERLEAVED_THINKING == ANTHROPIC_ADAPTIVE_CM_HIGH
+    assert ANTHROPIC_CM_MEDIUM_INTERLEAVED_THINKING == ANTHROPIC_ADAPTIVE_CM_MEDIUM
+    assert ANTHROPIC_CM_LOW_INTERLEAVED_THINKING == ANTHROPIC_ADAPTIVE_CM_LOW
+    assert ANTHROPIC_CM_OFF_INTERLEAVED_THINKING == ANTHROPIC_CM_OFF
 
-def test_anthropic_cm_interleaved_presets_structure() -> None:
-    """Test that Anthropic CM + interleaved presets have both betas and extra_body."""
-    for preset in [
-        ANTHROPIC_CM_DEFAULT_INTERLEAVED_THINKING,
-        ANTHROPIC_CM_HIGH_INTERLEAVED_THINKING,
-        ANTHROPIC_CM_MEDIUM_INTERLEAVED_THINKING,
-        ANTHROPIC_CM_LOW_INTERLEAVED_THINKING,
-    ]:
-        assert "extra_headers" in preset
-        beta_header = preset["extra_headers"]["anthropic-beta"]
-        assert "interleaved-thinking" in beta_header
-        assert "context-management" in beta_header
-        assert preset["anthropic_cache_instructions"] is True
-        assert preset["anthropic_cache_messages"] is True
-        # Context management should have thinking clearing with keep all
-        assert "extra_body" in preset
-        assert "context_management" in preset["extra_body"]
-        edit_types = [e["type"] for e in preset["extra_body"]["context_management"]["edits"]]
-        assert "clear_thinking_20251015" in edit_types
-
-    # OFF should disable thinking but still include both betas
-    assert ANTHROPIC_CM_OFF_INTERLEAVED_THINKING["anthropic_thinking"]["type"] == "disabled"
-    beta_off = ANTHROPIC_CM_OFF_INTERLEAVED_THINKING["extra_headers"]["anthropic-beta"]
-    assert "interleaved-thinking" in beta_off
-    assert "context-management" in beta_off
-    # OFF should have empty edits (clear_thinking=False, clear_tool_uses=False)
-    cm_off = ANTHROPIC_CM_OFF_INTERLEAVED_THINKING["extra_body"]["context_management"]
-    assert len(cm_off["edits"]) == 0
+    assert ANTHROPIC_1M_CM_DEFAULT_INTERLEAVED_THINKING == ANTHROPIC_ADAPTIVE_1M_CM_DEFAULT
+    assert ANTHROPIC_1M_CM_HIGH_INTERLEAVED_THINKING == ANTHROPIC_ADAPTIVE_1M_CM_HIGH
+    assert ANTHROPIC_1M_CM_MEDIUM_INTERLEAVED_THINKING == ANTHROPIC_ADAPTIVE_1M_CM_MEDIUM
+    assert ANTHROPIC_1M_CM_LOW_INTERLEAVED_THINKING == ANTHROPIC_ADAPTIVE_1M_CM_LOW
+    assert ANTHROPIC_1M_CM_OFF_INTERLEAVED_THINKING == ANTHROPIC_1M_CM_OFF
 
 
-def test_anthropic_1m_cm_interleaved_presets_structure() -> None:
-    """Test that Anthropic 1M + CM + interleaved presets have all three betas and extra_body."""
-    for preset in [
-        ANTHROPIC_1M_CM_DEFAULT_INTERLEAVED_THINKING,
-        ANTHROPIC_1M_CM_HIGH_INTERLEAVED_THINKING,
-        ANTHROPIC_1M_CM_MEDIUM_INTERLEAVED_THINKING,
-        ANTHROPIC_1M_CM_LOW_INTERLEAVED_THINKING,
-    ]:
-        assert "extra_headers" in preset
-        beta_header = preset["extra_headers"]["anthropic-beta"]
-        assert "context-1m" in beta_header
-        assert "interleaved-thinking" in beta_header
-        assert "context-management" in beta_header
-        assert preset["anthropic_cache_instructions"] is True
-        assert preset["anthropic_cache_messages"] is True
-        assert "extra_body" in preset
-        assert "context_management" in preset["extra_body"]
-
-    # OFF should disable thinking but still include all three betas
-    assert ANTHROPIC_1M_CM_OFF_INTERLEAVED_THINKING["anthropic_thinking"]["type"] == "disabled"
-    beta_off = ANTHROPIC_1M_CM_OFF_INTERLEAVED_THINKING["extra_headers"]["anthropic-beta"]
-    assert "context-1m" in beta_off
-    assert "interleaved-thinking" in beta_off
-    assert "context-management" in beta_off
-    assert "extra_body" in ANTHROPIC_1M_CM_OFF_INTERLEAVED_THINKING
-
-
-def test_anthropic_thinking_budgets() -> None:
-    """Test that Anthropic thinking budgets are ordered correctly."""
-    # Standard presets
-    high_budget = ANTHROPIC_HIGH["anthropic_thinking"]["budget_tokens"]
-    medium_budget = ANTHROPIC_MEDIUM["anthropic_thinking"]["budget_tokens"]
-    low_budget = ANTHROPIC_LOW["anthropic_thinking"]["budget_tokens"]
-    assert high_budget > medium_budget > low_budget
-
-    # 1M presets (should have same budget values)
-    high_budget_1m = ANTHROPIC_1M_HIGH["anthropic_thinking"]["budget_tokens"]
-    medium_budget_1m = ANTHROPIC_1M_MEDIUM["anthropic_thinking"]["budget_tokens"]
-    low_budget_1m = ANTHROPIC_1M_LOW["anthropic_thinking"]["budget_tokens"]
-    assert high_budget_1m > medium_budget_1m > low_budget_1m
-
-    # Verify same values between standard and 1M
-    assert high_budget == high_budget_1m
-    assert medium_budget == medium_budget_1m
-    assert low_budget == low_budget_1m
+def test_anthropic_legacy_aliases_point_to_adaptive_presets() -> None:
+    """Test that Anthropic legacy preset names remain stable compatibility aliases."""
+    legacy_aliases = [
+        (ANTHROPIC_DEFAULT, ANTHROPIC_ADAPTIVE_DEFAULT),
+        (ANTHROPIC_HIGH, ANTHROPIC_ADAPTIVE_HIGH),
+        (ANTHROPIC_MEDIUM, ANTHROPIC_ADAPTIVE_MEDIUM),
+        (ANTHROPIC_LOW, ANTHROPIC_ADAPTIVE_LOW),
+        (ANTHROPIC_1M_DEFAULT, ANTHROPIC_ADAPTIVE_1M_DEFAULT),
+        (ANTHROPIC_1M_HIGH, ANTHROPIC_ADAPTIVE_1M_HIGH),
+        (ANTHROPIC_1M_MEDIUM, ANTHROPIC_ADAPTIVE_1M_MEDIUM),
+        (ANTHROPIC_1M_LOW, ANTHROPIC_ADAPTIVE_1M_LOW),
+        (ANTHROPIC_CM_DEFAULT, ANTHROPIC_ADAPTIVE_CM_DEFAULT),
+        (ANTHROPIC_CM_HIGH, ANTHROPIC_ADAPTIVE_CM_HIGH),
+        (ANTHROPIC_CM_MEDIUM, ANTHROPIC_ADAPTIVE_CM_MEDIUM),
+        (ANTHROPIC_CM_LOW, ANTHROPIC_ADAPTIVE_CM_LOW),
+        (ANTHROPIC_1M_CM_DEFAULT, ANTHROPIC_ADAPTIVE_1M_CM_DEFAULT),
+        (ANTHROPIC_1M_CM_HIGH, ANTHROPIC_ADAPTIVE_1M_CM_HIGH),
+        (ANTHROPIC_1M_CM_MEDIUM, ANTHROPIC_ADAPTIVE_1M_CM_MEDIUM),
+        (ANTHROPIC_1M_CM_LOW, ANTHROPIC_ADAPTIVE_1M_CM_LOW),
+    ]
+    for legacy, adaptive in legacy_aliases:
+        assert legacy == adaptive
 
 
 def test_anthropic_adaptive_presets_structure() -> None:
     """Test that Anthropic adaptive presets have expected structure."""
     for preset in [
         ANTHROPIC_ADAPTIVE_DEFAULT,
+        ANTHROPIC_ADAPTIVE_XHIGH,
         ANTHROPIC_ADAPTIVE_HIGH,
         ANTHROPIC_ADAPTIVE_MEDIUM,
         ANTHROPIC_ADAPTIVE_LOW,
@@ -327,7 +250,7 @@ def test_anthropic_adaptive_presets_structure() -> None:
         assert "budget_tokens" not in preset["anthropic_thinking"]
         # Effort level
         assert "anthropic_effort" in preset
-        assert preset["anthropic_effort"] in ("low", "medium", "high", "max")
+        assert preset["anthropic_effort"] in ("low", "medium", "high", "xhigh", "max")
         # Caching enabled
         assert preset["anthropic_cache_instructions"] is True
         assert preset["anthropic_cache_messages"] is True
@@ -337,6 +260,7 @@ def test_anthropic_adaptive_presets_structure() -> None:
         assert "extra_body" not in preset
 
     # Verify effort levels
+    assert ANTHROPIC_ADAPTIVE_XHIGH["anthropic_effort"] == "xhigh"
     assert ANTHROPIC_ADAPTIVE_HIGH["anthropic_effort"] == "high"
     assert ANTHROPIC_ADAPTIVE_MEDIUM["anthropic_effort"] == "medium"
     assert ANTHROPIC_ADAPTIVE_LOW["anthropic_effort"] == "low"
@@ -347,6 +271,7 @@ def test_anthropic_adaptive_1m_presets_structure() -> None:
     """Test that Anthropic adaptive + 1M presets have 1M beta but no interleaved beta."""
     for preset in [
         ANTHROPIC_ADAPTIVE_1M_DEFAULT,
+        ANTHROPIC_ADAPTIVE_1M_XHIGH,
         ANTHROPIC_ADAPTIVE_1M_HIGH,
         ANTHROPIC_ADAPTIVE_1M_MEDIUM,
         ANTHROPIC_ADAPTIVE_1M_LOW,
@@ -364,6 +289,7 @@ def test_anthropic_adaptive_cm_presets_structure() -> None:
     """Test that Anthropic adaptive + CM presets have CM beta and extra_body."""
     for preset in [
         ANTHROPIC_ADAPTIVE_CM_DEFAULT,
+        ANTHROPIC_ADAPTIVE_CM_XHIGH,
         ANTHROPIC_ADAPTIVE_CM_HIGH,
         ANTHROPIC_ADAPTIVE_CM_MEDIUM,
         ANTHROPIC_ADAPTIVE_CM_LOW,
@@ -381,6 +307,7 @@ def test_anthropic_adaptive_1m_cm_presets_structure() -> None:
     """Test that Anthropic adaptive + 1M + CM presets have both betas and extra_body."""
     for preset in [
         ANTHROPIC_ADAPTIVE_1M_CM_DEFAULT,
+        ANTHROPIC_ADAPTIVE_1M_CM_XHIGH,
         ANTHROPIC_ADAPTIVE_1M_CM_HIGH,
         ANTHROPIC_ADAPTIVE_1M_CM_MEDIUM,
         ANTHROPIC_ADAPTIVE_1M_CM_LOW,
@@ -397,10 +324,11 @@ def test_anthropic_adaptive_1m_cm_presets_structure() -> None:
 
 def test_anthropic_adaptive_max_tokens_ordering() -> None:
     """Test that adaptive preset max_tokens decrease with lower effort."""
+    xhigh_tokens = ANTHROPIC_ADAPTIVE_XHIGH["max_tokens"]
     high_tokens = ANTHROPIC_ADAPTIVE_HIGH["max_tokens"]
     medium_tokens = ANTHROPIC_ADAPTIVE_MEDIUM["max_tokens"]
     low_tokens = ANTHROPIC_ADAPTIVE_LOW["max_tokens"]
-    assert high_tokens > medium_tokens > low_tokens
+    assert xhigh_tokens > high_tokens > medium_tokens > low_tokens
 
 
 def test_openai_chat_presets_structure() -> None:
@@ -431,6 +359,9 @@ def test_get_model_settings_by_enum() -> None:
     settings_1m = get_model_settings(ModelSettingsPreset.ANTHROPIC_1M_HIGH)
     assert settings_1m == ANTHROPIC_1M_HIGH
 
+    settings_xhigh = get_model_settings(ModelSettingsPreset.ANTHROPIC_ADAPTIVE_XHIGH)
+    assert settings_xhigh == ANTHROPIC_ADAPTIVE_XHIGH
+
     settings_interleaved = get_model_settings(ModelSettingsPreset.ANTHROPIC_HIGH_INTERLEAVED_THINKING)
     assert settings_interleaved == ANTHROPIC_HIGH_INTERLEAVED_THINKING
 
@@ -442,6 +373,9 @@ def test_get_model_settings_by_string() -> None:
     """Test getting model settings by string name."""
     settings = get_model_settings("anthropic_high")
     assert settings == ANTHROPIC_HIGH
+
+    settings_xhigh = get_model_settings("anthropic_adaptive_xhigh")
+    assert settings_xhigh == ANTHROPIC_ADAPTIVE_XHIGH
 
     # Test 1M preset
     settings_1m = get_model_settings("anthropic_1m_high")
@@ -557,19 +491,23 @@ def test_list_presets() -> None:
         "anthropic_adaptive_1m_cm_high",
         "anthropic_adaptive_1m_cm_low",
         "anthropic_adaptive_1m_cm_medium",
+        "anthropic_adaptive_1m_cm_xhigh",
         "anthropic_adaptive_1m_default",
         "anthropic_adaptive_1m_high",
         "anthropic_adaptive_1m_low",
         "anthropic_adaptive_1m_medium",
+        "anthropic_adaptive_1m_xhigh",
         "anthropic_adaptive_cm",
         "anthropic_adaptive_cm_default",
         "anthropic_adaptive_cm_high",
         "anthropic_adaptive_cm_low",
         "anthropic_adaptive_cm_medium",
+        "anthropic_adaptive_cm_xhigh",
         "anthropic_adaptive_default",
         "anthropic_adaptive_high",
         "anthropic_adaptive_low",
         "anthropic_adaptive_medium",
+        "anthropic_adaptive_xhigh",
         "anthropic_cm",
         "anthropic_cm_default",
         "anthropic_cm_default_interleaved_thinking",
