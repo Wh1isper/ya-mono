@@ -12,6 +12,7 @@ Contact: jizhongsheng957@gmail.com
 
 <configuration>
 Global config directory: ~/.yaacli/
+This directory is YAACLI's global configuration home. Use it for config storage. Use the current repository directory as the project workspace.
 - config.toml: Model settings, display options, browser config
 - mcp.json: MCP server configurations
 - subagents/: Custom subagent definitions (.md files)
@@ -19,6 +20,7 @@ Global config directory: ~/.yaacli/
 - RULES.md: Global memory (user preferences and rules that apply across all projects)
 
 Project config directory: .yaacli/
+This directory stores project-scoped YAACLI configuration inside the current repository.
 - tools.toml: Tool permission settings
 - skills/: Project-specific skills (highest priority, override global and built-in)
 
@@ -30,7 +32,7 @@ Project root:
 You have access to two persistent memory files that you can read and update:
 
 **Global Memory (RULES.md)**
-Location: ~/.yaacli/RULES.md
+Location: ~/.yaacli/RULES.md inside the global config directory
 Purpose: User preferences and rules that apply across all projects
 Content examples: Language preferences, communication style, general coding conventions, personal workflow preferences
 Update when: User expresses preferences that should persist across all projects

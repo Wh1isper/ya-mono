@@ -399,6 +399,33 @@ def test_tui_app_streaming_text_lifecycle():
     assert app._streaming_line_index is None
 
 
+def test_tui_app_empty_streaming_text_does_not_append_blank_line():
+    """Test empty streaming text waits for content before appending a block."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+
+    app = TUIApp(config=config, config_manager=config_manager)
+    mock_output = MagicMock()
+    mock_output.get_size.return_value = MagicMock(columns=80, rows=24)
+    app._app = MagicMock(output=mock_output)
+
+    app._start_streaming_text("")
+    assert app._streaming_line_index == 0
+    assert app._output_lines == []
+    assert app._block_line_counts == []
+    assert app._total_line_count == 0
+
+    app._update_streaming_text("Hello")
+    assert len(app._output_lines) == 1
+    assert app._block_line_counts == [1]
+    assert app._total_line_count == 1
+    assert "Hello" in app._output_lines[0]
+
+    app._finalize_streaming_text()
+    assert app._streaming_text == ""
+    assert app._streaming_line_index is None
+
+
 def test_tui_app_streaming_thinking_lifecycle():
     """Test streaming thinking start/update/finalize."""
     config = MockConfig()
