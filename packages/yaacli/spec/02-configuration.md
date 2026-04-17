@@ -27,7 +27,9 @@ The configuration system provides a layered approach to managing TUI settings, a
 # Default model for main agent
 model = "anthropic:claude-sonnet-4"
 # Model settings preset
-model_settings = "anthropic_high"
+# `anthropic` resolves to adaptive thinking by default.
+# Use `anthropic_adaptive_xhigh` for Claude Opus 4.7 long-horizon coding and agentic workloads.
+model_settings = "anthropic"
 # Auto-continue mode (agent continues without confirmation)
 auto_mode = true
 # Maximum requests per session
@@ -133,7 +135,9 @@ from pydantic import BaseModel, Field
 
 class GeneralConfig(BaseModel):
     model: str = "anthropic:claude-sonnet-4"
-    model_settings: str | dict = "anthropic_high"
+    # `anthropic` resolves to adaptive thinking by default.
+    # `anthropic_adaptive_xhigh` is available for Claude Opus 4.7.
+    model_settings: str | dict = "anthropic"
     auto_mode: bool = True
     max_requests: int = 200
 

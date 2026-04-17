@@ -150,6 +150,17 @@ model = infer_model(
 
 **Note**: `extra_headers` only applies to Gateway mode, primarily for providers like `gemini` and `bedrock` that require header injection via http_client.
 
+## Anthropic Adaptive Thinking Presets
+
+When configuring Anthropic models through ya-agent-sdk presets:
+
+- `anthropic` resolves to adaptive thinking by default.
+- `anthropic_adaptive_xhigh` is available for Claude Opus 4.7.
+- `anthropic_adaptive_high`, `anthropic_adaptive_medium`, and `anthropic_adaptive_low` remain the general-purpose effort presets.
+- `anthropic_off` disables thinking.
+
+Claude Opus 4.7 uses adaptive thinking as the primary thinking mode. The `xhigh` effort level is intended for long-horizon coding and agentic workloads.
+
 ## Integration with pydantic-ai Agent
 
 ```python
