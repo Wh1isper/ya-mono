@@ -50,26 +50,28 @@ After changing code, run:
 
 Useful commands:
 
-| Command                      | Description                                       |
-| ---------------------------- | ------------------------------------------------- |
-| `make run-claw`              | Run the YA Claw backend                           |
-| `make claw-infra-up`         | Start optional YA Claw development infrastructure |
-| `make claw-infra-down`       | Stop optional YA Claw development infrastructure  |
-| `make web-dev`               | Run the YA Claw web app                           |
-| `make build-claw`            | Build the `ya-claw` package                       |
-| `make build-platform`        | Build the WIP `ya-agent-platform` package         |
-| `make docker-build-claw`     | Build the YA Claw Docker image                    |
-| `make docker-build-platform` | Build the YA Agent Platform Docker image          |
+| Command                      | Description                               |
+| ---------------------------- | ----------------------------------------- |
+| `make run-claw`              | Run the YA Claw backend                   |
+| `make web-dev`               | Run the YA Claw web app                   |
+| `make build-claw`            | Build the `ya-claw` package               |
+| `make build-platform`        | Build the WIP `ya-agent-platform` package |
+| `make docker-build-claw`     | Build the YA Claw Docker image            |
+| `make docker-build-platform` | Build the YA Agent Platform Docker image  |
 
 ## Environment Configuration
 
 Environment variables are loaded via `pydantic-settings` from the process environment or `.env` files.
 
-- Repository example env file: `.env.example`
+- YA Agent SDK example env file: `packages/ya-agent-sdk/.env.example`
+- YAACLI example env file: `packages/yaacli/.env.example`
+- YA Claw example env file: `packages/ya-claw/.env.example`
 - Example runtime env file: `examples/.env.example`
+- YAACLI runtime env prefix: `YAACLI_`
+- YA Agent SDK runtime env prefix: `YA_AGENT_`
 - YA Claw runtime env prefix: `YA_CLAW_`
 
-Keep `.env.example` updated when environment variables change.
+Keep `packages/ya-agent-sdk/.env.example`, `packages/yaacli/.env.example`, `packages/ya-claw/.env.example`, and `examples/.env.example` updated when environment variables change.
 
 ## Notes For Repository Changes
 

@@ -9,17 +9,17 @@ sequenceDiagram
     participant Client
     participant API
     participant CFG as Config Resolver
-    participant WSP as Workspace Resolver
+    participant PROJ as Project Resolver
     participant SESS as Session Manager
     participant TASKS as Async Task Registry
     participant EXEC as Execution Coordinator
     participant SDK as ya-agent-sdk
 
     Client->>API: start run
-    API->>CFG: resolve profile and overrides
-    API->>WSP: resolve workspace binding
+    API->>CFG: resolve profile and request inputs
+    API->>PROJ: resolve execution scope
     CFG-->>API: resolved configuration
-    WSP-->>API: binding snapshot
+    PROJ-->>API: execution scope
     API->>SESS: create run record
     API->>TASKS: register active task
     API->>EXEC: execute run
@@ -38,7 +38,7 @@ sequenceDiagram
 The coordinator is responsible for:
 
 - loading the previous committed session state when continuing
-- constructing the SDK runtime and environment
+- constructing the SDK runtime and execution environment
 - processing stream events into external protocol events
 - persisting final summaries, artifacts, and exported state
 - updating the in-process task registry during active execution
@@ -46,9 +46,9 @@ The coordinator is responsible for:
 
 ## Session Model
 
-YA Claw should use an immutable session lineage model.
-
-A continuation creates a new session snapshot linked to its parent. A fork creates a new root lineage from a historical point.
+YA Claw should use a durable session model with explicit continuation points.
+A session carries the committed state that the next run can restore.
+A fork creates a new lineage from a historical point.
 
 ```mermaid
 flowchart LR
@@ -78,15 +78,15 @@ A run starts from four inputs:
 
 - session context
 - agent profile
-- workspace binding
-- request payload
+- project selector and request metadata
+- user input payload
 
-The runtime should construct an SDK `Environment` from the resolved workspace binding, including:
+The runtime should resolve those inputs into one execution scope and then construct the SDK `Environment` from that scope, including:
 
 - default working directory
-- allowed file paths
+- readable and writable file paths
 - environment variables
-- provider metadata exposed as runtime context instructions
+- resolver metadata exposed as runtime context instructions when useful
 
 ## In-Process Active State
 
@@ -134,6 +134,7 @@ At a committed boundary, especially at session end, YA Claw should write:
 - exported SDK state
 - the compacted committed conversation record to `message.json`
 - metadata that links the committed message view to the session and run
+- the effective `project_id` and useful request metadata for continuation and UI restore
 
 ## Session Schedule Model
 
@@ -143,7 +144,7 @@ A schedule should bind:
 
 - one target session or session template
 - one profile
-- one workspace binding intent
+- one `project_id` selection or project selection rule
 - one trigger definition
 - one delivery policy
 - one enabled state
@@ -188,7 +189,7 @@ Task relay is the default bridge path for async work.
 The flow is:
 
 1. bridge receives a channel event
-2. bridge resolves the bridge endpoint policy
+2. bridge decides the effective `project_id`
 3. bridge creates or continues an async session
 4. execution runs in background task form
 5. bridge adapter or channel CLI delivers the resulting output back to the IM channel
@@ -200,10 +201,11 @@ Stream relay is the interactive bridge path for foreground work.
 The flow is:
 
 1. bridge receives a channel event
-2. bridge starts a foreground run through the YA Claw service
-3. bridge consumes SSE from the run event stream
-4. bridge transforms runtime events into channel-ready messages
-5. bridge pushes incremental output to the IM channel
+2. bridge decides the effective `project_id`
+3. bridge starts a foreground run through the YA Claw service
+4. bridge consumes SSE from the run event stream
+5. bridge transforms runtime events into channel-ready messages
+6. bridge pushes incremental output to the IM channel
 
 ## Completion Path
 
@@ -245,5 +247,4 @@ The architecture should record these as run- and session-level events without fr
 ## Concurrency Rule
 
 One active foreground run per session is the clean default for the single-node runtime.
-
 Parallelism should come from independent sessions, subagents, scheduled runs, or background tasks tracked by the same process.

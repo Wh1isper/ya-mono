@@ -4492,6 +4492,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-ai" },
     { name = "pydantic-settings" },
+    { name = "python-dotenv" },
     { name = "y-agent-environment" },
     { name = "ya-agent-sdk", extra = ["all"] },
 ]
@@ -4502,6 +4503,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-ai" },
     { name = "pydantic-settings", specifier = ">=2.0" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "y-agent-environment", specifier = ">=0.1.0" },
     { name = "ya-agent-sdk", extras = ["all"], editable = "packages/ya-agent-sdk" },
 ]

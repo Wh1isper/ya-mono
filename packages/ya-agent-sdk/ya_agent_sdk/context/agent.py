@@ -71,6 +71,7 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 from xml.dom.minidom import parseString
@@ -109,6 +110,8 @@ from ya_agent_sdk.utils import get_latest_request_usage
 from .bus import BusMessage, MessageBus
 from .note import NoteManager
 from .tasks import TaskManager, TaskStatus
+
+_PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 
 if TYPE_CHECKING:
     from typing import Self
@@ -266,7 +269,7 @@ class ToolSettings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(_PACKAGE_ROOT / ".env", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,

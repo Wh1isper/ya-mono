@@ -32,6 +32,8 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from ya_agent_sdk.mcp import MCPServerSpec
 
+_PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+
 # =============================================================================
 # Configuration Models
 # =============================================================================
@@ -315,7 +317,7 @@ class EnvSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="YAACLI_",
-        env_file=".env",
+        env_file=(_PACKAGE_ROOT / ".env", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,

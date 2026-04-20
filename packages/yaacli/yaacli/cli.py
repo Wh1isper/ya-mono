@@ -19,10 +19,13 @@ from importlib import resources
 from pathlib import Path
 
 import click
+from dotenv import load_dotenv
 
 from yaacli import __version__  # pyright: ignore[reportAttributeAccessIssue]
 from yaacli.config import ConfigManager, WorktreeMetadata, YaacliConfig
 from yaacli.logging import LOG_FILE_NAME, configure_logging, get_logger
+
+_PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 
 logger = get_logger(__name__)
 
@@ -358,6 +361,15 @@ def run_setup_wizard(config_manager: ConfigManager) -> bool:
     return True
 
 
+def load_package_env_files() -> None:
+    """Load .env files for repo development and local invocation.
+
+    Priority favors the current working directory over the package directory.
+    """
+    load_dotenv(_PACKAGE_ROOT / ".env", override=False)
+    load_dotenv(override=False)
+
+
 def load_env_from_config(config: YaacliConfig) -> None:
     """Load environment variables from config [env] section."""
     if config.env:
@@ -571,6 +583,8 @@ def cli(verbose: bool, worktree: bool, worktree_branch: str | None) -> None:
     """
     configure_logging(verbose=verbose)
     logger.info("Starting yaacli v%s", __version__)
+
+    load_package_env_files()
 
     # Load configuration
     config_manager = ConfigManager()

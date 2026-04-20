@@ -27,7 +27,7 @@ PostgreSQL remains an optional storage backend for deployments that prefer an ex
 
 Key areas in this package:
 
-- `infra/` — optional development services and environment helpers
+- `.env.example` — runtime environment example
 - `spec/` — architecture and runtime design documents
 - `tests/` — runtime tests
 - `ya_claw/api/` — HTTP API surface
@@ -54,20 +54,17 @@ From the workspace root, start the default runtime flow:
 
 ```bash
 uv sync --all-packages
+cp packages/ya-claw/.env.example packages/ya-claw/.env
 uv run --package ya-claw ya-claw serve --reload
 ```
 
 The development server listens on `http://127.0.0.1:9042` by default.
+YA Claw loads `YA_CLAW_*` settings from `packages/ya-claw/.env` and the process environment.
+Use [`packages/ya-agent-sdk/.env.example`](../ya-agent-sdk/.env.example) for SDK and tool environment variables.
 
-## Optional PostgreSQL Development Flow
+## External Database
 
-Use the bundled infrastructure helpers when you want an external database for local development:
-
-```bash
-make claw-infra-up
-set -a && source packages/ya-claw/infra/dev.env && set +a
-uv run --package ya-claw ya-claw serve --reload
-```
+Set `YA_CLAW_DATABASE_URL` in `packages/ya-claw/.env` when you want an external PostgreSQL database.
 
 ## Database Commands
 
@@ -100,16 +97,6 @@ Run the web shell from the repository root:
 ```bash
 make web-dev
 ```
-
-## Development Infrastructure
-
-```bash
-make claw-infra-up
-make claw-infra-status
-make claw-infra-down
-```
-
-Development infrastructure settings live in `packages/ya-claw/infra/dev.env`.
 
 ## Docker
 

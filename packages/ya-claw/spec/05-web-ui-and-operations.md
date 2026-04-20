@@ -8,8 +8,7 @@ The web shell is the first-party runtime console.
 
 It should let a user:
 
-- inspect workspaces
-- choose profiles
+- choose or restore a `project_id`
 - create and continue sessions
 - manage schedules
 - watch live run output
@@ -17,13 +16,15 @@ It should let a user:
 - inspect bridge endpoints and relay activity
 - inspect artifacts and run summaries
 
+The web shell acts as an application on top of YA Claw.
+It can remember the last used `project_id` in application state and send it back on the next run.
+YA Claw does not need a runtime-managed project catalog for that flow.
+
 ## Web Shell Sections
 
 ```mermaid
 flowchart LR
-    HOME[Overview] --> WS[Workspaces]
-    HOME --> PF[Profiles]
-    HOME --> SS[Sessions]
+    HOME[Overview] --> SS[Sessions]
     HOME --> SC[Schedules]
     HOME --> BR[Bridges]
     SS --> RV[Run View]
@@ -34,21 +35,13 @@ flowchart LR
 
 Shows runtime health, active sessions, active schedules, bridge activity, and recent runs.
 
-### Workspaces
-
-Lists configured workspaces and resolution previews.
-
-### Profiles
-
-Lists reusable profiles and their runtime settings.
-
 ### Sessions
 
 Shows session lineage, latest state, continuation entry points, and compacted conversation history loaded from `message.json` in the session store.
 
 ### Schedules
 
-Shows next fire time, last run status, target session, and delivery policy.
+Shows next fire time, last run status, target session, delivery policy, and effective project selection.
 
 ### Bridges
 
@@ -56,7 +49,7 @@ Shows bridge endpoints, relay mode, recent dispatches, and channel health.
 
 ### Run View
 
-Shows live event output, final summary, AGUI-aligned event flow, and error state when needed.
+Shows live event output, final summary, AGUI-aligned event flow, effective `project_id`, and error state when needed.
 
 ### Artifacts
 
@@ -89,7 +82,7 @@ The default startup path is:
 The runtime should emit structured logs for:
 
 - startup configuration summary
-- workspace resolution failures
+- project resolution failures
 - run lifecycle transitions
 - schedule trigger and dispatch lifecycle
 - bridge ingress and relay lifecycle
@@ -110,6 +103,7 @@ Each shape should keep the same core baseline:
 - one SQLite database by default
 - optional PostgreSQL for external relational storage
 - one persistent local data directory
+- one configured workspace root
 - in-process active state, schedule dispatch, and bridge coordination
 
 ## Bridge Operations

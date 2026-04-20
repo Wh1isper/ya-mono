@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 
 
 class AgentSettings(BaseSettings):
@@ -14,7 +18,7 @@ class AgentSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="YA_AGENT_",
-        env_file=".env",
+        env_file=(_PACKAGE_ROOT / ".env", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,

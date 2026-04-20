@@ -42,6 +42,9 @@ pip install ya-agent-sdk[tool-search]
 
 ## Quick Start
 
+For workspace development, copy [`packages/ya-agent-sdk/.env.example`](.env.example) to `packages/ya-agent-sdk/.env`.
+For the runnable example scripts, copy [`examples/.env.example`](../../examples/.env.example) to `examples/.env`.
+
 ```python
 from ya_agent_sdk.agents import create_agent, stream_agent
 
