@@ -1,0 +1,34 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: ya-claw-postgres
+    environment:
+      POSTGRES_USER: ya_claw
+      POSTGRES_PASSWORD: ya_claw
+      POSTGRES_DB: ya_claw
+    ports:
+      - "15433:5432"
+    volumes:
+      - ya-claw-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ya_claw -d ya_claw"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: ya-claw-redis
+    ports:
+      - "16380:6379"
+    volumes:
+      - ya-claw-redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  ya-claw-pgdata:
+  ya-claw-redisdata:

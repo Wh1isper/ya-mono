@@ -6,7 +6,7 @@ settings:
 
 importers:
 
-  apps/ya-agent-platform-web:
+  apps/ya-claw-web:
     dependencies:
       react:
         specifier: ^19.2.0

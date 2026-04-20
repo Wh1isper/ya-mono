@@ -11,11 +11,12 @@
 
 - [`packages/ya-agent-sdk`](packages/ya-agent-sdk) — Python SDK for building AI agents with Pydantic AI
 - [`packages/yaacli`](packages/yaacli) — TUI reference implementation built on top of `ya-agent-sdk`
-- [`packages/ya-agent-platform`](packages/ya-agent-platform) — cloud-ready backend package for platform APIs, orchestration, and bridge integration
+- [`packages/ya-claw`](packages/ya-claw) — workspace-native single-node runtime with `WorkspaceProvider`, PostgreSQL, and Redis
+- [`packages/ya-agent-platform`](packages/ya-agent-platform) — reserved package name with TBD scope
 
 ## Apps
 
-- [`apps/ya-agent-platform-web`](apps/ya-agent-platform-web) — Vite + React web shell for management and chat surfaces
+- [`apps/ya-claw-web`](apps/ya-claw-web) — Vite + React web shell for YA Claw
 
 ## Repository Layout
 
@@ -28,7 +29,7 @@
 
 ## Primary Skill Source
 
-- [`skills/agent-builder/`](skills/agent-builder) — source of truth for the `agent-builder` skill bundled into YAACLI
+- [`skills/agent-builder/`](skills/agent-builder/) — source of truth for the `agent-builder` skill bundled into YAACLI
 
 ## Installation
 
@@ -63,25 +64,24 @@ Recommended starting points:
 - Read [`skills/agent-builder/README.md`](skills/agent-builder/README.md) for the skill file map
 - Run examples from [`examples/`](examples/) for end-to-end usage patterns
 
-A practical flow for agent setup is:
+### YA Claw
 
-1. Run `make install`.
-2. Run `make install-skills`.
-3. Tell your agent to read `skills/agent-builder/SKILL.md` in this repository, or read the installed copy under `~/.agents/skills/agent-builder/SKILL.md`.
-4. Start from `examples/general.py`, `examples/deepresearch.py`, or `examples/browser_use.py` depending on the workflow.
+Read the runtime design docs:
 
-When you want to run the local CLI with the latest bundled skills, use:
+- [`packages/ya-claw/spec/README.md`](packages/ya-claw/spec/README.md)
+- [`packages/ya-claw/spec/000-product-overview.md`](packages/ya-claw/spec/000-product-overview.md)
+- [`packages/ya-claw/spec/002-workspace-provider.md`](packages/ya-claw/spec/002-workspace-provider.md)
+
+Run the local development infrastructure:
 
 ```bash
-make cli
+make claw-infra-up
 ```
-
-### YA Agent Platform
 
 Run the backend:
 
 ```bash
-make run-platform
+make run-claw
 ```
 
 Run the web shell:
@@ -90,26 +90,17 @@ Run the web shell:
 make web-dev
 ```
 
-Build and run the combined Docker image:
+Build the images:
 
 ```bash
+make docker-build-claw
 make docker-build-platform
-make docker-run-platform
 ```
 
-Published platform image tags:
+## Dockerfiles
 
-- `ghcr.io/wh1isper/ya-agent-platform:dev` on every update to `main`
-- `ghcr.io/wh1isper/ya-agent-platform:<release-tag>` on each published release
-- `ghcr.io/wh1isper/ya-agent-platform:latest` on each published release
-
-Read the initial architecture docs here:
-
-- [`packages/ya-agent-platform/spec/README.md`](packages/ya-agent-platform/spec/README.md)
-- [`packages/ya-agent-platform/spec/000-platform-overview.md`](packages/ya-agent-platform/spec/000-platform-overview.md)
-- [`packages/ya-agent-platform/spec/001-system-architecture.md`](packages/ya-agent-platform/spec/001-system-architecture.md)
-- [`packages/ya-agent-platform/spec/002-bridge-contract.md`](packages/ya-agent-platform/spec/002-bridge-contract.md)
-- [`packages/ya-agent-platform/spec/003-http-api.md`](packages/ya-agent-platform/spec/003-http-api.md)
+- `Dockerfile.ya-claw` — YA Claw image build
+- `Dockerfile.ya-agent-platform` — YA Agent Platform image build
 
 ## Development
 
@@ -121,46 +112,33 @@ make check
 make test
 ```
 
-Run package-specific targets:
-
-```bash
-make test-platform
-make build-platform
-```
-
 ## Package Guides
 
 - [ya-agent-sdk README](packages/ya-agent-sdk/README.md)
 - [yaacli README](packages/yaacli/README.md)
+- [ya-claw README](packages/ya-claw/README.md)
 - [ya-agent-platform README](packages/ya-agent-platform/README.md)
 - [agent-builder skill](skills/agent-builder/SKILL.md)
 - [Contributing Guide](CONTRIBUTING.md)
 
 ## Workspace Commands
 
-| Command                      | Description                                                            |
-| ---------------------------- | ---------------------------------------------------------------------- |
-| `make install`               | Install Python dependencies, web dependencies, and pre-commit hooks    |
-| `make install-skills`        | Install the `agent-builder` skill bundle into `~/.agents/skills`       |
-| `make lint`                  | Check lock consistency and run pre-commit hooks                        |
-| `make check`                 | Run lock validation, lint, pyright, and deptry for all Python packages |
-| `make test`                  | Run SDK, CLI, and platform tests                                       |
-| `make test-sdk`              | Run SDK tests only                                                     |
-| `make test-cli`              | Run CLI tests only                                                     |
-| `make test-platform`         | Run YA Agent Platform tests only                                       |
-| `make cli`                   | Sync skill assets and launch `yaacli`                                  |
-| `make run-platform`          | Run the YA Agent Platform backend                                      |
-| `make web-install`           | Install web dependencies for `apps/ya-agent-platform-web`              |
-| `make web-dev`               | Run the YA Agent Platform web app                                      |
-| `make docker-build-platform` | Build the combined YA Agent Platform Docker image                      |
-| `make docker-run-platform`   | Run the combined YA Agent Platform Docker image                        |
-| `make build`                 | Build the `ya-agent-sdk` distribution                                  |
-| `make build-platform`        | Build the `ya-agent-platform` distribution                             |
-| `make build-all`             | Build distributions for all workspace packages                         |
-| `make clean-build`           | Remove build artifacts                                                 |
-| `make publish`               | Publish built distributions in `dist/` to PyPI                         |
-| `make build-and-publish`     | Build and publish distributions                                        |
-| `make help`                  | Print available make targets                                           |
+| Command                      | Description                                                         |
+| ---------------------------- | ------------------------------------------------------------------- |
+| `make install`               | Install Python dependencies, web dependencies, and pre-commit hooks |
+| `make install-skills`        | Install the `agent-builder` skill bundle into `~/.agents/skills`    |
+| `make lint`                  | Check lock consistency and run pre-commit hooks                     |
+| `make check`                 | Run lock validation, lint, pyright, deptry, and web checks          |
+| `make test`                  | Run SDK, CLI, and YA Claw tests                                     |
+| `make run-claw`              | Run the YA Claw backend                                             |
+| `make claw-infra-up`         | Start YA Claw PostgreSQL and Redis                                  |
+| `make claw-infra-down`       | Stop YA Claw PostgreSQL and Redis                                   |
+| `make web-dev`               | Run the YA Claw web app                                             |
+| `make build-claw`            | Build the `ya-claw` distribution                                    |
+| `make build-platform`        | Build the reserved `ya-agent-platform` package                      |
+| `make build-all`             | Build distributions for all workspace packages                      |
+| `make docker-build-claw`     | Build the YA Claw Docker image                                      |
+| `make docker-build-platform` | Build the YA Agent Platform Docker image                            |
 
 ## License
 

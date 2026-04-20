@@ -28,7 +28,7 @@ repos:
         entry: prettier --write
         language: node
         additional_dependencies: [prettier@3.6.2]
-        files: ^apps/ya-agent-platform-web/.*\.(ts|tsx|css|html|md)$
+        files: ^apps/ya-claw-web/.*\.(ts|tsx|css|html|md)$
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: "v0.15.10"
     hooks:
