@@ -2438,7 +2438,7 @@ class TUIApp:
             table.add_column("Elapsed", style="dim")
             table.add_column("Prompt", style="dim")
 
-            now = datetime.now()
+            now = datetime.now(UTC)
             for agent_id, info in bg_infos.items():
                 is_running = agent_id in bg_active and not bg_active[agent_id].done()
                 if is_running:
@@ -2477,7 +2477,7 @@ class TUIApp:
             table.add_column("PID", style="dim")
 
             for _proc_id, proc in bg_processes.items():
-                elapsed = (datetime.now() - proc.started_at).total_seconds()
+                elapsed = (datetime.now(UTC) - proc.started_at).total_seconds()
                 status_text = Text(f"running ({elapsed:.0f}s)", style="cyan")
                 pid_str = str(proc.pid) if proc.pid is not None else "-"
                 table.add_row(proc.process_id, status_text, proc.command, pid_str)

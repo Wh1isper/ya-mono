@@ -1,7 +1,7 @@
 """Tests for ya_agent_sdk.events module."""
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from ya_agent_sdk.context import AgentContext
 from ya_agent_sdk.events import (
@@ -28,11 +28,12 @@ def test_agent_event_creation() -> None:
     event = AgentEvent(event_id="test-123")
     assert event.event_id == "test-123"
     assert isinstance(event.timestamp, datetime)
+    assert event.timestamp.tzinfo == UTC
 
 
 def test_agent_event_custom_timestamp() -> None:
     """AgentEvent should accept custom timestamp."""
-    custom_time = datetime(2024, 1, 1, 12, 0, 0)
+    custom_time = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
     event = AgentEvent(event_id="test-123", timestamp=custom_time)
     assert event.timestamp == custom_time
 
@@ -48,6 +49,7 @@ def test_compact_start_event_creation() -> None:
     assert event.event_id == "compact-001"
     assert event.message_count == 50
     assert isinstance(event.timestamp, datetime)
+    assert event.timestamp.tzinfo == UTC
 
 
 def test_compact_start_event_default_message_count() -> None:
@@ -238,6 +240,7 @@ def test_custom_event_subclass() -> None:
     assert event.event_id == "custom-001"
     assert event.custom_field == "my value"
     assert isinstance(event.timestamp, datetime)
+    assert event.timestamp.tzinfo == UTC
 
 
 # =============================================================================

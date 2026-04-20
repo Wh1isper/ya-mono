@@ -6,7 +6,7 @@ multi-step work within agent sessions.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -51,8 +51,8 @@ class Task(BaseModel):
     blocks: list[str] = Field(default_factory=list)
     blocked_by: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def is_blocked(self) -> bool:
         """Check if task is blocked by any incomplete tasks."""
@@ -122,7 +122,7 @@ class TaskManager(BaseModel):
             The created Task instance.
         """
         task_id = self._generate_id()
-        now = datetime.now()
+        now = datetime.now(UTC)
         task = Task(
             id=task_id,
             subject=subject,
@@ -154,7 +154,7 @@ class TaskManager(BaseModel):
             task.blocks.append(blocked_id)
         if blocked_task and task_id not in blocked_task.blocked_by:
             blocked_task.blocked_by.append(task_id)
-            blocked_task.updated_at = datetime.now()
+            blocked_task.updated_at = datetime.now(UTC)
 
     def _add_blocked_by_relationship(self, task_id: str, blocker_id: str) -> None:
         """Add a blocked-by relationship: task_id is blocked by blocker_id."""
@@ -164,7 +164,7 @@ class TaskManager(BaseModel):
             task.blocked_by.append(blocker_id)
         if blocker_task and task_id not in blocker_task.blocks:
             blocker_task.blocks.append(task_id)
-            blocker_task.updated_at = datetime.now()
+            blocker_task.updated_at = datetime.now(UTC)
 
     def _resolve_completion(self, task: Task) -> None:
         """Remove completed task from blocked_by lists of tasks it blocks."""
@@ -172,7 +172,7 @@ class TaskManager(BaseModel):
             blocked_task = self.tasks.get(blocked_id)
             if blocked_task and task.id in blocked_task.blocked_by:
                 blocked_task.blocked_by.remove(task.id)
-                blocked_task.updated_at = datetime.now()
+                blocked_task.updated_at = datetime.now(UTC)
 
     def _update_task_fields(
         self,
@@ -246,7 +246,7 @@ class TaskManager(BaseModel):
         for blocker_id in add_blocked_by or []:
             self._add_blocked_by_relationship(task_id, blocker_id)
 
-        task.updated_at = datetime.now()
+        task.updated_at = datetime.now(UTC)
 
         # Handle completion: remove this task from blocked_by of tasks it blocks
         if was_completed:

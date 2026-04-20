@@ -69,7 +69,7 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -1241,7 +1241,7 @@ class AgentContext(BaseModel):
         """
         if self.start_at is None:
             return None
-        end = self.end_at if self.end_at else datetime.now()
+        end = self.end_at if self.end_at else datetime.now(UTC)
         return end - self.start_at
 
     def get_wrapper_metadata(self) -> dict[str, Any]:
@@ -1273,7 +1273,7 @@ class AgentContext(BaseModel):
                 def get_wrapper_metadata(self) -> dict[str, Any]:
                     return {
                         **super().get_wrapper_metadata(),
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                         "session": self.session_metadata,
                     }
         """
@@ -1288,7 +1288,7 @@ class AgentContext(BaseModel):
         """Return current time with timezone information.
 
         Override this method to provide custom time sources (e.g., NTP, mock for testing).
-        Default implementation uses system local time with timezone offset.
+        Default implementation uses UTC with timezone information.
 
         Returns:
             Current datetime with timezone information (ISO 8601 compatible).
@@ -1306,7 +1306,7 @@ class AgentContext(BaseModel):
                     def get_current_time(self) -> datetime:
                         return datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
         """
-        return datetime.now().astimezone()
+        return datetime.now(UTC)
 
     def _build_active_tasks_element(self, parent: Element, detailed: bool) -> None:
         """Build active-tasks XML element and append to parent if tasks exist.
@@ -1515,7 +1515,7 @@ class AgentContext(BaseModel):
         """
         update: dict[str, Any] = {
             "run_id": _generate_run_id(),
-            "start_at": datetime.now(),
+            "start_at": datetime.now(UTC),
             "end_at": None,
             "tool_id_wrapper": ToolIdWrapper(),
             "agent_stream_queues": _create_stream_queue_factory(),
@@ -1772,7 +1772,7 @@ class AgentContext(BaseModel):
             # normal assignment on private attrs that were previously set via
             # object.__setattr__ (e.g., in prepare_new_run / create_subagent_context).
             object.__setattr__(self, "_entered", True)
-        self.start_at = datetime.now()
+        self.start_at = datetime.now(UTC)
         self.tool_id_wrapper.clear()
         # Subscribe to message bus for this agent
         self.message_bus.subscribe(self._agent_id)
@@ -1780,7 +1780,7 @@ class AgentContext(BaseModel):
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Exit the context and record end time."""
-        self.end_at = datetime.now()
+        self.end_at = datetime.now(UTC)
         # For main agent: clear message bus on exit
         # For subagents: unsubscribe to free cursor
         if self._agent_id == "main":
