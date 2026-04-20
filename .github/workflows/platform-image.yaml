@@ -65,7 +65,7 @@ jobs:
             type=raw,value=dev
           labels: |
             org.opencontainers.image.title=ya-agent-platform
-            org.opencontainers.image.description=TBD YA Agent Platform image
+            org.opencontainers.image.description=WIP stateless YA Agent Platform service image
 
       - name: Build and push dev image
         uses: docker/build-push-action@v6
@@ -111,7 +111,7 @@ jobs:
             type=raw,value=latest
           labels: |
             org.opencontainers.image.title=ya-agent-platform
-            org.opencontainers.image.description=TBD YA Agent Platform image
+            org.opencontainers.image.description=WIP stateless YA Agent Platform service image
 
       - name: Build and push release image
         uses: docker/build-push-action@v6

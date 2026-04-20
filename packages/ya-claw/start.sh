@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-if [ "${YA_CLAW_AUTO_MIGRATE:-true}" = "true" ] && [ -n "${YA_CLAW_DATABASE_URL:-}" ]; then
+if [ "${YA_CLAW_AUTO_MIGRATE:-true}" = "true" ]; then
   ya-claw migrate
 fi
 

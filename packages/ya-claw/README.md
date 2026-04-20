@@ -1,6 +1,6 @@
 # YA Claw
 
-Workspace-native single-node agent runtime for the `ya-mono` workspace.
+Workspace-native single-node agent runtime and web service for the `ya-mono` workspace.
 
 ## Scope
 
@@ -9,50 +9,67 @@ YA Claw packages a durable runtime shell around `ya-agent-sdk` with:
 - registered workspaces resolved through `WorkspaceProvider`
 - reusable agent profiles
 - resumable sessions and runs
-- PostgreSQL-backed relational state
-- Redis-backed live events and coordination
+- in-process active state and async task coordination
+- session schedules for timed execution
+- SQLite-first durable state with optional PostgreSQL
+- local filesystem artifacts and exported state
 - a bundled web shell for local and self-hosted use
+- bridge adapters that connect IM channels to the YA Claw service
 
 ## Current Direction
 
-The current delivery target is a single-node runtime with one API service, one PostgreSQL, one Redis, and a local filesystem data root.
+The target single-node shape runs as one web service.
+The runtime keeps active session state, live delivery, async tasks, schedule dispatch, and bridge coordination inside one runtime process.
+SQLite is the default durable store.
+PostgreSQL remains an optional storage backend for deployments that prefer an external relational database.
 
 ## Layout
 
-```text
-packages/ya-claw/
-├── README.md
-├── infra/
-│   ├── dev.env
-│   └── docker-compose.dev.yml
-├── pyproject.toml
-├── spec/
-├── start.sh
-├── tests/
-└── ya_claw/
-    ├── alembic/
-    ├── api/
-    ├── app.py
-    ├── cli.py
-    ├── config.py
-    ├── db/
-    └── redis.py
-```
+Key areas in this package:
+
+- `infra/` — optional development services and environment helpers
+- `spec/` — architecture and runtime design documents
+- `tests/` — runtime tests
+- `ya_claw/api/` — HTTP API surface
+- `ya_claw/bridge/` — IM bridge adapters and relay logic
+- `ya_claw/app.py` and `ya_claw/cli.py` — application entrypoints
+- `ya_claw/config.py` — runtime configuration
+
+## Runtime Shape
+
+The runtime shape is:
+
+- one YA Claw web service
+- one in-process runtime state manager
+- one session scheduler
+- one bridge subsystem for external channels
+- one SQLite database by default
+- optional PostgreSQL
+- one local data directory
+- one bundled web shell
 
 ## Quick Start
 
-From the workspace root:
+From the workspace root, start the default runtime flow:
 
 ```bash
 uv sync --all-packages
-make claw-infra-up
-set -a && source packages/ya-claw/infra/dev.env && set +a
 uv run --package ya-claw ya-claw serve --reload
 ```
 
 The development server listens on `http://127.0.0.1:9042` by default.
 
-## Database and Redis Commands
+## Optional PostgreSQL Development Flow
+
+Use the bundled infrastructure helpers when you want an external database for local development:
+
+```bash
+make claw-infra-up
+set -a && source packages/ya-claw/infra/dev.env && set +a
+uv run --package ya-claw ya-claw serve --reload
+```
+
+## Database Commands
 
 ```bash
 uv run --package ya-claw ya-claw migrate
@@ -60,6 +77,21 @@ uv run --package ya-claw ya-claw db current
 uv run --package ya-claw ya-claw db history
 uv run --package ya-claw ya-claw db migrate "add session tables"
 ```
+
+## Bridge Commands
+
+The CLI owns a top-level bridge command group.
+
+```bash
+uv run --package ya-claw ya-claw bridge ls
+uv run --package ya-claw ya-claw bridge run lark
+uv run --package ya-claw ya-claw bridge serve lark
+```
+
+### Bridge Relay Modes
+
+- `task relay` — a bridge submits work to YA Claw as an async session flow and delivers agent output back through the channel adapter or channel CLI
+- `stream relay` — a bridge opens a foreground run, consumes SSE from the YA Claw service, and streams channel-ready output directly
 
 ## Web Shell
 
@@ -77,7 +109,7 @@ make claw-infra-status
 make claw-infra-down
 ```
 
-Default development URLs live in `packages/ya-claw/infra/dev.env`.
+Development infrastructure settings live in `packages/ya-claw/infra/dev.env`.
 
 ## Docker
 
@@ -89,16 +121,18 @@ docker build -f Dockerfile.ya-claw -t ya-claw:dev .
 
 ## Initial API Surface
 
-- `GET /healthz` — service health probe with PostgreSQL and Redis component status
+- `GET /healthz` — service health probe with storage and runtime component status
 - `GET /api/v1/claw/info` — runtime metadata and active surfaces
 - `GET /api/v1/claw/topology` — high-level component topology for the UI and tooling
+- `GET /api/v1/schedules` — session schedule inspection surface
+- `POST /api/v1/bridges/{bridge_id}/dispatch` — bridge ingress surface
 
 ## Spec Set
 
 - [`spec/README.md`](spec/README.md)
-- [`spec/000-product-overview.md`](spec/000-product-overview.md)
-- [`spec/001-system-architecture.md`](spec/001-system-architecture.md)
-- [`spec/002-workspace-provider.md`](spec/002-workspace-provider.md)
-- [`spec/003-session-and-runtime.md`](spec/003-session-and-runtime.md)
-- [`spec/004-storage-and-streaming.md`](spec/004-storage-and-streaming.md)
-- [`spec/005-http-api-and-web-ui.md`](spec/005-http-api-and-web-ui.md)
+- [`spec/00-overview.md`](spec/00-overview.md)
+- [`spec/01-configuration-and-workspace-provider.md`](spec/01-configuration-and-workspace-provider.md)
+- [`spec/02-execution-and-session.md`](spec/02-execution-and-session.md)
+- [`spec/03-storage-and-streaming.md`](spec/03-storage-and-streaming.md)
+- [`spec/04-api.md`](spec/04-api.md)
+- [`spec/05-web-ui-and-operations.md`](spec/05-web-ui-and-operations.md)

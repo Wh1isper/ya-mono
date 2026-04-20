@@ -6,8 +6,8 @@ Workspace members:
 
 - `packages/ya-agent-sdk` — SDK for building AI agents with Pydantic AI
 - `packages/yaacli` — TUI reference implementation built on top of the SDK
-- `packages/ya-claw` — workspace-native single-node runtime with `WorkspaceProvider`, PostgreSQL, and Redis
-- `packages/ya-agent-platform` — reserved package name with TBD scope
+- `packages/ya-claw` — workspace-native single-node runtime web service with `WorkspaceProvider`, in-process runtime state, schedules, bridges, and SQLite-first storage
+- `packages/ya-agent-platform` — WIP stateless agent service with TBD scope
 
 Shared repository areas:
 
@@ -29,56 +29,16 @@ Most architecture work in this repository targets `packages/ya-agent-sdk` and `p
 - **Build System**: hatchling
 - **Frontend Stack**: Vite + React + TypeScript
 
-## YA Claw Package Structure
-
-```text
-packages/ya-claw/
-├── pyproject.toml
-├── README.md
-├── infra/
-├── spec/
-├── tests/
-└── ya_claw/
-    ├── api/
-    ├── app.py
-    ├── cli.py
-    ├── config.py
-    └── __main__.py
-```
-
-## Reserved Package Structure
-
-```text
-packages/ya-agent-platform/
-├── pyproject.toml
-├── README.md
-└── ya_agent_platform/
-    └── __init__.py
-```
-
-## Web App Structure
-
-```text
-apps/ya-claw-web/
-├── package.json
-├── README.md
-├── index.html
-├── src/
-│   ├── App.tsx
-│   ├── main.tsx
-│   └── styles.css
-└── vite.config.ts
-```
-
 ## Runtime Direction
 
 - YA Claw is the active runtime product in this repository
 - the current delivery target is a single-node runtime
 - `WorkspaceProvider` is the core extension boundary
-- PostgreSQL stores durable relational state
-- Redis handles live events and coordination
+- active session state, live events, async task coordination, schedules, and bridge coordination stay in process
+- SQLite is the default durable store
+- PostgreSQL is an optional durable store for deployments that prefer an external database
 - local filesystem stores exported state and artifacts
-- `ya-agent-platform` stays reserved with TBD scope
+- `ya-agent-platform` is a WIP stateless agent service with TBD scope
 
 ## Development Workflow
 
@@ -90,16 +50,16 @@ After changing code, run:
 
 Useful commands:
 
-| Command                      | Description                                    |
-| ---------------------------- | ---------------------------------------------- |
-| `make run-claw`              | Run the YA Claw backend                        |
-| `make claw-infra-up`         | Start YA Claw PostgreSQL and Redis             |
-| `make claw-infra-down`       | Stop YA Claw PostgreSQL and Redis              |
-| `make web-dev`               | Run the YA Claw web app                        |
-| `make build-claw`            | Build the `ya-claw` package                    |
-| `make build-platform`        | Build the reserved `ya-agent-platform` package |
-| `make docker-build-claw`     | Build the YA Claw Docker image                 |
-| `make docker-build-platform` | Build the YA Agent Platform Docker image       |
+| Command                      | Description                                       |
+| ---------------------------- | ------------------------------------------------- |
+| `make run-claw`              | Run the YA Claw backend                           |
+| `make claw-infra-up`         | Start optional YA Claw development infrastructure |
+| `make claw-infra-down`       | Stop optional YA Claw development infrastructure  |
+| `make web-dev`               | Run the YA Claw web app                           |
+| `make build-claw`            | Build the `ya-claw` package                       |
+| `make build-platform`        | Build the WIP `ya-agent-platform` package         |
+| `make docker-build-claw`     | Build the YA Claw Docker image                    |
+| `make docker-build-platform` | Build the YA Agent Platform Docker image          |
 
 ## Environment Configuration
 

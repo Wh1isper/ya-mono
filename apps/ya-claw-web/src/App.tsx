@@ -23,7 +23,7 @@ const productTracks = [
   {
     title: 'Sessions and Runs',
     description:
-      'Keep durable session state in PostgreSQL and stream live runtime events through Redis.',
+      'Keep committed runtime state in SQLite by default, track active work in process memory, and stream live output to connected clients.',
   },
 ]
 
@@ -57,7 +57,7 @@ function App() {
         <h1>YA Claw</h1>
         <p className="hero-copy">
           A local-first runtime shell for ya-agent-sdk with WorkspaceProvider,
-          PostgreSQL, Redis, and a bundled web UI.
+          in-process runtime state, SQLite-first storage, and a bundled web UI.
         </p>
       </section>
 

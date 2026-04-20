@@ -9,9 +9,11 @@ from ya_claw.config import get_settings
 
 
 @pytest.fixture(autouse=True)
-def clear_claw_settings(monkeypatch) -> None:
-    for env_name in ("YA_CLAW_DATABASE_URL", "YA_CLAW_REDIS_URL", "YA_CLAW_WEB_DIST_DIR"):
+def clear_claw_settings(monkeypatch, tmp_path: Path) -> None:
+    for env_name in ("YA_CLAW_DATABASE_URL", "YA_CLAW_WEB_DIST_DIR"):
         monkeypatch.delenv(env_name, raising=False)
+
+    monkeypatch.setenv("YA_CLAW_DATA_DIR", str(tmp_path / "runtime-data"))
 
     get_settings.cache_clear()
     yield
@@ -23,7 +25,7 @@ def test_healthz() -> None:
         response = client.get("/healthz")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "postgres": "unavailable", "redis": "unavailable"}
+    assert response.json() == {"status": "ok", "database": "ok", "runtime_state": "ok"}
 
 
 def test_claw_info() -> None:

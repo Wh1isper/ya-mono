@@ -31,19 +31,26 @@ async def claw_info() -> ClawInfo:
         public_base_url=settings.public_base_url,
         surfaces=["workspaces", "profiles", "sessions", "runs", "artifacts", "events", "web-shell"],
         provider_model="one configured WorkspaceProvider resolves local workspace bindings for runtime execution",
-        storage_model="PostgreSQL stores durable state, Redis carries live events, and the local filesystem stores artifacts",
+        storage_model="SQLite is the default durable store, PostgreSQL remains optional, in-process memory carries active runtime state, and the local filesystem stores artifacts",
     )
 
 
 @router.get("/topology", response_model=ClawTopology)
 async def claw_topology() -> ClawTopology:
     return ClawTopology(
-        nodes=["web-shell", "claw-api", "workspace-provider", "runtime-coordinator", "postgres", "redis"],
+        nodes=[
+            "web-shell",
+            "claw-api",
+            "workspace-provider",
+            "runtime-coordinator",
+            "runtime-state",
+            "relational-store",
+        ],
         edges=[
             "web-shell -> claw-api",
             "claw-api -> workspace-provider",
             "claw-api -> runtime-coordinator",
-            "runtime-coordinator -> postgres",
-            "runtime-coordinator -> redis",
+            "runtime-coordinator -> runtime-state",
+            "runtime-coordinator -> relational-store",
         ],
     )

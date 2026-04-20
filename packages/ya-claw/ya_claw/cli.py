@@ -5,7 +5,8 @@ from pathlib import Path
 import click
 import uvicorn
 
-from ya_claw.config import get_settings
+from ya_claw.bridge.cli import bridge
+from ya_claw.config import get_settings, resolve_database_url
 
 
 @click.group()
@@ -22,11 +23,7 @@ def _alembic_config():
 
 def _ensure_database_url() -> str:
     settings = get_settings()
-    if settings.database_url:
-        return settings.database_url
-
-    click.echo("Error: YA_CLAW_DATABASE_URL is required.", err=True)
-    raise SystemExit(1)
+    return resolve_database_url(settings)
 
 
 def _apply_database_migrations(revision: str = "head") -> None:
@@ -48,7 +45,7 @@ def serve(host: str | None, port: int | None, reload: bool | None, migrate: bool
     resolved_reload = settings.reload if reload is None else reload
     resolved_migrate = settings.auto_migrate if migrate is None else migrate
 
-    if resolved_migrate and settings.database_url:
+    if resolved_migrate:
         _apply_database_migrations()
         click.echo("Database migrations applied.")
 
@@ -59,6 +56,9 @@ def serve(host: str | None, port: int | None, reload: bool | None, migrate: bool
         port=resolved_port,
         reload=resolved_reload,
     )
+
+
+cli.add_command(bridge)
 
 
 @cli.command("migrate")

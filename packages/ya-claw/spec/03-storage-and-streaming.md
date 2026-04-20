@@ -8,28 +8,29 @@ YA Claw uses three storage roles with clear separation of concerns.
 flowchart TB
     subgraph Runtime
         EXEC[Execution Coordinator]
-        EVT[Event Processor]
+        TASKS[Async Task Registry]
+        EVT[Event Fan-out]
     end
 
     subgraph Durable
-        PG[(PostgreSQL)]
+        SQL[(SQLite / PostgreSQL)]
         FS[(Local Filesystem)]
     end
 
-    subgraph Live
-        RD[(Redis)]
+    subgraph Active
+        MEM[(In-Process Memory)]
     end
 
-    EXEC --> PG
+    EXEC --> SQL
     EXEC --> FS
-    EXEC --> RD
-    EVT --> RD
-    EVT --> PG
+    EXEC --> MEM
+    TASKS --> MEM
+    EVT --> MEM
 ```
 
-## PostgreSQL
+## Relational Store
 
-PostgreSQL is the durable source of truth for queryable runtime state.
+The relational store is the durable source of truth for queryable runtime state.
 
 It should store:
 
@@ -39,51 +40,108 @@ It should store:
 - artifact metadata and references
 - event checkpoints or replay summaries where needed
 
-### PostgreSQL Principle
+### Relational Store Principle
 
-PostgreSQL should answer runtime inspection and list queries without requiring large blob reads.
+The relational store should answer runtime inspection and list queries without requiring large blob reads.
 
-## Redis
+## Backend Selection
 
-Redis is the live coordination and delivery layer.
+YA Claw should support one relational backend per deployment.
+
+- SQLite is the default backend for local and self-hosted single-node deployments
+- PostgreSQL is an optional backend for deployments that prefer an external relational store
+
+## In-Process Memory
+
+In-process memory owns active runtime state for one node.
 
 It should carry:
 
-- active run event fan-out
-- short-lived stream buffers
+- active run handles
+- async task registry entries
 - cancellation and interruption signals
-- watcher presence or transport state when needed
+- live SSE subscriber fan-out
+- short-lived stream buffers for connected clients
 
-### Redis Principle
+### In-Process Memory Principle
 
-Redis owns short-lived runtime state.
-PostgreSQL owns durable runtime state.
+Process memory owns active runtime state.
+The relational store owns committed runtime state.
 
 ## Local Filesystem
 
-The local filesystem stores large immutable payloads.
+The local filesystem has two durable areas:
+
+- a **project store** for run outputs and workspace-facing files
+- a **session store** for durable session state and compacted conversation records
+
+### Project Store
+
+The project store holds durable payloads that are naturally attached to a workspace or run output.
+Each project directory should stay flat.
 
 It should store:
 
-- exported SDK state blobs
-- retained uploads
 - generated files
+- retained uploads
 - run logs and traces
-- optional archived event chunks
+- exported artifacts intended for download or later inspection
+
+### Session Store
+
+The session store holds durable session continuity data.
+Each session directory should stay flat.
+
+It should store:
+
+- `state.json`
+- `message.json`
+
+### Session State File
+
+Each session should have one durable `state.json` file that captures the committed continuation point.
+
+That file should include:
+
+- exported SDK state
+- message history
+- `ClawAgentContext`
+- compact metadata such as last committed run, compact version, and timestamps
+
+### Message File
+
+`message.json` is the durable Web UI conversation record.
+It should be written at session end or at another committed boundary and should contain:
+
+- compacted conversation messages for the completed round
+- AGUI-aligned message metadata for rendering a session timeline
+- references to associated run, session, and artifact records
+
+`message.json` is the preferred source for Web UI conversation history.
+It keeps the UI aligned with an AGUI-style message model while the runtime continues to use live event streaming for active runs.
 
 Suggested layout:
 
 ```text
 data/
-├── sessions/
-│   └── {session_id}/
-├── runs/
-│   └── {run_id}/
-│       ├── logs/
-│       ├── traces/
-│       └── artifacts/
-└── uploads/
+├── projects/
+│   └── {project_id}/
+└── session-store/
+    └── {session_id}/
+        ├── state.json
+        └── message.json
 ```
+
+## AGUI Alignment
+
+YA Claw should align its user-facing session transport with AGUI principles:
+
+- event-based streaming for active runs
+- durable message records for user-facing history
+- structured state continuity between the runtime and Web UI
+
+The runtime may emit richer internal events than the Web UI needs.
+The session store should retain the committed message view that the UI reads back later.
 
 ## Event Delivery Model
 
@@ -91,15 +149,17 @@ data/
 
 1. SDK emits stream events
 2. execution coordinator enriches them with run context
-3. event processor converts them into external protocol events
-4. transport layer publishes them through SSE and Redis-backed delivery
+3. runtime fan-out publishes them to connected clients from in-process memory
+4. committed summaries, `state.json`, and `message.json` land in durable storage at commit boundaries
 
 ### Transport Shape
 
 The single-node baseline should support:
 
 - direct SSE for browser-native clients
-- Redis-backed stream buffers for resumable or decoupled consumers
+- in-process subscriber fan-out for connected watchers
+- AGUI-aligned message views for committed session history
+- durable run and session summaries for reconnect and inspection workflows
 
 ## Replay Model
 
@@ -108,10 +168,13 @@ The runtime should retain enough durable summary data to support:
 - session timeline views
 - run detail views
 - debugging and audit inspection
+- committed conversation history in the Web UI
 
-The full live stream does not need to remain in Redis after run completion.
+Live event buffers stay scoped to the process lifetime.
+Committed summaries, `state.json`, and `message.json` should stay durable.
 
 ## Artifact Principle
 
-Artifact metadata should stay queryable from PostgreSQL.
-Artifact payloads should stay on the filesystem under the runtime data root.
+Artifact metadata should stay queryable from the relational store.
+Artifact payloads should stay in the project store under the runtime data root.
+Session continuity data should stay in the session store under the runtime data root.

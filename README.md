@@ -11,8 +11,8 @@
 
 - [`packages/ya-agent-sdk`](packages/ya-agent-sdk) — Python SDK for building AI agents with Pydantic AI
 - [`packages/yaacli`](packages/yaacli) — TUI reference implementation built on top of `ya-agent-sdk`
-- [`packages/ya-claw`](packages/ya-claw) — workspace-native single-node runtime with `WorkspaceProvider`, PostgreSQL, and Redis
-- [`packages/ya-agent-platform`](packages/ya-agent-platform) — reserved package name with TBD scope
+- [`packages/ya-claw`](packages/ya-claw) — workspace-native single-node runtime web service with `WorkspaceProvider`, in-process runtime state, schedules, bridges, and SQLite-first storage
+- [`packages/ya-agent-platform`](packages/ya-agent-platform) — WIP stateless agent service with TBD scope
 
 ## Apps
 
@@ -69,25 +69,33 @@ Recommended starting points:
 Read the runtime design docs:
 
 - [`packages/ya-claw/spec/README.md`](packages/ya-claw/spec/README.md)
-- [`packages/ya-claw/spec/000-product-overview.md`](packages/ya-claw/spec/000-product-overview.md)
-- [`packages/ya-claw/spec/002-workspace-provider.md`](packages/ya-claw/spec/002-workspace-provider.md)
+- [`packages/ya-claw/spec/00-overview.md`](packages/ya-claw/spec/00-overview.md)
+- [`packages/ya-claw/spec/01-configuration-and-workspace-provider.md`](packages/ya-claw/spec/01-configuration-and-workspace-provider.md)
 
-Run the local development infrastructure:
-
-```bash
-make claw-infra-up
-```
-
-Run the backend:
+Run the default runtime flow:
 
 ```bash
 make run-claw
+```
+
+Start optional development infrastructure when you want an external database flow:
+
+```bash
+make claw-infra-up
 ```
 
 Run the web shell:
 
 ```bash
 make web-dev
+```
+
+Bridge commands live under the main YA Claw CLI:
+
+```bash
+uv run --package ya-claw ya-claw bridge ls
+uv run --package ya-claw ya-claw bridge run lark
+uv run --package ya-claw ya-claw bridge serve lark
 ```
 
 Build the images:
@@ -131,11 +139,11 @@ make test
 | `make check`                 | Run lock validation, lint, pyright, deptry, and web checks          |
 | `make test`                  | Run SDK, CLI, and YA Claw tests                                     |
 | `make run-claw`              | Run the YA Claw backend                                             |
-| `make claw-infra-up`         | Start YA Claw PostgreSQL and Redis                                  |
-| `make claw-infra-down`       | Stop YA Claw PostgreSQL and Redis                                   |
+| `make claw-infra-up`         | Start optional YA Claw development infrastructure                   |
+| `make claw-infra-down`       | Stop optional YA Claw development infrastructure                    |
 | `make web-dev`               | Run the YA Claw web app                                             |
 | `make build-claw`            | Build the `ya-claw` distribution                                    |
-| `make build-platform`        | Build the reserved `ya-agent-platform` package                      |
+| `make build-platform`        | Build the WIP `ya-agent-platform` package                           |
 | `make build-all`             | Build distributions for all workspace packages                      |
 | `make docker-build-claw`     | Build the YA Claw Docker image                                      |
 | `make docker-build-platform` | Build the YA Agent Platform Docker image                            |

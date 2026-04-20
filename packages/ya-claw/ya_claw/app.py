@@ -10,9 +10,9 @@ from fastapi.responses import FileResponse
 
 from ya_claw.api.claw import router as claw_router
 from ya_claw.api.health import router as health_router
-from ya_claw.config import ClawSettings, get_settings
+from ya_claw.config import ClawSettings, get_settings, resolve_database_url
 from ya_claw.db.engine import create_engine
-from ya_claw.redis import create_redis_client
+from ya_claw.runtime_state import create_runtime_state
 
 _RESERVED_FRONTEND_PATHS = ("api", "docs", "redoc", "openapi.json", "healthz")
 
@@ -20,28 +20,23 @@ _RESERVED_FRONTEND_PATHS = ("api", "docs", "redoc", "openapi.json", "healthz")
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
 
-    app.state.db_engine = None
-    app.state.redis = None
-
-    if settings.database_url:
-        app.state.db_engine = create_engine(
-            settings.database_url,
-            echo=settings.database_echo,
-            pool_size=settings.database_pool_size,
-            max_overflow=settings.database_max_overflow,
-            pool_recycle=settings.database_pool_recycle_seconds,
-        )
-
-    if settings.redis_url:
-        app.state.redis = create_redis_client(settings.redis_url)
+    app.state.db_engine = create_engine(
+        resolve_database_url(settings),
+        echo=settings.database_echo,
+        pool_size=settings.database_pool_size,
+        max_overflow=settings.database_max_overflow,
+        pool_recycle=settings.database_pool_recycle_seconds,
+    )
+    app.state.runtime_state = create_runtime_state()
 
     try:
         yield
     finally:
-        redis_client = app.state.redis
-        if redis_client is not None:
-            await redis_client.aclose()
+        runtime_state = app.state.runtime_state
+        if runtime_state is not None:
+            await runtime_state.aclose()
 
         db_engine = app.state.db_engine
         if db_engine is not None:
@@ -99,7 +94,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version="0.1.0",
-        description="Workspace-native single-node agent runtime built on top of ya-agent-sdk.",
+        description="Workspace-native single-node agent runtime with in-process state and SQLite-first storage.",
         lifespan=_lifespan,
     )
     app.state.settings = settings
