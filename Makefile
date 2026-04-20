@@ -59,21 +59,6 @@ claw-db-migrate: ## Generate a YA Claw migration (MSG required)
 	@echo "Generating ya-claw migration"
 	@uv run --package ya-claw ya-claw db migrate "$(MSG)"
 
-.PHONY: claw-infra-up
-claw-infra-up: ## Start optional YA Claw PostgreSQL development database
-	@echo "Starting ya-claw development infrastructure"
-	@docker compose -f packages/ya-claw/infra/docker-compose.dev.yml up -d
-
-.PHONY: claw-infra-down
-claw-infra-down: ## Stop optional YA Claw PostgreSQL development database
-	@echo "Stopping ya-claw development infrastructure"
-	@docker compose -f packages/ya-claw/infra/docker-compose.dev.yml down
-
-.PHONY: claw-infra-status
-claw-infra-status: ## Show YA Claw dev infrastructure status
-	@echo "Showing ya-claw development infrastructure status"
-	@docker compose -f packages/ya-claw/infra/docker-compose.dev.yml ps
-
 .PHONY: web-install
 web-install: ## Install web app dependencies with corepack pnpm
 	@echo "Installing ya-claw-web dependencies"

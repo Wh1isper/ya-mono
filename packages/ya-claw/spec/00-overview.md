@@ -2,12 +2,14 @@
 
 ## Definition
 
-YA Claw is a workspace-native single-node runtime web service for `ya-agent-sdk`.
+YA Claw is a single-node runtime web service for `ya-agent-sdk`.
 
 It provides a durable local execution shell around SDK agent construction and streaming primitives with:
 
 - reusable agent profiles
-- provider-resolved workspaces
+- one configured workspace root
+- opaque `project_id` input carried by applications such as bridges and the web shell
+- resolver-driven execution scope construction
 - resumable sessions and runs
 - session schedules for timed execution
 - in-process async task coordination
@@ -21,7 +23,8 @@ It provides a durable local execution shell around SDK agent construction and st
 ### Product Goals
 
 - make local and self-hosted deployment the default operating model
-- treat workspace resolution as a first-class runtime concern
+- keep runtime file and shell access bounded by one configured workspace root
+- let applications choose `project_id` and carry their own project mapping logic
 - preserve SDK capabilities such as continuation, subagents, compact, and streaming
 - keep the runtime small enough to understand and evolve quickly
 - keep active state management inside one process for the single-node target
@@ -31,6 +34,7 @@ It provides a durable local execution shell around SDK agent construction and st
 
 - hosted platform concerns
 - organization-level control plane design
+- runtime-managed project catalogs
 - distributed runtime scheduling
 - bridge provider feature parity freeze before first implementation
 
@@ -48,7 +52,7 @@ flowchart TB
     subgraph Runtime[YA Claw Service]
         API[HTTP API]
         CFG[Config Resolver]
-        WSP[Workspace Resolver]
+        PROJ[Project Resolver]
         EXEC[Execution Coordinator]
         SESS[Session Manager]
         TASKS[Async Task Registry]
@@ -77,7 +81,7 @@ flowchart TB
     BRIDGE --> API
 
     API --> CFG
-    API --> WSP
+    API --> PROJ
     API --> EXEC
     API --> SESS
     API --> TASKS
@@ -97,7 +101,7 @@ flowchart TB
     SCHED --> MEM
     BRIDGE --> MEM
     EVT --> MEM
-    WSP --> FS
+    PROJ --> FS
 ```
 
 ## Runtime Boundary
@@ -105,7 +109,8 @@ flowchart TB
 | Concern                    | Owner                     |
 | -------------------------- | ------------------------- |
 | Agent execution primitives | `ya-agent-sdk`            |
-| Workspace resolution       | YA Claw                   |
+| Workspace root enforcement | YA Claw                   |
+| Project resolution         | YA Claw                   |
 | Session persistence        | YA Claw                   |
 | Run orchestration          | YA Claw                   |
 | Schedule dispatch          | YA Claw                   |
@@ -113,6 +118,7 @@ flowchart TB
 | Active task tracking       | YA Claw                   |
 | Event delivery             | YA Claw                   |
 | Artifact persistence       | YA Claw                   |
+| Project mapping            | bridge or web application |
 | Channel transport          | bridge adapter            |
 | LLM provider interaction   | SDK + model provider      |
 | Container lifecycle        | user or external operator |
@@ -121,17 +127,31 @@ flowchart TB
 
 The architecture revolves around a small set of runtime objects:
 
-- **Workspace**: a named execution target known to the runtime
-- **Workspace Binding**: the resolved execution snapshot returned by `WorkspaceProvider`
+- **Workspace Root**: the configured top-level directory that bounds runtime file and shell access
+- **Project ID**: an opaque application-provided selector that YA Claw carries and records
+- **Project Resolver**: the runtime component that maps `project_id` and metadata to an execution scope
+- **Execution Scope**: the resolved working directory, path access, and environment view for one run
 - **Agent Profile**: reusable runtime configuration for model, prompt, tools, and policy
 - **Session**: durable conversational continuity
 - **Run**: one execution attempt inside a session
-- **Session Schedule**: a timed trigger bound to one session template or continuation target
+- **Session Schedule**: a timed trigger bound to one session or continuation target
 - **Async Task**: an in-process background activity associated with one runtime process
 - **Bridge Endpoint**: one configured channel integration and relay policy
 - **Artifact**: durable file output or retained input produced by a run
 
 These objects are architectural concepts first. Exact table layouts should stay implementation-driven.
+
+## Project Resolution Model
+
+Applications such as bridges and the web shell choose `project_id`.
+YA Claw consumes that value, stores it with the session and run, and resolves it into an execution scope.
+
+The runtime stays responsible for:
+
+- applying one configured workspace root
+- resolving effective working directory and path access
+- validating that resolved paths stay inside the workspace root
+- exposing the resulting scope to virtual file and shell tools
 
 ## Bridge Model
 

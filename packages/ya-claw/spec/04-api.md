@@ -2,7 +2,7 @@
 
 YA Claw exposes one local HTTP API under `/api/v1`.
 
-The API should stay resource-oriented and small enough to match the single-node runtime shape.
+The API should stay small enough to match the single-node runtime shape.
 
 ## Resource Groups
 
@@ -10,14 +10,12 @@ The API should stay resource-oriented and small enough to match the single-node 
 flowchart TB
     ROOT[/api/v1]
     ROOT --> CLAW[/claw]
-    ROOT --> WORKSPACES[/workspaces]
-    ROOT --> PROFILES[/profiles]
     ROOT --> SESSIONS[/sessions]
     ROOT --> RUNS[/runs]
+    ROOT --> EVENTS[/events]
     ROOT --> SCHEDULES[/schedules]
     ROOT --> BRIDGES[/bridges]
     ROOT --> ARTIFACTS[/artifacts]
-    ROOT --> EVENTS[/events]
 ```
 
 ## Top-level Endpoints
@@ -27,25 +25,6 @@ flowchart TB
 | `GET`  | `/healthz`              | service, storage, and runtime health |
 | `GET`  | `/api/v1/claw/info`     | runtime metadata                     |
 | `GET`  | `/api/v1/claw/topology` | high-level topology                  |
-
-## Workspaces
-
-| Method  | Path                                        | Purpose                    |
-| ------- | ------------------------------------------- | -------------------------- |
-| `POST`  | `/api/v1/workspaces`                        | create workspace           |
-| `GET`   | `/api/v1/workspaces`                        | list workspaces            |
-| `GET`   | `/api/v1/workspaces/{workspace_id}`         | inspect workspace          |
-| `POST`  | `/api/v1/workspaces/{workspace_id}/resolve` | preview binding resolution |
-| `PATCH` | `/api/v1/workspaces/{workspace_id}`         | update workspace           |
-
-## Profiles
-
-| Method  | Path                            | Purpose         |
-| ------- | ------------------------------- | --------------- |
-| `POST`  | `/api/v1/profiles`              | create profile  |
-| `GET`   | `/api/v1/profiles`              | list profiles   |
-| `GET`   | `/api/v1/profiles/{profile_id}` | inspect profile |
-| `PATCH` | `/api/v1/profiles/{profile_id}` | update profile  |
 
 ## Sessions
 
@@ -106,6 +85,7 @@ A bridge dispatch request should carry:
 - source platform event payload
 - target relay mode
 - session routing policy
+- opaque `project_id` or project-selection metadata
 - optional reply target metadata
 
 ## Artifacts
@@ -128,10 +108,16 @@ A bridge dispatch request should carry:
 A run request should carry:
 
 - session creation or continuation intent
-- selected profile
-- selected workspace and optional project
+- selected profile when profiles are runtime-managed
+- opaque `project_id`
 - input payload parts
+- request metadata for project resolution and delivery
 - optional transport override
+
+### Request Design Principle
+
+YA Claw consumes `project_id` and metadata.
+YA Claw does not need project CRUD endpoints.
 
 ## API Style
 
@@ -146,8 +132,8 @@ Suggested error shape:
 ```json
 {
   "error": {
-    "code": "workspace_resolution_failed",
-    "message": "WorkspaceProvider could not resolve the workspace.",
+    "code": "project_resolution_failed",
+    "message": "The runtime could not resolve the requested execution scope.",
     "details": {}
   }
 }
@@ -157,4 +143,4 @@ Suggested error shape:
 
 The single-node baseline can start from one shared bearer token model or trusted local deployment mode.
 
-Authentication should stay orthogonal to workspace, session, run, schedule, and bridge structure.
+Authentication should stay orthogonal to session, run, schedule, and bridge structure.

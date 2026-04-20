@@ -1,18 +1,18 @@
-# 01 - Configuration and Workspace Provider
+# 01 - Configuration and Execution Scope
 
 YA Claw resolves each run from three configuration layers:
 
 - environment variables for service infrastructure and secrets
-- storage-backed profiles and workspaces for durable runtime behavior
-- request-level overrides for transient run customization
+- storage-backed profiles for durable runtime behavior
+- request-level inputs for transient run selection and execution
 
 ## Configuration Layers
 
 ```mermaid
 flowchart TB
     ENV[Environment Variables] --> RES[Runtime Config Resolver]
-    STORE[Profiles + Workspaces in SQLite / PostgreSQL] --> RES
-    REQ[Per-request Overrides] --> RES
+    STORE[Profiles in SQLite / PostgreSQL] --> RES
+    REQ[Run Request] --> RES
     RES --> RUNCFG[Resolved Run Configuration]
 ```
 
@@ -30,6 +30,7 @@ flowchart TB
 | `YA_CLAW_AUTO_MIGRATE`                  | startup schema migration switch        |
 | `YA_CLAW_WEB_DIST_DIR`                  | bundled web shell directory            |
 | `YA_CLAW_DATA_DIR`                      | local data root                        |
+| `YA_CLAW_WORKSPACE_ROOT`                | top-level runtime workspace root       |
 | `YA_CLAW_DATABASE_ECHO`                 | SQL logging                            |
 | `YA_CLAW_DATABASE_POOL_SIZE`            | pool size                              |
 | `YA_CLAW_DATABASE_MAX_OVERFLOW`         | pool overflow                          |
@@ -48,79 +49,54 @@ A profile should define:
 - enabled toolsets
 - subagent behavior
 - runtime policy defaults
-- workspace selection policy defaults
 
-### Suggested Profile Shape
+Profile management can stay implementation-driven.
+The initial runtime only needs a stable way to choose a profile for a run.
 
-| Field              | Purpose                                              |
-| ------------------ | ---------------------------------------------------- |
-| `model`            | model name plus model settings and overrides         |
-| `system_prompt`    | reusable prompt template                             |
-| `toolsets`         | enabled tool groups and tool-level options           |
-| `subagents`        | delegation and async behavior                        |
-| `runtime_policy`   | transport, approval, compact, and execution defaults |
-| `workspace_policy` | workspace or project selection defaults              |
+## Opaque Project ID
 
-## Workspace Record
+`project_id` is application input.
+YA Claw treats it as an opaque selector.
 
-A workspace record should stay small.
+Typical examples:
 
-It only needs to persist:
+- a bridge maps one group chat to one `project_id`
+- the web shell restores the last used `project_id` from application state
+- another application sends a one-off `project_id` with a direct API request
 
-- stable workspace identity
-- provider key
-- provider input
-- display metadata
+YA Claw does not need project CRUD or a runtime-managed project catalog.
 
-Heavy resolution logic belongs to `WorkspaceProvider`, not to the workspace record.
+## Project Resolver
 
-## WorkspaceProvider
+The project resolver is the main runtime boundary for project-aware execution.
 
-`WorkspaceProvider` is the central extension boundary of YA Claw.
+It transforms `project_id` plus request metadata into an execution scope.
+The resolver may use local configuration, external state, or application metadata.
+That choice stays implementation-driven.
 
-It transforms user-facing workspace intent into an execution-ready binding.
+The runtime stays responsible for:
 
-### Responsibilities
+- applying one configured workspace root
+- resolving the effective working directory
+- resolving readable and writable paths
+- resolving environment overrides for execution
+- validating that all resolved paths stay inside the workspace root
 
-The provider is responsible for:
+## Execution Scope
 
-- resolving workspace and project intent into local paths
-- selecting working directory and allowed paths
-- returning environment variables for execution
-- exposing capability flags and metadata to the runtime
+An execution scope is the execution-ready view for one run.
 
-The provider boundary stays focused on resolution. Session persistence, run creation, active task management, and artifact storage stay in the core runtime.
+At the overview level it should include:
 
-## Resolution Contract
+| Field            | Purpose                                    |
+| ---------------- | ------------------------------------------ |
+| `cwd`            | default working directory                  |
+| `readable_paths` | paths visible to virtual file operations   |
+| `writable_paths` | paths writable during the run              |
+| `env_overrides`  | execution-time environment additions       |
+| `metadata`       | resolver metadata useful for logging or UI |
 
-A conceptual provider interface is:
-
-```python
-class WorkspaceProvider(Protocol):
-    async def resolve(
-        self,
-        workspace_id: str,
-        *,
-        project_id: str | None,
-        profile: ResolvedProfile,
-    ) -> WorkspaceBinding:
-        ...
-```
-
-### Workspace Binding Output
-
-A binding should include:
-
-| Field               | Purpose                                             |
-| ------------------- | --------------------------------------------------- |
-| `workspace_id`      | workspace identity                                  |
-| `project_id`        | selected project                                    |
-| `workspace_root`    | resolved root path                                  |
-| `working_directory` | default shell working directory                     |
-| `allowed_paths`     | all paths exposed to the runtime                    |
-| `environment`       | provider-resolved environment variables             |
-| `capabilities`      | writable, shell, watch, or similar capability flags |
-| `metadata`          | display and audit metadata                          |
+YA Claw uses the execution scope to construct virtual file access and sandboxed shell execution for the SDK runtime.
 
 ## Resolution Flow
 
@@ -128,29 +104,18 @@ A binding should include:
 sequenceDiagram
     participant Client
     participant API
-    participant Resolver
-    participant Provider
-    participant Store
+    participant CFG as Config Resolver
+    participant PROJ as Project Resolver
 
     Client->>API: start run
-    API->>Resolver: resolve profile + workspace
-    Resolver->>Store: load workspace record
-    Resolver->>Provider: resolve(workspace_id, project_id, profile)
-    Provider-->>Resolver: binding
-    Resolver->>Store: persist binding snapshot reference
-    Resolver-->>API: resolved run configuration
+    API->>CFG: resolve profile and request inputs
+    API->>PROJ: resolve(project_id, metadata)
+    CFG-->>API: resolved runtime config
+    PROJ-->>API: execution scope
+    API-->>Client: accepted run
 ```
 
-## Provider Selection Model
+## Design Principle
 
-One YA Claw deployment should use one configured provider implementation.
-
-That provider may manage many workspace records.
-
-This keeps the runtime simple while preserving room for different resolution strategies.
-
-## Starter Provider Shapes
-
-- **Local Registry Provider**: one workspace maps directly to one local root
-- **Monorepo Provider**: one root hosts many projects inside a tree
-- **Git Worktree Provider**: one workspace maps to managed worktree roots
+YA Claw owns execution constraints.
+Applications own project identity and project mapping.

@@ -6,13 +6,14 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_DATABASE_FILENAME = "ya_claw.sqlite3"
 
 
 class ClawSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="YA_CLAW_",
-        env_file=".env",
+        env_file=(_PACKAGE_ROOT / ".env", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )

@@ -34,9 +34,10 @@ The relational store is the durable source of truth for queryable runtime state.
 
 It should store:
 
-- workspaces and profile records
+- profile records when profiles are runtime-managed
 - session and run indexes
 - status, timestamps, summaries, and searchable metadata
+- opaque `project_id` values carried with sessions and runs
 - artifact metadata and references
 - event checkpoints or replay summaries where needed
 
@@ -72,13 +73,13 @@ The relational store owns committed runtime state.
 
 The local filesystem has two durable areas:
 
-- a **project store** for run outputs and workspace-facing files
+- an **artifact store** for run outputs and retained files
 - a **session store** for durable session state and compacted conversation records
 
-### Project Store
+### Artifact Store
 
-The project store holds durable payloads that are naturally attached to a workspace or run output.
-Each project directory should stay flat.
+The artifact store holds durable payloads produced or retained by runs.
+Each run directory should stay simple.
 
 It should store:
 
@@ -90,7 +91,7 @@ It should store:
 ### Session Store
 
 The session store holds durable session continuity data.
-Each session directory should stay flat.
+Each session directory should stay simple.
 
 It should store:
 
@@ -105,8 +106,9 @@ That file should include:
 
 - exported SDK state
 - message history
-- `ClawAgentContext`
+- run and session metadata needed for restore
 - compact metadata such as last committed run, compact version, and timestamps
+- effective `project_id` and useful continuation metadata
 
 ### Message File
 
@@ -124,8 +126,8 @@ Suggested layout:
 
 ```text
 data/
-├── projects/
-│   └── {project_id}/
+├── artifacts/
+│   └── {run_id}/
 └── session-store/
     └── {session_id}/
         ├── state.json
@@ -176,5 +178,5 @@ Committed summaries, `state.json`, and `message.json` should stay durable.
 ## Artifact Principle
 
 Artifact metadata should stay queryable from the relational store.
-Artifact payloads should stay in the project store under the runtime data root.
+Artifact payloads should stay in the artifact store under the runtime data root.
 Session continuity data should stay in the session store under the runtime data root.

@@ -62,6 +62,9 @@ Recommended starting points:
 
 - Read [`skills/agent-builder/SKILL.md`](skills/agent-builder/SKILL.md) for the main agent-building workflow
 - Read [`skills/agent-builder/README.md`](skills/agent-builder/README.md) for the skill file map
+- Copy [`examples/.env.example`](examples/.env.example) to `examples/.env` when running SDK examples
+- Copy [`packages/ya-agent-sdk/.env.example`](packages/ya-agent-sdk/.env.example) to `packages/ya-agent-sdk/.env` when developing the SDK or configuring SDK/tool variables for workspace apps
+- Copy [`packages/yaacli/.env.example`](packages/yaacli/.env.example) to `packages/yaacli/.env` or your current working directory `.env` when developing YAACLI
 - Run examples from [`examples/`](examples/) for end-to-end usage patterns
 
 ### YA Claw
@@ -72,17 +75,14 @@ Read the runtime design docs:
 - [`packages/ya-claw/spec/00-overview.md`](packages/ya-claw/spec/00-overview.md)
 - [`packages/ya-claw/spec/01-configuration-and-workspace-provider.md`](packages/ya-claw/spec/01-configuration-and-workspace-provider.md)
 
-Run the default runtime flow:
+Prepare the runtime environment and start the service:
 
 ```bash
+cp packages/ya-claw/.env.example packages/ya-claw/.env
 make run-claw
 ```
 
-Start optional development infrastructure when you want an external database flow:
-
-```bash
-make claw-infra-up
-```
+SDK and tool variables for YA Claw workflows live in [`packages/ya-agent-sdk/.env.example`](packages/ya-agent-sdk/.env.example).
 
 Run the web shell:
 
@@ -139,8 +139,6 @@ make test
 | `make check`                 | Run lock validation, lint, pyright, deptry, and web checks          |
 | `make test`                  | Run SDK, CLI, and YA Claw tests                                     |
 | `make run-claw`              | Run the YA Claw backend                                             |
-| `make claw-infra-up`         | Start optional YA Claw development infrastructure                   |
-| `make claw-infra-down`       | Stop optional YA Claw development infrastructure                    |
 | `make web-dev`               | Run the YA Claw web app                                             |
 | `make build-claw`            | Build the `ya-claw` distribution                                    |
 | `make build-platform`        | Build the WIP `ya-agent-platform` package                           |
