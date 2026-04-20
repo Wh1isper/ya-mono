@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 
@@ -7,14 +10,17 @@ def _is_sqlite_url(database_url: str) -> bool:
     return database_url.startswith("sqlite")
 
 
-def create_engine(database_url: str, **kwargs: object) -> AsyncEngine:
-    defaults: dict[str, object] = {
+def create_engine(database_url: str, **kwargs: Any) -> AsyncEngine:
+    defaults: dict[str, Any] = {
         "echo": False,
         "pool_pre_ping": True,
     }
 
+    connect_args: dict[str, Any] | None = None
+    raw_connect_args = kwargs.pop("connect_args", None)
+
     if _is_sqlite_url(database_url):
-        defaults["connect_args"] = {"check_same_thread": False}
+        connect_args = {"check_same_thread": False}
     else:
         defaults.update({
             "pool_size": 5,
@@ -22,10 +28,13 @@ def create_engine(database_url: str, **kwargs: object) -> AsyncEngine:
             "pool_recycle": 3600,
         })
 
-    if "connect_args" in kwargs and "connect_args" in defaults:
-        merged_connect_args = dict(defaults["connect_args"])
-        merged_connect_args.update(kwargs.pop("connect_args"))
-        defaults["connect_args"] = merged_connect_args
+    if isinstance(raw_connect_args, Mapping):
+        merged_connect_args = dict(connect_args or {})
+        merged_connect_args.update(raw_connect_args)
+        connect_args = merged_connect_args
+
+    if connect_args is not None:
+        defaults["connect_args"] = connect_args
 
     defaults.update(kwargs)
     return create_async_engine(database_url, **defaults)
