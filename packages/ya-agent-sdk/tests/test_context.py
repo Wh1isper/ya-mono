@@ -60,7 +60,7 @@ async def test_agent_context_elapsed_time_before_start(env: LocalEnvironment) ->
 async def test_agent_context_elapsed_time_after_start(env: LocalEnvironment) -> None:
     """Should return elapsed time after start."""
     ctx = AgentContext(env=env)
-    ctx.start_at = datetime.now()
+    ctx.start_at = datetime.now(UTC)
     elapsed = ctx.elapsed_time
     assert elapsed is not None
     assert isinstance(elapsed, timedelta)
@@ -70,7 +70,7 @@ async def test_agent_context_elapsed_time_after_start(env: LocalEnvironment) -> 
 async def test_agent_context_elapsed_time_after_end(env: LocalEnvironment) -> None:
     """Should return final duration after end."""
     ctx = AgentContext(env=env)
-    start = datetime.now()
+    start = datetime.now(UTC)
     ctx.start_at = start
     ctx.end_at = start + timedelta(seconds=5)
     elapsed = ctx.elapsed_time
@@ -81,7 +81,7 @@ async def test_agent_context_elapsed_time_after_end(env: LocalEnvironment) -> No
 async def test_agent_context_create_subagent_context(env: LocalEnvironment) -> None:
     """Should create child context with proper inheritance."""
     parent = AgentContext(env=env)
-    parent.start_at = datetime.now()
+    parent.start_at = datetime.now(UTC)
 
     async with parent.create_subagent_context("search") as child:
         assert child.parent_run_id == parent.run_id
@@ -1442,9 +1442,9 @@ async def test_get_current_time_returns_datetime_with_timezone(env: LocalEnviron
 async def test_get_current_time_is_recent(env: LocalEnvironment) -> None:
     """Should return a time close to actual current time."""
     ctx = AgentContext(env=env)
-    before = datetime.now().astimezone()
+    before = datetime.now(UTC)
     current_time = ctx.get_current_time()
-    after = datetime.now().astimezone()
+    after = datetime.now(UTC)
 
     # Should be within the time window
     assert before <= current_time <= after
@@ -1471,7 +1471,7 @@ async def test_get_context_instructions_includes_current_time(env: LocalEnvironm
         # Should contain current-time element
         assert "<current-time>" in instructions
         assert "</current-time>" in instructions
-        # Should be in ISO 8601 format with timezone (e.g., 2025-01-20T12:30:00+08:00)
+        # Should be in ISO 8601 format with timezone (e.g., 2025-01-20T12:30:00+00:00)
         assert re.search(
             r"<current-time>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}</current-time>", instructions
         )

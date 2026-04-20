@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 
 from jinja2 import Template
 from pydantic import BaseModel, Field, field_validator
@@ -146,7 +146,7 @@ class BusMessage(BaseModel):
     template: str | None = None
     """Jinja2 template string for rendering. Use {{ content }} placeholder."""
 
-    timestamp: datetime = Field(default_factory=datetime.now)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     """When the message was created."""
 
     @field_validator("id")

@@ -8,7 +8,7 @@ to consumers without interrupting the main agent flow.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -29,7 +29,7 @@ class AgentEvent:
     """
 
     event_id: str
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 # =============================================================================

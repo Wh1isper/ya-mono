@@ -1,6 +1,6 @@
 """Tests for message bus functionality."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from ya_agent_sdk.context import BusMessage, MessageBus
 
@@ -17,6 +17,7 @@ def test_bus_message_creation() -> None:
     assert msg.source == "user"
     assert msg.target is None
     assert isinstance(msg.timestamp, datetime)
+    assert msg.timestamp.tzinfo == UTC
 
 
 def test_bus_message_auto_generates_id() -> None:

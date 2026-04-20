@@ -34,7 +34,7 @@ import asyncio
 import contextlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from y_agent_environment import BaseResource
@@ -61,7 +61,7 @@ class BackgroundTaskInfo:
     agent_id: str
     subagent_name: str
     prompt: str
-    started_at: datetime = field(default_factory=datetime.now)
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     is_resume: bool = False
 
 

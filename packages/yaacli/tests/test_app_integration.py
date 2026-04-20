@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
+from y_agent_environment.shell import BackgroundProcess
 
 # Import the components we're testing
 from yaacli.app import TUIApp, TUIMode, TUIState
@@ -223,6 +225,38 @@ def test_tui_app_output_line_limit():
     # Oldest lines should be removed
     assert app._output_lines[0] == "Line 5"
     assert app._output_lines[-1] == "Line 14"
+
+
+def test_tui_app_show_tasks_handles_naive_background_process_timestamp():
+    """Background process rendering supports naive timestamps from shell metadata."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+
+    app = TUIApp(config=config, config_manager=config_manager)
+
+    runtime = MagicMock()
+    runtime.ctx = MagicMock()
+    runtime.ctx.task_manager = MagicMock()
+    runtime.ctx.task_manager.list_all.return_value = []
+    runtime.env = MagicMock()
+    runtime.env.resources = {}
+
+    proc = BackgroundProcess(
+        process_id="proc-1",
+        command="sleep 1",
+        cwd=".",
+        started_at=datetime.now() - timedelta(seconds=5),
+    )
+    runtime.env.shell = MagicMock()
+    runtime.env.shell.active_background_processes = {proc.process_id: proc}
+    app._runtime = runtime
+
+    app._show_tasks()
+
+    output = "\n".join(app._output_lines)
+    assert "Background Processes" in output
+    assert "proc-1" in output
+    assert "running (" in output
 
 
 # =============================================================================

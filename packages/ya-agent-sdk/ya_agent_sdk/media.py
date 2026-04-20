@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, runtime_checkable
 
 import anyio
@@ -245,7 +245,7 @@ class S3MediaUploader:
         # Generate object key: prefix + date + content_hash.ext
         ext = self.EXTENSION_MAP.get(media_type, "bin")
         content_hash = hashlib.sha256(data).hexdigest()[:12]
-        date_prefix = datetime.now().strftime("%Y-%m-%d")
+        date_prefix = datetime.now(UTC).strftime("%Y-%m-%d")
         key = f"{self.config.prefix}{date_prefix}/{content_hash}.{ext}"
 
         # Upload to S3 (run sync boto3 in thread)
