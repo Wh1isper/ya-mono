@@ -29,16 +29,37 @@ Most architecture work in this repository targets `packages/ya-agent-sdk` and `p
 - **Build System**: hatchling
 - **Frontend Stack**: Vite + React + TypeScript
 
-## Runtime Direction
+## Package Directions
 
-- YA Claw is the active runtime product in this repository
-- the current delivery target is a single-node runtime
+### `packages/ya-agent-sdk`
+
+- SDK for building AI agents with Pydantic AI
+- preserves the core execution primitives used across the repository
+- changes here should keep examples, skills, and package docs aligned
+
+### `packages/yaacli`
+
+- TUI reference implementation built on top of `ya-agent-sdk`
+- runtime-facing CLI behavior belongs here
+
+### `packages/ya-claw`
+
+- active runtime product in this repository
+- current delivery target is a single-node runtime
 - `WorkspaceProvider` is the core extension boundary
 - active session state, live events, async task coordination, schedules, and bridge coordination stay in process
 - SQLite is the default durable store
 - PostgreSQL is an optional durable store for deployments that prefer an external database
-- local filesystem stores exported state and artifacts
-- `ya-agent-platform` is a WIP stateless agent service with TBD scope
+- local filesystem stores committed session continuity data
+- requires `YA_CLAW_API_TOKEN` before service startup
+- defaults: SQLite at `~/.ya-claw/ya_claw.sqlite3`, runtime data at `~/.ya-claw/data`, workspace root at `~/.ya-claw/workspace`
+- implementation style: organize runtime code by `api/`, `controller/`, and `orm/`
+- internal data objects use Pydantic `BaseModel`
+- code prefers explicit typing and `isinstance` checks
+
+### `packages/ya-agent-platform`
+
+- WIP stateless agent service with TBD scope
 
 ## Development Workflow
 

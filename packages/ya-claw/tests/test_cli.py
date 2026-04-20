@@ -1,19 +1,23 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+import secrets
 
 import ya_claw.cli as claw_cli
 from click.testing import CliRunner
+from ya_claw.config import ClawSettings
 
 runner = CliRunner()
+TEST_API_TOKEN = secrets.token_hex(16)
 
 
-def test_migrate_command_invokes_upgrade(monkeypatch) -> None:
+def test_db_upgrade_invokes_upgrade(monkeypatch) -> None:
     revisions: list[str] = []
 
-    monkeypatch.setattr(claw_cli, "_apply_database_migrations", lambda revision="head": revisions.append(revision))
+    monkeypatch.setattr(
+        claw_cli.cli_application, "upgrade_database", lambda revision="head": revisions.append(revision)
+    )
 
-    result = runner.invoke(claw_cli.cli, ["migrate"])
+    result = runner.invoke(claw_cli.cli, ["db", "upgrade"])
 
     assert result.exit_code == 0
     assert revisions == ["head"]
@@ -22,18 +26,22 @@ def test_migrate_command_invokes_upgrade(monkeypatch) -> None:
 
 def test_serve_runs_auto_migrate_with_default_sqlite(monkeypatch, tmp_path) -> None:
     calls: list[tuple[str, object]] = []
-    settings = SimpleNamespace(
+    settings = ClawSettings(
         host="127.0.0.1",
         port=9042,
         reload=False,
         auto_migrate=True,
+        api_token=TEST_API_TOKEN,
         database_url=None,
         data_dir=tmp_path,
+        workspace_root=tmp_path / "workspace",
     )
 
     monkeypatch.setattr(claw_cli, "get_settings", lambda: settings)
     monkeypatch.setattr(
-        claw_cli, "_apply_database_migrations", lambda revision="head": calls.append(("migrate", revision))
+        claw_cli.cli_application,
+        "upgrade_database",
+        lambda revision="head": calls.append(("migrate", revision)),
     )
     monkeypatch.setattr(claw_cli.uvicorn, "run", lambda *args, **kwargs: calls.append(("serve", kwargs)))
 
@@ -44,20 +52,44 @@ def test_serve_runs_auto_migrate_with_default_sqlite(monkeypatch, tmp_path) -> N
     assert calls[1][0] == "serve"
 
 
-def test_serve_skips_auto_migrate_when_disabled(monkeypatch, tmp_path) -> None:
-    calls: list[tuple[str, object]] = []
-    settings = SimpleNamespace(
+def test_serve_requires_api_token(monkeypatch, tmp_path) -> None:
+    settings = ClawSettings(
         host="127.0.0.1",
         port=9042,
         reload=False,
         auto_migrate=True,
+        api_token=None,
         database_url=None,
         data_dir=tmp_path,
+        workspace_root=tmp_path / "workspace",
+    )
+
+    monkeypatch.setattr(claw_cli, "get_settings", lambda: settings)
+
+    result = runner.invoke(claw_cli.cli, ["serve"])
+
+    assert result.exit_code == 1
+    assert "YA_CLAW_API_TOKEN must be configured before starting YA Claw." in result.output
+
+
+def test_serve_skips_auto_migrate_when_disabled(monkeypatch, tmp_path) -> None:
+    calls: list[tuple[str, object]] = []
+    settings = ClawSettings(
+        host="127.0.0.1",
+        port=9042,
+        reload=False,
+        auto_migrate=True,
+        api_token=TEST_API_TOKEN,
+        database_url=None,
+        data_dir=tmp_path,
+        workspace_root=tmp_path / "workspace",
     )
 
     monkeypatch.setattr(claw_cli, "get_settings", lambda: settings)
     monkeypatch.setattr(
-        claw_cli, "_apply_database_migrations", lambda revision="head": calls.append(("migrate", revision))
+        claw_cli.cli_application,
+        "upgrade_database",
+        lambda revision="head": calls.append(("migrate", revision)),
     )
     monkeypatch.setattr(claw_cli.uvicorn, "run", lambda *args, **kwargs: calls.append(("serve", kwargs)))
 

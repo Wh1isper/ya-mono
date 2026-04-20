@@ -10,14 +10,34 @@ from ya_claw.config import get_settings
 
 @pytest.fixture(autouse=True)
 def clear_claw_settings(monkeypatch, tmp_path: Path) -> None:
-    for env_name in ("YA_CLAW_DATABASE_URL", "YA_CLAW_WEB_DIST_DIR"):
+    for env_name in (
+        "YA_CLAW_API_TOKEN",
+        "YA_CLAW_DATABASE_URL",
+        "YA_CLAW_DATA_DIR",
+        "YA_CLAW_WEB_DIST_DIR",
+        "YA_CLAW_WORKSPACE_ROOT",
+    ):
         monkeypatch.delenv(env_name, raising=False)
 
+    monkeypatch.setenv("YA_CLAW_API_TOKEN", "test-token")
     monkeypatch.setenv("YA_CLAW_DATA_DIR", str(tmp_path / "runtime-data"))
+    monkeypatch.setenv("YA_CLAW_WORKSPACE_ROOT", str(tmp_path / "workspace"))
 
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+def _auth_headers() -> dict[str, str]:
+    return {"Authorization": "Bearer test-token"}
+
+
+def test_create_app_requires_api_token(monkeypatch) -> None:
+    monkeypatch.delenv("YA_CLAW_API_TOKEN", raising=False)
+    get_settings.cache_clear()
+
+    with pytest.raises(RuntimeError, match="YA_CLAW_API_TOKEN"):
+        create_app()
 
 
 def test_healthz() -> None:
@@ -28,22 +48,22 @@ def test_healthz() -> None:
     assert response.json() == {"status": "ok", "database": "ok", "runtime_state": "ok"}
 
 
-def test_claw_info() -> None:
+def test_root_requires_authorization() -> None:
     with TestClient(create_app()) as client:
-        response = client.get("/api/v1/claw/info")
+        response = client.get("/")
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["name"] == "YA Claw"
-    assert "web-shell" in payload["surfaces"]
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Bearer token required."}
 
 
 def test_index_without_frontend_bundle() -> None:
     with TestClient(create_app()) as client:
-        response = client.get("/")
+        response = client.get("/", headers=_auth_headers())
 
     assert response.status_code == 200
-    assert response.json()["name"] == "YA Claw"
+    payload = response.json()
+    assert payload["name"] == "YA Claw"
+    assert payload["surfaces"] == ["sessions", "runs", "schedules", "bridges"]
 
 
 def test_serves_frontend_bundle(monkeypatch, tmp_path: Path) -> None:
@@ -58,9 +78,9 @@ def test_serves_frontend_bundle(monkeypatch, tmp_path: Path) -> None:
     get_settings.cache_clear()
 
     with TestClient(create_app()) as app_client:
-        root_response = app_client.get("/")
-        asset_response = app_client.get("/assets/app.js")
-        spa_response = app_client.get("/sessions")
+        root_response = app_client.get("/", headers=_auth_headers())
+        asset_response = app_client.get("/assets/app.js", headers=_auth_headers())
+        spa_response = app_client.get("/sessions", headers=_auth_headers())
 
     assert root_response.status_code == 200
     assert "claw shell" in root_response.text

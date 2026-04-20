@@ -21,7 +21,7 @@ This spec set focuses on one clear target shape:
 - **SDK-aligned**: `ya-agent-sdk` stays responsible for agent execution primitives
 - **Unified execution model**: API requests, schedules, and bridge ingress all create runs through one session model
 - **Simple active-state model**: active run state, live delivery, async task tracking, schedules, and bridge coordination stay inside the process
-- **Durable and practical**: SQLite is the default durable store, PostgreSQL is an optional backend, and the local filesystem stores session state and artifacts
+- **Durable and practical**: SQLite is the default durable store, PostgreSQL is an optional backend, and the local filesystem stores committed session state
 - **Architecture-first**: this spec defines runtime structure and interaction boundaries; detailed schema work follows implementation
 
 ## Section Map

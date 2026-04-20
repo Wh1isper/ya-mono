@@ -40,7 +40,7 @@ The coordinator is responsible for:
 - loading the previous committed session state when continuing
 - constructing the SDK runtime and execution environment
 - processing stream events into external protocol events
-- persisting final summaries, artifacts, and exported state
+- persisting final summaries and exported state
 - updating the in-process task registry during active execution
 - coordinating schedule-triggered runs and bridge-triggered runs through the same session model
 
@@ -102,7 +102,7 @@ That active state should include:
 - schedule timers and wake-up bookkeeping
 - bridge relay handles
 
-Durable session continuity, run summaries, and artifacts still commit to storage.
+Durable session continuity and run summaries still commit to storage.
 
 ## State Restore
 
@@ -215,10 +215,9 @@ On successful completion the coordinator should:
 2. export SDK state
 3. persist the latest session state snapshot to `state.json`
 4. compact and persist the committed conversation record to `message.json`
-5. persist artifacts produced or retained during the run
-6. mark the run `completed`
-7. advance the session into a ready-to-continue state
-8. release in-process task resources
+5. mark the run `completed`
+6. advance the session into a ready-to-continue state
+7. release in-process task resources
 
 ## Failure Path
 

@@ -15,7 +15,7 @@ It provides a durable local execution shell around SDK agent construction and st
 - in-process async task coordination
 - live event streaming for the current node
 - bridge adapters for external IM channels
-- artifact persistence
+- committed session persistence
 - a first-party web shell
 
 ## Goals
@@ -106,22 +106,22 @@ flowchart TB
 
 ## Runtime Boundary
 
-| Concern                    | Owner                     |
-| -------------------------- | ------------------------- |
-| Agent execution primitives | `ya-agent-sdk`            |
-| Workspace root enforcement | YA Claw                   |
-| Project resolution         | YA Claw                   |
-| Session persistence        | YA Claw                   |
-| Run orchestration          | YA Claw                   |
-| Schedule dispatch          | YA Claw                   |
-| Bridge relay coordination  | YA Claw                   |
-| Active task tracking       | YA Claw                   |
-| Event delivery             | YA Claw                   |
-| Artifact persistence       | YA Claw                   |
-| Project mapping            | bridge or web application |
-| Channel transport          | bridge adapter            |
-| LLM provider interaction   | SDK + model provider      |
-| Container lifecycle        | user or external operator |
+| Concern                       | Owner                     |
+| ----------------------------- | ------------------------- |
+| Agent execution primitives    | `ya-agent-sdk`            |
+| Workspace root enforcement    | YA Claw                   |
+| Project resolution            | YA Claw                   |
+| Session persistence           | YA Claw                   |
+| Run orchestration             | YA Claw                   |
+| Schedule dispatch             | YA Claw                   |
+| Bridge relay coordination     | YA Claw                   |
+| Active task tracking          | YA Claw                   |
+| Event delivery                | YA Claw                   |
+| Committed session persistence | YA Claw                   |
+| Project mapping               | bridge or web application |
+| Channel transport             | bridge adapter            |
+| LLM provider interaction      | SDK + model provider      |
+| Container lifecycle           | user or external operator |
 
 ## Core Runtime Objects
 
