@@ -12,7 +12,7 @@ YA Claw packages a durable runtime shell around `ya-agent-sdk` with:
 - in-process active state and async task coordination
 - session schedules for timed execution
 - SQLite-first durable state with optional PostgreSQL
-- local filesystem artifacts and exported state
+- local filesystem session continuity and exported state
 - a bundled web shell for local and self-hosted use
 - bridge adapters that connect IM channels to the YA Claw service
 
@@ -43,9 +43,11 @@ The runtime shape is:
 - one in-process runtime state manager
 - one session scheduler
 - one bridge subsystem for external channels
+- one shared bearer token for HTTP access
 - one SQLite database by default
 - optional PostgreSQL
-- one local data directory
+- one runtime data directory for sensitive session continuity
+- one workspace root for project data
 - one bundled web shell
 
 ## Quick Start
@@ -58,21 +60,29 @@ cp packages/ya-claw/.env.example packages/ya-claw/.env
 uv run --package ya-claw ya-claw serve --reload
 ```
 
+Set `YA_CLAW_API_TOKEN` before starting the service.
 The development server listens on `http://127.0.0.1:9042` by default.
 YA Claw loads `YA_CLAW_*` settings from `packages/ya-claw/.env` and the process environment.
 Use [`packages/ya-agent-sdk/.env.example`](../ya-agent-sdk/.env.example) for SDK and tool environment variables.
 
+Default local paths:
+
+- SQLite database: `~/.ya-claw/ya_claw.sqlite3`
+- runtime data root: `~/.ya-claw/data`
+- workspace root: `~/.ya-claw/workspace`
+
 ## External Database
 
 Set `YA_CLAW_DATABASE_URL` in `packages/ya-claw/.env` when you want an external PostgreSQL database.
+The default SQLite file stays at `~/.ya-claw/ya_claw.sqlite3`.
 
 ## Database Commands
 
 ```bash
-uv run --package ya-claw ya-claw migrate
+uv run --package ya-claw ya-claw db upgrade
 uv run --package ya-claw ya-claw db current
 uv run --package ya-claw ya-claw db history
-uv run --package ya-claw ya-claw db migrate "add session tables"
+uv run --package ya-claw ya-claw db revision "add session tables"
 ```
 
 ## Bridge Commands
@@ -108,9 +118,9 @@ docker build -f Dockerfile.ya-claw -t ya-claw:dev .
 
 ## Initial API Surface
 
+Every HTTP route except `/healthz` expects `Authorization: Bearer <YA_CLAW_API_TOKEN>`.
+
 - `GET /healthz` — service health probe with storage and runtime component status
-- `GET /api/v1/claw/info` — runtime metadata and active surfaces
-- `GET /api/v1/claw/topology` — high-level component topology for the UI and tooling
 - `GET /api/v1/schedules` — session schedule inspection surface
 - `POST /api/v1/bridges/{bridge_id}/dispatch` — bridge ingress surface
 

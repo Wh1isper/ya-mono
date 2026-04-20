@@ -20,23 +20,30 @@ flowchart TB
 
 ### Environment Variables
 
-| Variable                                | Purpose                                |
-| --------------------------------------- | -------------------------------------- |
-| `YA_CLAW_HOST`                          | bind host                              |
-| `YA_CLAW_PORT`                          | bind port                              |
-| `YA_CLAW_PUBLIC_BASE_URL`               | public base URL                        |
-| `YA_CLAW_ENVIRONMENT`                   | runtime environment label              |
-| `YA_CLAW_DATABASE_URL`                  | SQLite or PostgreSQL connection string |
-| `YA_CLAW_AUTO_MIGRATE`                  | startup schema migration switch        |
-| `YA_CLAW_WEB_DIST_DIR`                  | bundled web shell directory            |
-| `YA_CLAW_DATA_DIR`                      | local data root                        |
-| `YA_CLAW_WORKSPACE_ROOT`                | top-level runtime workspace root       |
-| `YA_CLAW_DATABASE_ECHO`                 | SQL logging                            |
-| `YA_CLAW_DATABASE_POOL_SIZE`            | pool size                              |
-| `YA_CLAW_DATABASE_MAX_OVERFLOW`         | pool overflow                          |
-| `YA_CLAW_DATABASE_POOL_RECYCLE_SECONDS` | connection recycle interval            |
+| Variable                                | Purpose                                                   |
+| --------------------------------------- | --------------------------------------------------------- |
+| `YA_CLAW_HOST`                          | bind host                                                 |
+| `YA_CLAW_PORT`                          | bind port                                                 |
+| `YA_CLAW_PUBLIC_BASE_URL`               | public base URL                                           |
+| `YA_CLAW_API_TOKEN`                     | shared bearer token required for HTTP access              |
+| `YA_CLAW_ENVIRONMENT`                   | runtime environment label                                 |
+| `YA_CLAW_DATABASE_URL`                  | SQLite or PostgreSQL connection string                    |
+| `YA_CLAW_AUTO_MIGRATE`                  | startup schema migration switch                           |
+| `YA_CLAW_WEB_DIST_DIR`                  | bundled web shell directory                               |
+| `YA_CLAW_DATA_DIR`                      | runtime data root for session store                       |
+| `YA_CLAW_WORKSPACE_ROOT`                | top-level runtime workspace root for project-managed data |
+| `YA_CLAW_DATABASE_ECHO`                 | SQL logging                                               |
+| `YA_CLAW_DATABASE_POOL_SIZE`            | pool size                                                 |
+| `YA_CLAW_DATABASE_MAX_OVERFLOW`         | pool overflow                                             |
+| `YA_CLAW_DATABASE_POOL_RECYCLE_SECONDS` | connection recycle interval                               |
 
 LLM provider keys and tool API keys stay in environment variables and follow `ya-agent-sdk` conventions.
+
+Default local paths:
+
+- SQLite database: `~/.ya-claw/ya_claw.sqlite3`
+- runtime data root: `~/.ya-claw/data`
+- workspace root: `~/.ya-claw/workspace`
 
 ## Agent Profile
 

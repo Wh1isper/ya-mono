@@ -14,7 +14,7 @@ It should let a user:
 - watch live run output
 - read compacted conversation history for completed rounds
 - inspect bridge endpoints and relay activity
-- inspect artifacts and run summaries
+- inspect run summaries
 
 The web shell acts as an application on top of YA Claw.
 It can remember the last used `project_id` in application state and send it back on the next run.
@@ -28,7 +28,7 @@ flowchart LR
     HOME --> SC[Schedules]
     HOME --> BR[Bridges]
     SS --> RV[Run View]
-    RV --> AF[Artifacts]
+    RV --> RS[Run Summary]
 ```
 
 ### Overview
@@ -51,9 +51,9 @@ Shows bridge endpoints, relay mode, recent dispatches, and channel health.
 
 Shows live event output, final summary, AGUI-aligned event flow, effective `project_id`, and error state when needed.
 
-### Artifacts
+### Run Summary
 
-Shows files produced or retained by a run.
+Shows the final run result, commit metadata, and continuation readiness.
 
 ## Startup Flow
 

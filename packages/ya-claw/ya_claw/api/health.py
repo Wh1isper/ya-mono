@@ -1,35 +1,26 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine
+
+from ya_claw.controller.health import HealthController, HealthStatus
+from ya_claw.runtime_state import InMemoryRuntimeState
 
 router = APIRouter(tags=["health"])
-
-
-class HealthStatus(BaseModel):
-    status: str
-    database: str
-    runtime_state: str
+controller = HealthController()
 
 
 @router.get("/healthz", response_model=HealthStatus)
 async def healthz(request: Request) -> HealthStatus:
-    database = "unavailable"
-    runtime_state = "unavailable"
+    db_engine = request.app.state.db_engine
+    runtime_state = request.app.state.runtime_state
 
-    db_engine = getattr(request.app.state, "db_engine", None)
-    if db_engine is not None:
-        try:
-            async with db_engine.connect() as connection:
-                await connection.execute(text("SELECT 1"))
-            database = "ok"
-        except Exception:
-            database = "error"
+    typed_db_engine: AsyncEngine | None = None
+    typed_runtime_state: InMemoryRuntimeState | None = None
 
-    runtime_manager = getattr(request.app.state, "runtime_state", None)
-    if runtime_manager is not None:
-        runtime_state = "ok"
+    if isinstance(db_engine, AsyncEngine):
+        typed_db_engine = db_engine
+    if isinstance(runtime_state, InMemoryRuntimeState):
+        typed_runtime_state = runtime_state
 
-    status = "ok" if database == "ok" and runtime_state == "ok" else "degraded"
-    return HealthStatus(status=status, database=database, runtime_state=runtime_state)
+    return await controller.read(db_engine=typed_db_engine, runtime_state=typed_runtime_state)

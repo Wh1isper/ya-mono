@@ -5,10 +5,10 @@ from typing import Any
 
 from alembic import context
 from sqlalchemy import create_engine, pool
-from ya_claw.config import ClawSettings, resolve_database_path, resolve_database_url
-from ya_claw.db import tables as _tables  # noqa: F401
+from ya_claw.config import ClawSettings
 from ya_claw.db.engine import to_sync_database_url
-from ya_claw.db.tables import Base
+from ya_claw.orm import tables as _tables  # noqa: F401
+from ya_claw.orm.base import Base
 
 config = context.config
 if config.config_file_name is not None:
@@ -19,9 +19,8 @@ settings = ClawSettings()
 
 
 def get_url() -> str:
-    database_path = resolve_database_path(settings)
-    database_path.parent.mkdir(parents=True, exist_ok=True)
-    return to_sync_database_url(resolve_database_url(settings))
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    return to_sync_database_url(settings.resolved_database_url)
 
 
 def include_object(obj: Any, name: str | None, type_: str, reflected: bool, compare_to: Any) -> bool:

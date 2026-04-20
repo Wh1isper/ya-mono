@@ -9,22 +9,18 @@ The API should stay small enough to match the single-node runtime shape.
 ```mermaid
 flowchart TB
     ROOT[/api/v1]
-    ROOT --> CLAW[/claw]
     ROOT --> SESSIONS[/sessions]
     ROOT --> RUNS[/runs]
     ROOT --> EVENTS[/events]
     ROOT --> SCHEDULES[/schedules]
     ROOT --> BRIDGES[/bridges]
-    ROOT --> ARTIFACTS[/artifacts]
 ```
 
 ## Top-level Endpoints
 
-| Method | Path                    | Purpose                              |
-| ------ | ----------------------- | ------------------------------------ |
-| `GET`  | `/healthz`              | service, storage, and runtime health |
-| `GET`  | `/api/v1/claw/info`     | runtime metadata                     |
-| `GET`  | `/api/v1/claw/topology` | high-level topology                  |
+| Method | Path       | Purpose                              |
+| ------ | ---------- | ------------------------------------ |
+| `GET`  | `/healthz` | service, storage, and runtime health |
 
 ## Sessions
 
@@ -88,13 +84,6 @@ A bridge dispatch request should carry:
 - opaque `project_id` or project-selection metadata
 - optional reply target metadata
 
-## Artifacts
-
-| Method | Path                                       | Purpose                 |
-| ------ | ------------------------------------------ | ----------------------- |
-| `GET`  | `/api/v1/artifacts/{artifact_id}`          | fetch artifact metadata |
-| `GET`  | `/api/v1/artifacts/{artifact_id}/download` | download artifact       |
-
 ## Events
 
 | Method | Path                                   | Purpose                                |
@@ -141,6 +130,7 @@ Suggested error shape:
 
 ## Authentication
 
-The single-node baseline can start from one shared bearer token model or trusted local deployment mode.
+The single-node baseline uses one shared bearer token configured through `YA_CLAW_API_TOKEN`.
+Every HTTP route except `/healthz` sends `Authorization: Bearer <token>`.
 
-Authentication should stay orthogonal to session, run, schedule, and bridge structure.
+Authentication stays orthogonal to session, run, schedule, and bridge structure.

@@ -38,7 +38,6 @@ It should store:
 - session and run indexes
 - status, timestamps, summaries, and searchable metadata
 - opaque `project_id` values carried with sessions and runs
-- artifact metadata and references
 - event checkpoints or replay summaries where needed
 
 ### Relational Store Principle
@@ -71,22 +70,14 @@ The relational store owns committed runtime state.
 
 ## Local Filesystem
 
-The local filesystem has two durable areas:
+The local filesystem keeps runtime data and project data in separate roots.
 
-- an **artifact store** for run outputs and retained files
+- the **runtime data root** holds sensitive session continuity data
+- the **workspace root** holds project-managed data that can participate in normal Git workflows
+
+Inside the runtime data root, YA Claw keeps one durable area:
+
 - a **session store** for durable session state and compacted conversation records
-
-### Artifact Store
-
-The artifact store holds durable payloads produced or retained by runs.
-Each run directory should stay simple.
-
-It should store:
-
-- generated files
-- retained uploads
-- run logs and traces
-- exported artifacts intended for download or later inspection
 
 ### Session Store
 
@@ -117,7 +108,7 @@ It should be written at session end or at another committed boundary and should 
 
 - compacted conversation messages for the completed round
 - AGUI-aligned message metadata for rendering a session timeline
-- references to associated run, session, and artifact records
+- references to associated run and session records
 
 `message.json` is the preferred source for Web UI conversation history.
 It keeps the UI aligned with an AGUI-style message model while the runtime continues to use live event streaming for active runs.
@@ -125,13 +116,15 @@ It keeps the UI aligned with an AGUI-style message model while the runtime conti
 Suggested layout:
 
 ```text
-data/
-├── artifacts/
-│   └── {run_id}/
-└── session-store/
-    └── {session_id}/
-        ├── state.json
-        └── message.json
+~/.ya-claw/
+├── ya_claw.sqlite3
+├── data/
+│   └── session-store/
+│       └── {session_id}/
+│           ├── state.json
+│           └── message.json
+└── workspace/
+    └── ... project-managed files ...
 ```
 
 ## AGUI Alignment
@@ -175,8 +168,7 @@ The runtime should retain enough durable summary data to support:
 Live event buffers stay scoped to the process lifetime.
 Committed summaries, `state.json`, and `message.json` should stay durable.
 
-## Artifact Principle
+## Storage Principle
 
-Artifact metadata should stay queryable from the relational store.
-Artifact payloads should stay in the artifact store under the runtime data root.
 Session continuity data should stay in the session store under the runtime data root.
+Project-managed files should stay under the workspace root.
