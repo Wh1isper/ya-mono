@@ -141,6 +141,14 @@ def _is_benign_contextvar_cleanup_error(e: BaseException | None) -> bool:
     return "was created in a different Context" in message and "ContextVar" in message
 
 
+def _get_elapsed_seconds(started_at: datetime) -> float:
+    """Calculate elapsed seconds for naive or aware timestamps."""
+    if started_at.tzinfo is None:
+        return (datetime.now() - started_at).total_seconds()
+
+    return (datetime.now(UTC) - started_at.astimezone(UTC)).total_seconds()
+
+
 # =============================================================================
 # Constants
 # =============================================================================
@@ -2477,7 +2485,7 @@ class TUIApp:
             table.add_column("PID", style="dim")
 
             for _proc_id, proc in bg_processes.items():
-                elapsed = (datetime.now(UTC) - proc.started_at).total_seconds()
+                elapsed = _get_elapsed_seconds(proc.started_at)
                 status_text = Text(f"running ({elapsed:.0f}s)", style="cyan")
                 pid_str = str(proc.pid) if proc.pid is not None else "-"
                 table.add_row(proc.process_id, status_text, proc.command, pid_str)
