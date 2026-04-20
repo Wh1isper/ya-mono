@@ -12,21 +12,29 @@ build-backend = "hatchling.build"
 package = false
 
 [tool.uv.workspace]
-members = ["packages/ya-agent-sdk", "packages/yaacli", "packages/ya-agent-platform"]
+members = [
+    "packages/ya-agent-sdk",
+    "packages/yaacli",
+    "packages/ya-claw",
+    "packages/ya-agent-platform",
+]
 
 [tool.uv.sources]
 ya-agent-sdk = { workspace = true }
+ya-claw = { workspace = true }
 ya-agent-platform = { workspace = true }
 
 [tool.pyright]
 include = [
     "packages/ya-agent-sdk/ya_agent_sdk",
     "packages/yaacli/yaacli",
+    "packages/ya-claw/ya_claw",
     "packages/ya-agent-platform/ya_agent_platform",
 ]
 exclude = [
     "packages/ya-agent-sdk/tests",
     "packages/yaacli/tests",
+    "packages/ya-claw/tests",
     "packages/ya-agent-platform/tests",
     "packages/yaacli/yaacli/skills",
     "examples",
@@ -76,7 +84,7 @@ ignore = [
 "packages/yaacli/yaacli/*" = ["C901", "SIM108"]
 "packages/yaacli/tests/*" = ["S101", "S603", "S607", "SIM117", "RUF059", "TRY400", "B904"]
 "packages/ya-agent-sdk/tests/*" = ["S101", "S603", "S607", "SIM117", "RUF059", "TRY400", "B904"]
-"packages/ya-agent-platform/tests/*" = ["S101", "SIM117", "RUF059", "TRY400", "B904"]
+"packages/ya-claw/tests/*" = ["S101", "SIM117", "RUF059", "TRY400", "B904"]
 "packages/yaacli/yaacli/skills/**/*.py" = ["E402"]
 "skills/examples/*" = ["S101", "SIM117", "RUF059", "TRY400", "B904", "E402"]
 "examples/*" = ["S101", "SIM117", "RUF059", "TRY400", "B904", "E402"]
@@ -96,7 +104,7 @@ branch = true
 source = [
     "packages/ya-agent-sdk/ya_agent_sdk",
     "packages/yaacli/yaacli",
-    "packages/ya-agent-platform/ya_agent_platform",
+    "packages/ya-claw/ya_claw",
 ]
 omit = [
     "packages/ya-agent-sdk/ya_agent_sdk/agents/*",

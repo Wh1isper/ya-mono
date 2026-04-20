@@ -1,0 +1,27 @@
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS builder
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+COPY . .
+
+RUN uv build --package ya-agent-platform -o /dist
+
+
+FROM python:3.13-slim-bookworm AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /srv/ya-agent-platform
+
+COPY --from=builder /dist /tmp/dist
+RUN platform_wheel=$(ls /tmp/dist/ya_agent_platform-*.whl) \
+    && python -m pip install "${platform_wheel}" \
+    && rm -rf /tmp/dist
+
+CMD ["python", "-c", "print('ya-agent-platform is reserved with TBD scope. Current runtime work focuses on the single-node ya-claw build.')"]

@@ -29,83 +29,93 @@ cli: ## Run the CLI
 	@./scripts/sync-skills.sh
 	@rm -f yaacli.log && YAACLI_PERF=1 uv run --package yaacli yaacli -v
 
-.PHONY: run-platform
-run-platform: ## Run the YA Agent Platform backend locally
-	@echo "Running ya-agent-platform"
-	@uv run --package ya-agent-platform ya-agent-platform serve --reload
+.PHONY: run-claw
+run-claw: ## Run the YA Claw backend locally
+	@echo "Running ya-claw"
+	@uv run --package ya-claw ya-claw serve --reload
 
-.PHONY: platform-db-upgrade
-platform-db-upgrade: ## Run YA Agent Platform DB migrations to latest
-	@echo "Upgrading ya-agent-platform database"
-	@uv run --package ya-agent-platform ya-agent-platform db upgrade
+.PHONY: claw-db-upgrade
+claw-db-upgrade: ## Run YA Claw DB migrations to latest
+	@echo "Upgrading ya-claw database"
+	@uv run --package ya-claw ya-claw db upgrade
 
-.PHONY: platform-db-downgrade
-platform-db-downgrade: ## Roll back YA Agent Platform DB by one migration
-	@echo "Downgrading ya-agent-platform database"
-	@uv run --package ya-agent-platform ya-agent-platform db downgrade
+.PHONY: claw-db-downgrade
+claw-db-downgrade: ## Roll back YA Claw DB by one migration
+	@echo "Downgrading ya-claw database"
+	@uv run --package ya-claw ya-claw db downgrade
 
-.PHONY: platform-db-current
-platform-db-current: ## Show current YA Agent Platform DB revision
-	@echo "Showing ya-agent-platform database revision"
-	@uv run --package ya-agent-platform ya-agent-platform db current
+.PHONY: claw-db-current
+claw-db-current: ## Show current YA Claw DB revision
+	@echo "Showing ya-claw database revision"
+	@uv run --package ya-claw ya-claw db current
 
-.PHONY: platform-db-history
-platform-db-history: ## Show YA Agent Platform migration history
-	@echo "Showing ya-agent-platform migration history"
-	@uv run --package ya-agent-platform ya-agent-platform db history
+.PHONY: claw-db-history
+claw-db-history: ## Show YA Claw migration history
+	@echo "Showing ya-claw migration history"
+	@uv run --package ya-claw ya-claw db history
 
-.PHONY: platform-db-migrate
-platform-db-migrate: ## Generate a YA Agent Platform migration (MSG required)
-	@echo "Generating ya-agent-platform migration"
-	@uv run --package ya-agent-platform ya-agent-platform db migrate "$(MSG)"
+.PHONY: claw-db-migrate
+claw-db-migrate: ## Generate a YA Claw migration (MSG required)
+	@echo "Generating ya-claw migration"
+	@uv run --package ya-claw ya-claw db migrate "$(MSG)"
 
-.PHONY: platform-infra-up
-platform-infra-up: ## Start YA Agent Platform dev PostgreSQL and Redis
-	@echo "Starting ya-agent-platform development infrastructure"
-	@docker compose -f packages/ya-agent-platform/infra/docker-compose.dev.yml up -d
+.PHONY: claw-infra-up
+claw-infra-up: ## Start YA Claw dev PostgreSQL and Redis
+	@echo "Starting ya-claw development infrastructure"
+	@docker compose -f packages/ya-claw/infra/docker-compose.dev.yml up -d
 
-.PHONY: platform-infra-down
-platform-infra-down: ## Stop YA Agent Platform dev PostgreSQL and Redis
-	@echo "Stopping ya-agent-platform development infrastructure"
-	@docker compose -f packages/ya-agent-platform/infra/docker-compose.dev.yml down
+.PHONY: claw-infra-down
+claw-infra-down: ## Stop YA Claw dev PostgreSQL and Redis
+	@echo "Stopping ya-claw development infrastructure"
+	@docker compose -f packages/ya-claw/infra/docker-compose.dev.yml down
 
-.PHONY: platform-infra-status
-platform-infra-status: ## Show YA Agent Platform dev infrastructure status
-	@echo "Showing ya-agent-platform development infrastructure status"
-	@docker compose -f packages/ya-agent-platform/infra/docker-compose.dev.yml ps
+.PHONY: claw-infra-status
+claw-infra-status: ## Show YA Claw dev infrastructure status
+	@echo "Showing ya-claw development infrastructure status"
+	@docker compose -f packages/ya-claw/infra/docker-compose.dev.yml ps
 
 .PHONY: web-install
 web-install: ## Install web app dependencies with corepack pnpm
-	@echo "Installing ya-agent-platform-web dependencies"
+	@echo "Installing ya-claw-web dependencies"
 	@corepack pnpm install
 
 .PHONY: web-dev
-web-dev: ## Run the YA Agent Platform web app locally
-	@echo "Running ya-agent-platform-web"
-	@corepack pnpm --dir apps/ya-agent-platform-web dev
+web-dev: ## Run the YA Claw web app locally
+	@echo "Running ya-claw-web"
+	@corepack pnpm --dir apps/ya-claw-web dev
 
 .PHONY: web-lint
-web-lint: ## Run ESLint for the platform web app
-	@echo "Running ya-agent-platform-web lint"
-	@corepack pnpm --dir apps/ya-agent-platform-web exec eslint .
+web-lint: ## Run ESLint for the YA Claw web app
+	@echo "Running ya-claw-web lint"
+	@corepack pnpm --dir apps/ya-claw-web exec eslint .
 
 .PHONY: web-build
-web-build: ## Run TypeScript and Vite build checks for the platform web app
-	@echo "Running ya-agent-platform-web build"
-	@corepack pnpm --dir apps/ya-agent-platform-web build
+web-build: ## Run TypeScript and Vite build checks for the YA Claw web app
+	@echo "Running ya-claw-web build"
+	@corepack pnpm --dir apps/ya-claw-web build
+
+.PHONY: docker-build-claw
+docker-build-claw: ## Build the YA Claw Docker image
+	@echo "Building ya-claw Docker image"
+	@docker build -f Dockerfile.ya-claw -t ya-claw:dev .
+
+.PHONY: docker-run-claw
+docker-run-claw: ## Run the YA Claw Docker image
+	@echo "Running ya-claw Docker image"
+	@docker run --rm -p 9042:9042 ya-claw:dev
 
 .PHONY: docker-build-platform
-docker-build-platform: ## Build the combined YA Agent Platform Docker image
+docker-build-platform: ## Build the YA Agent Platform Docker image
 	@echo "Building ya-agent-platform Docker image"
-	@docker build -t ya-agent-platform:dev .
+	@docker build -f Dockerfile.ya-agent-platform -t ya-agent-platform:dev .
 
 .PHONY: docker-run-platform
-docker-run-platform: ## Run the combined YA Agent Platform Docker image
+docker-run-platform: ## Run the YA Agent Platform Docker image
 	@echo "Running ya-agent-platform Docker image"
-	@docker run --rm -p 9042:9042 ya-agent-platform:dev
+	@docker run --rm ya-agent-platform:dev
 
 .PHONY: check
-check: ## Run code quality tools for all packages
+check: ## Run code quality tools for all active packages
 	@echo "Checking lock file consistency with pyproject.toml"
 	@uv lock --locked
 	@echo "Running pre-commit"
@@ -120,13 +130,13 @@ check: ## Run code quality tools for all packages
 	@(cd packages/ya-agent-sdk && uvx deptry ya_agent_sdk)
 	@echo "Running deptry for yaacli"
 	@(cd packages/yaacli && uvx deptry yaacli)
-	@echo "Running deptry for ya-agent-platform"
-	@(cd packages/ya-agent-platform && uvx deptry ya_agent_platform)
+	@echo "Running deptry for ya-claw"
+	@(cd packages/ya-claw && uvx deptry ya_claw)
 
 .PHONY: test
-test: ## Run SDK, CLI, and platform tests
+test: ## Run SDK, CLI, and YA Claw tests
 	@echo "Running pytest for workspace packages"
-	@uv run python -m pytest packages/ya-agent-sdk/tests packages/yaacli/tests packages/ya-agent-platform/tests -n auto -vv --inline-snapshot=disable --cov --cov-config=pyproject.toml --cov-report term-missing
+	@uv run python -m pytest packages/ya-agent-sdk/tests packages/yaacli/tests packages/ya-claw/tests -n auto -vv --inline-snapshot=disable --cov --cov-config=pyproject.toml --cov-report term-missing
 
 .PHONY: test-sdk
 test-sdk: ## Run SDK tests
@@ -138,35 +148,40 @@ test-cli: ## Run CLI tests
 	@echo "Running CLI pytest"
 	@uv run python -m pytest packages/yaacli/tests -n auto -vv --inline-snapshot=disable
 
-.PHONY: test-platform
-test-platform: ## Run YA Agent Platform tests
-	@echo "Running platform pytest"
-	@uv run python -m pytest packages/ya-agent-platform/tests -n auto -vv --inline-snapshot=disable --cov --cov-config=pyproject.toml --cov-report term-missing
+.PHONY: test-claw
+test-claw: ## Run YA Claw tests
+	@echo "Running YA Claw pytest"
+	@uv run python -m pytest packages/ya-claw/tests -n auto -vv --inline-snapshot=disable --cov --cov-config=pyproject.toml --cov-report term-missing
 
 .PHONY: test-fix
 test-fix: ## Run pytest with inline snapshot updates
 	@echo "Running pytest with inline snapshot updates"
-	@uv run python -m pytest packages/ya-agent-sdk/tests packages/yaacli/tests packages/ya-agent-platform/tests -vv --inline-snapshot=fix
+	@uv run python -m pytest packages/ya-agent-sdk/tests packages/yaacli/tests packages/ya-claw/tests -vv --inline-snapshot=fix
 
 .PHONY: build
 build: clean-build ## Build ya-agent-sdk distribution
 	@echo "Building ya-agent-sdk"
 	@uv build --package ya-agent-sdk -o dist
 
+.PHONY: build-claw
+build-claw: clean-build ## Build ya-claw distribution
+	@echo "Building ya-claw"
+	@uv build --package ya-claw -o dist
+
 .PHONY: build-platform
-build-platform: clean-build ## Build ya-agent-platform distribution
-	@echo "Building ya-agent-platform"
+build-platform: clean-build ## Build the ya-agent-platform package
+	@echo "Building ya-agent-platform package"
 	@uv build --package ya-agent-platform -o dist
 
 .PHONY: build-all
-build-all: clean-build ## Build distributions for all packages
+build-all: clean-build ## Build distributions for all workspace packages
 	@echo "Building workspace packages"
 	@uv build --all-packages -o dist
 
 .PHONY: clean-build
 clean-build: ## Clean build artifacts
 	@echo "Removing build artifacts"
-	@uv run python -c "from pathlib import Path; import shutil; [shutil.rmtree(path, ignore_errors=True) for path in (Path('dist'), Path('packages/ya-agent-sdk/dist'), Path('packages/yaacli/dist'), Path('packages/ya-agent-platform/dist'))]"
+	@uv run python -c "from pathlib import Path; import shutil; [shutil.rmtree(path, ignore_errors=True) for path in (Path('dist'), Path('packages/ya-agent-sdk/dist'), Path('packages/yaacli/dist'), Path('packages/ya-claw/dist'), Path('packages/ya-agent-platform/dist'))]"
 
 .PHONY: publish
 publish: ## Publish built distributions to PyPI
@@ -178,6 +193,6 @@ build-and-publish: build publish ## Build and publish.
 
 .PHONY: help
 help:
-	@uv run python -c "import re; [[print(f'\033[36m{m[0]:<20}\033[0m {m[1]}') for m in re.findall(r'^([a-zA-Z_-]+):.*?## (.*)$$', open(makefile).read(), re.M)] for makefile in ('$(MAKEFILE_LIST)').strip().split()]"
+	@uv run python -c "import re; [[print(f'\033[36m{m[0]:<24}\033[0m {m[1]}') for m in re.findall(r'^([a-zA-Z_-]+):.*?## (.*)$$', open(makefile).read(), re.M)] for makefile in ('$(MAKEFILE_LIST)').strip().split()]"
 
 .DEFAULT_GOAL := help
