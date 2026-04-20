@@ -6,6 +6,8 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_DEFAULT_DATABASE_FILENAME = "ya_claw.sqlite3"
+
 
 class ClawSettings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -31,11 +33,23 @@ class ClawSettings(BaseSettings):
     database_max_overflow: int = 10
     database_pool_recycle_seconds: int = 3600
 
-    redis_url: str | None = None
-
     auto_migrate: bool = True
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> ClawSettings:
     return ClawSettings()
+
+
+def resolve_database_path(settings: ClawSettings | None = None) -> Path:
+    resolved_settings = settings or get_settings()
+    return resolved_settings.data_dir.expanduser() / _DEFAULT_DATABASE_FILENAME
+
+
+def resolve_database_url(settings: ClawSettings | None = None) -> str:
+    resolved_settings = settings or get_settings()
+    if resolved_settings.database_url:
+        return resolved_settings.database_url
+
+    database_path = resolve_database_path(resolved_settings).resolve()
+    return f"sqlite+aiosqlite:///{database_path}"

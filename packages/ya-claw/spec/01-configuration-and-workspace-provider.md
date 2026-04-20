@@ -3,7 +3,7 @@
 YA Claw resolves each run from three configuration layers:
 
 - environment variables for service infrastructure and secrets
-- database-stored profiles and workspaces for durable runtime behavior
+- storage-backed profiles and workspaces for durable runtime behavior
 - request-level overrides for transient run customization
 
 ## Configuration Layers
@@ -11,7 +11,7 @@ YA Claw resolves each run from three configuration layers:
 ```mermaid
 flowchart TB
     ENV[Environment Variables] --> RES[Runtime Config Resolver]
-    DB[Profiles + Workspaces in PostgreSQL] --> RES
+    STORE[Profiles + Workspaces in SQLite / PostgreSQL] --> RES
     REQ[Per-request Overrides] --> RES
     RES --> RUNCFG[Resolved Run Configuration]
 ```
@@ -20,21 +20,20 @@ flowchart TB
 
 ### Environment Variables
 
-| Variable                                | Purpose                     |
-| --------------------------------------- | --------------------------- |
-| `YA_CLAW_HOST`                          | bind host                   |
-| `YA_CLAW_PORT`                          | bind port                   |
-| `YA_CLAW_PUBLIC_BASE_URL`               | public base URL             |
-| `YA_CLAW_ENVIRONMENT`                   | runtime environment label   |
-| `YA_CLAW_DATABASE_URL`                  | PostgreSQL connection       |
-| `YA_CLAW_REDIS_URL`                     | Redis connection            |
-| `YA_CLAW_AUTO_MIGRATE`                  | startup migration switch    |
-| `YA_CLAW_WEB_DIST_DIR`                  | bundled web shell directory |
-| `YA_CLAW_DATA_DIR`                      | local data root             |
-| `YA_CLAW_DATABASE_ECHO`                 | SQL logging                 |
-| `YA_CLAW_DATABASE_POOL_SIZE`            | pool size                   |
-| `YA_CLAW_DATABASE_MAX_OVERFLOW`         | pool overflow               |
-| `YA_CLAW_DATABASE_POOL_RECYCLE_SECONDS` | connection recycle interval |
+| Variable                                | Purpose                                |
+| --------------------------------------- | -------------------------------------- |
+| `YA_CLAW_HOST`                          | bind host                              |
+| `YA_CLAW_PORT`                          | bind port                              |
+| `YA_CLAW_PUBLIC_BASE_URL`               | public base URL                        |
+| `YA_CLAW_ENVIRONMENT`                   | runtime environment label              |
+| `YA_CLAW_DATABASE_URL`                  | SQLite or PostgreSQL connection string |
+| `YA_CLAW_AUTO_MIGRATE`                  | startup schema migration switch        |
+| `YA_CLAW_WEB_DIST_DIR`                  | bundled web shell directory            |
+| `YA_CLAW_DATA_DIR`                      | local data root                        |
+| `YA_CLAW_DATABASE_ECHO`                 | SQL logging                            |
+| `YA_CLAW_DATABASE_POOL_SIZE`            | pool size                              |
+| `YA_CLAW_DATABASE_MAX_OVERFLOW`         | pool overflow                          |
+| `YA_CLAW_DATABASE_POOL_RECYCLE_SECONDS` | connection recycle interval            |
 
 LLM provider keys and tool API keys stay in environment variables and follow `ya-agent-sdk` conventions.
 
@@ -73,7 +72,7 @@ It only needs to persist:
 - provider input
 - display metadata
 
-Heavy resolution logic belongs to `WorkspaceProvider`, not to the workspace row itself.
+Heavy resolution logic belongs to `WorkspaceProvider`, not to the workspace record.
 
 ## WorkspaceProvider
 
@@ -90,12 +89,7 @@ The provider is responsible for:
 - returning environment variables for execution
 - exposing capability flags and metadata to the runtime
 
-The provider is not responsible for:
-
-- session persistence
-- run creation
-- event transport
-- artifact storage
+The provider boundary stays focused on resolution. Session persistence, run creation, active task management, and artifact storage stay in the core runtime.
 
 ## Resolution Contract
 
@@ -136,14 +130,14 @@ sequenceDiagram
     participant API
     participant Resolver
     participant Provider
-    participant DB
+    participant Store
 
     Client->>API: start run
     API->>Resolver: resolve profile + workspace
-    Resolver->>DB: load workspace record
+    Resolver->>Store: load workspace record
     Resolver->>Provider: resolve(workspace_id, project_id, profile)
     Provider-->>Resolver: binding
-    Resolver->>DB: persist binding snapshot reference
+    Resolver->>Store: persist binding snapshot reference
     Resolver-->>API: resolved run configuration
 ```
 

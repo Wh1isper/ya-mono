@@ -60,12 +60,12 @@ claw-db-migrate: ## Generate a YA Claw migration (MSG required)
 	@uv run --package ya-claw ya-claw db migrate "$(MSG)"
 
 .PHONY: claw-infra-up
-claw-infra-up: ## Start YA Claw dev PostgreSQL and Redis
+claw-infra-up: ## Start optional YA Claw PostgreSQL development database
 	@echo "Starting ya-claw development infrastructure"
 	@docker compose -f packages/ya-claw/infra/docker-compose.dev.yml up -d
 
 .PHONY: claw-infra-down
-claw-infra-down: ## Stop YA Claw dev PostgreSQL and Redis
+claw-infra-down: ## Stop optional YA Claw PostgreSQL development database
 	@echo "Stopping ya-claw development infrastructure"
 	@docker compose -f packages/ya-claw/infra/docker-compose.dev.yml down
 

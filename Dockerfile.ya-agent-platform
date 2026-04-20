@@ -24,4 +24,4 @@ RUN platform_wheel=$(ls /tmp/dist/ya_agent_platform-*.whl) \
     && python -m pip install "${platform_wheel}" \
     && rm -rf /tmp/dist
 
-CMD ["python", "-c", "print('ya-agent-platform is reserved with TBD scope. Current runtime work focuses on the single-node ya-claw build.')"]
+CMD ["python", "-c", "print('ya-agent-platform is a WIP stateless agent service with TBD scope. Current runtime work focuses on the single-node ya-claw build.')"]

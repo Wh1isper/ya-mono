@@ -1,7 +1,7 @@
 [project]
 name = "ya-agent-platform"
 dynamic = ["version"]
-description = "Universal agent platform for various applications."
+description = "WIP stateless agent service with TBD scope."
 authors = [{ name = "wh1isper", email = "jizhongsheng957@gmail.com" }]
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
