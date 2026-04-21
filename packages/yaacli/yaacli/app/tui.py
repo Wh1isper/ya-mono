@@ -26,6 +26,7 @@ import sys
 import time
 import traceback
 import uuid
+from collections.abc import Sequence
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -37,12 +38,13 @@ from typing import TYPE_CHECKING, Any, cast
 from prompt_toolkit import Application
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import HSplit, Layout, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import TextArea
-from pydantic_ai import DeferredToolRequests, DeferredToolResults, ToolDenied, UsageLimits
+from pydantic_ai import BinaryContent, DeferredToolRequests, DeferredToolResults, ToolDenied, UsageLimits, UserContent
 from pydantic_ai.messages import (
     FunctionToolCallEvent,
     FunctionToolResultEvent,
@@ -83,6 +85,7 @@ from ya_agent_sdk.utils import get_latest_request_usage
 from yaacli.app.state import TUIMode
 from yaacli.background import BACKGROUND_MONITOR_KEY, BackgroundMonitor, BackgroundTaskInfo
 from yaacli.browser import BrowserManager
+from yaacli.clipboard import ClipboardImageReadResult, read_clipboard_image
 from yaacli.config import ConfigManager, YaacliConfig
 from yaacli.display import EventRenderer, RichRenderer, ToolMessage
 from yaacli.environment import TUIEnvironment
@@ -172,6 +175,15 @@ class TUIState(StrEnum):
     RUNNING = "running"
 
 
+@dataclass(frozen=True)
+class PendingAttachment:
+    """Pending binary attachment queued from clipboard paste."""
+
+    data: bytes
+    media_type: str
+    size_bytes: int
+
+
 # =============================================================================
 # TUI Application
 # =============================================================================
@@ -257,6 +269,7 @@ class TUIApp:
     _prompt_history: list[str] = field(default_factory=list, init=False)
     _history_index: int = field(default=-1, init=False)
     _current_input_backup: str = field(default="", init=False)
+    _pending_attachments: list[PendingAttachment] = field(default_factory=list, init=False)
 
     # Streaming text tracking for markdown rendering
     _streaming_text: str = field(default="", init=False)
@@ -789,15 +802,59 @@ class TUIApp:
         self._streaming_thinking = ""
         self._streaming_thinking_line_index = None
 
-    def _append_user_input(self, text: str) -> None:
-        """Render user input with styled prompt indicator and word wrap."""
+    def _format_size_bytes(self, size_bytes: int) -> str:
+        """Format byte size for compact UI display."""
+        if size_bytes < 1024:
+            return f"{size_bytes}B"
+        if size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.0f}KB"
+        return f"{size_bytes / (1024 * 1024):.1f}MB"
+
+    def _format_attachment_description(self, attachment: PendingAttachment) -> str:
+        """Format a single attachment description."""
+        return f"{attachment.media_type} {self._format_size_bytes(attachment.size_bytes)}"
+
+    def _format_pending_attachments_label(self) -> str:
+        """Format pending attachment status label."""
+        if not self._pending_attachments:
+            return ""
+
+        count = len(self._pending_attachments)
+        total_size = sum(item.size_bytes for item in self._pending_attachments)
+        noun = "image" if count == 1 else "images"
+        return f"Attach: {count} {noun} ({self._format_size_bytes(total_size)})"
+
+    def _consume_pending_attachments(self) -> list[PendingAttachment]:
+        """Take the queued clipboard attachments for the next agent turn."""
+        attachments = list(self._pending_attachments)
+        self._pending_attachments.clear()
+        return attachments
+
+    def _reset_pending_attachments(self) -> None:
+        """Clear queued clipboard attachments and related compose state."""
+        self._pending_attachments.clear()
+        self._history_index = -1
+        self._current_input_backup = ""
+
+    def _append_user_input(self, text: str, attachments: Sequence[PendingAttachment] | None = None) -> None:
+        """Render user input with styled prompt indicator and attachment markers."""
         width = self._get_terminal_width()
-        # Use Rich Text for proper word wrapping
         from rich.text import Text as RichText
+
+        attachment_list = list(attachments or [])
+        display_text = text
+        if not display_text and attachment_list:
+            count = len(attachment_list)
+            noun = "image" if count == 1 else "images"
+            display_text = f"[Attached {count} {noun}]"
 
         user_text = RichText()
         user_text.append("> ", style="bold green")
-        user_text.append(text)
+        user_text.append(display_text)
+        for attachment in attachment_list:
+            user_text.append("\n")
+            user_text.append("  [Attached] ", style="dim cyan")
+            user_text.append(self._format_attachment_description(attachment), style="dim cyan")
         rendered = self._renderer.render(user_text, width=width).rstrip("\n")
         self._append_output(rendered)
 
@@ -919,6 +976,7 @@ class TUIApp:
         """Get formatted status bar text."""
         mode_style = f"class:status-bar.mode-{self._mode.value}"
         state_text = "RUNNING" if self._state == TUIState.RUNNING else "IDLE"
+        attachment_label = self._format_pending_attachments_label()
 
         # Calculate context usage percentage
         if self._current_context_tokens > 0 and self._context_window_size > 0:
@@ -964,6 +1022,11 @@ class TUIApp:
                         ("class:status-bar", " | "),
                         ("class:status-bar.warning", bg_label),
                     ])
+                if attachment_label:
+                    parts.extend([
+                        ("class:status-bar", " | "),
+                        ("class:status-bar.warning", attachment_label),
+                    ])
                 parts.extend([
                     ("class:status-bar", " | "),
                     ("class:status-bar", "Ctrl+C: Interrupt "),
@@ -990,6 +1053,11 @@ class TUIApp:
                 parts.extend([
                     ("class:status-bar", " | "),
                     ("class:status-bar.warning", bg_label),
+                ])
+            if attachment_label:
+                parts.extend([
+                    ("class:status-bar", " | "),
+                    ("class:status-bar.warning", attachment_label),
                 ])
             parts.extend([
                 ("class:status-bar", " | "),
@@ -1046,20 +1114,15 @@ class TUIApp:
 
         return project_guidance, user_rules
 
-    def _build_user_prompt(self, user_input: str) -> str | list[str]:
-        """Build the full user prompt with optional guidance files and mode reminder.
-
-        Args:
-            user_input: The user's input text.
-
-        Returns:
-            Either the plain user_input string, or a list of
-            [user_input, project_guidance, user_rules, mode_reminder] if guidance files exist
-            or plan mode is active.
-        """
+    def _build_user_prompt(
+        self,
+        user_input: str,
+        attachments: Sequence[PendingAttachment] | None = None,
+    ) -> str | list[UserContent]:
+        """Build the full user prompt with optional clipboard image attachments."""
         project_guidance, user_rules = self._load_guidance_files()
+        attachment_list = list(attachments or [])
 
-        # Build mode reminder for plan mode
         mode_reminder: str | None = None
         if self._mode == TUIMode.PLAN:
             mode_reminder = (
@@ -1074,20 +1137,38 @@ class TUIApp:
                 "</mode-reminder>"
             )
 
-        # If no guidance files and not in plan mode, return plain string
-        if not project_guidance and not user_rules and not mode_reminder:
+        if not attachment_list and not project_guidance and not user_rules and not mode_reminder:
             return user_input
 
-        # Build list with non-None items
-        parts = [user_input]
-        if project_guidance:
-            parts.append(project_guidance)
-        if user_rules:
-            parts.append(user_rules)
-        if mode_reminder:
-            parts.append(mode_reminder)
+        if not attachment_list:
+            parts: list[UserContent] = [user_input]
+            if project_guidance:
+                parts.append(project_guidance)
+            if user_rules:
+                parts.append(user_rules)
+            if mode_reminder:
+                parts.append(mode_reminder)
+            return parts
 
-        return parts
+        prompt_parts: list[UserContent] = []
+        if user_input:
+            prompt_parts.append(user_input)
+        elif len(attachment_list) == 1:
+            prompt_parts.append("Please analyze the attached image.")
+        else:
+            prompt_parts.append("Please analyze the attached images.")
+
+        for attachment in attachment_list:
+            prompt_parts.append(BinaryContent(data=attachment.data, media_type=attachment.media_type))
+
+        if project_guidance:
+            prompt_parts.append(project_guidance)
+        if user_rules:
+            prompt_parts.append(user_rules)
+        if mode_reminder:
+            prompt_parts.append(mode_reminder)
+
+        return prompt_parts
 
     def _get_background_monitor(self) -> BackgroundMonitor | None:
         """Get BackgroundMonitor from environment resources."""
@@ -1218,9 +1299,14 @@ class TUIApp:
         self._agent_task = asyncio.create_task(self._run_agent(""))
         self._agent_task.add_done_callback(self._on_agent_task_done)
 
-    async def _run_agent(self, user_input: str) -> None:
+    async def _run_agent(
+        self,
+        user_input: str,
+        attachments: Sequence[PendingAttachment] | None = None,
+    ) -> None:
         """Execute agent with HITL inner loop for tool approvals."""
         self._state = TUIState.RUNNING
+        turn_attachments = list(attachments or [])
         self._pending_bus_check_needed = False
         self._tool_messages.clear()
         self._printed_tool_calls.clear()
@@ -1230,7 +1316,7 @@ class TUIApp:
 
         try:
             # Initial agent execution
-            result = await self._execute_stream(user_input)
+            result = await self._execute_stream(user_input, turn_attachments)
 
             # HITL inner loop: keep processing until we get final str output
             while result and isinstance(result.output, DeferredToolRequests):
@@ -1322,6 +1408,7 @@ class TUIApp:
     async def _execute_stream(
         self,
         prompt: str | DeferredToolResults,
+        attachments: Sequence[PendingAttachment] | None = None,
     ) -> Any:
         """Execute a single agent stream and return the result.
 
@@ -1338,7 +1425,7 @@ class TUIApp:
 
         # Build user prompt if string input
         if isinstance(prompt, str):
-            user_prompt = self._build_user_prompt(prompt)
+            user_prompt = self._build_user_prompt(prompt, attachments)
             deferred_results = None
         else:
             user_prompt = ""
@@ -1873,6 +1960,87 @@ class TUIApp:
         if self._app:
             self._app.invalidate()
 
+    async def _handle_bracketed_paste(self, pasted_text: str, input_area: TextArea) -> None:
+        """Handle a paste gesture with clipboard-image priority."""
+        normalized_text = pasted_text.replace("\r\n", "\n").replace("\r", "\n")
+
+        try:
+            clipboard_result = await read_clipboard_image()
+        except Exception as e:
+            logger.exception("Failed to inspect clipboard image during paste")
+            clipboard_result = ClipboardImageReadResult(image=None, error=_safe_exception_str(e))
+
+        image = clipboard_result.image
+        if image is not None:
+            attachment = PendingAttachment(
+                data=image.data,
+                media_type=image.media_type,
+                size_bytes=len(image.data),
+            )
+            self._pending_attachments.append(attachment)
+            self._history_index = -1
+            self._current_input_backup = ""
+            self._append_system_output(f"Attached {self._format_attachment_description(attachment)} from clipboard")
+            if self._app:
+                self._app.invalidate()
+            return
+
+        if normalized_text:
+            input_area.buffer.insert_text(normalized_text)
+            if self._app:
+                self._app.invalidate()
+            return
+
+        if clipboard_result.error:
+            self._append_system_output(clipboard_result.error)
+            if self._app:
+                self._app.invalidate()
+
+    def _submit_input(self, text: str, input_area: TextArea) -> None:
+        """Submit the current input buffer content."""
+        if self._state == TUIState.RUNNING:
+            if text:
+                self._history_index = -1
+                self._current_input_backup = ""
+                if not self._prompt_history or self._prompt_history[-1] != text:
+                    self._prompt_history.append(text)
+                self._add_steering_message(text)
+                input_area.buffer.reset()
+                return
+
+            if self._pending_attachments:
+                input_area.buffer.reset()
+                self._append_system_output("Queued clipboard image for the next prompt after the current run finishes.")
+                return
+
+            input_area.buffer.reset()
+            return
+
+        if text.startswith("/"):
+            input_area.buffer.reset()
+            self._track_managed_task(asyncio.create_task(self._handle_command(text)))
+            return
+
+        if text.startswith("!"):
+            input_area.buffer.reset()
+            self._track_managed_task(asyncio.create_task(self._execute_shell_command(text[1:])))
+            return
+
+        attachments = self._consume_pending_attachments()
+        if not text and not attachments:
+            input_area.buffer.reset()
+            return
+
+        self._history_index = -1
+        self._current_input_backup = ""
+        if text and (not self._prompt_history or self._prompt_history[-1] != text):
+            self._prompt_history.append(text)
+
+        input_area.buffer.reset()
+        self._append_user_input(text, attachments)
+        self._agent_task = asyncio.create_task(self._run_agent(text, attachments))
+        self._agent_task.add_done_callback(self._on_agent_task_done)
+
     def _extract_tool_result(self, event: FunctionToolResultEvent) -> str:
         """Extract result content from tool result event."""
         try:
@@ -2007,10 +2175,8 @@ class TUIApp:
             if self._input_mode == "send":
                 text = input_area.buffer.text.strip()
 
-                # Check if waiting for HITL approval input
                 if self._hitl_pending and self._approval_event and not self._approval_event.is_set():
                     input_area.buffer.reset()
-                    # Approve if empty, y, Y, yes, YES
                     if text.lower() in ("", "y", "yes"):
                         self._approval_result = True
                         self._approval_reason = None
@@ -2020,40 +2186,18 @@ class TUIApp:
                     self._approval_event.set()
                     return
 
-                if text:
-                    # Reset history navigation
-                    self._history_index = -1
-                    self._current_input_backup = ""
-
-                    # Save to prompt history (avoid duplicates)
-                    if not self._prompt_history or self._prompt_history[-1] != text:
-                        self._prompt_history.append(text)
-
-                    if self._state == TUIState.RUNNING:
-                        # Add steering message and enqueue to steering manager
-                        self._add_steering_message(text)
-                        input_area.buffer.reset()
-                    else:
-                        input_area.buffer.reset()
-                        # Handle slash commands
-                        if text.startswith("/"):
-                            self._track_managed_task(asyncio.create_task(self._handle_command(text)))
-                        # Handle shell commands
-                        elif text.startswith("!"):
-                            self._track_managed_task(asyncio.create_task(self._execute_shell_command(text[1:])))
-                        else:
-                            self._append_user_input(text)
-                            self._agent_task = asyncio.create_task(self._run_agent(text))
-                            self._agent_task.add_done_callback(self._on_agent_task_done)
-                else:
-                    # Empty input - also handle HITL approval (approve with Enter)
-                    if self._hitl_pending and self._approval_event and not self._approval_event.is_set():
-                        self._approval_result = True
-                        self._approval_reason = None
-                        self._approval_event.set()
-                    input_area.buffer.reset()
+                self._submit_input(text, input_area)
             else:
                 input_area.buffer.insert_text("\n")
+
+        @kb.add(Keys.BracketedPaste, eager=True)
+        def handle_bracketed_paste(event: KeyPressEvent) -> None:
+            """Handle terminal paste events with clipboard image priority."""
+            pasted_text = event.data or ""
+            if self._app:
+                self._app.create_background_task(self._handle_bracketed_paste(pasted_text, input_area))
+            else:
+                self._track_managed_task(asyncio.create_task(self._handle_bracketed_paste(pasted_text, input_area)))
 
         @kb.add("tab")
         def handle_tab(event: KeyPressEvent) -> None:
@@ -2364,6 +2508,7 @@ class TUIApp:
         self._tool_messages.clear()
         self._subagent_states.clear()
         self._steering_items.clear()
+        self._reset_pending_attachments()
         # Clear conversation history
         self._message_history = None
         self._last_run = None
@@ -2555,6 +2700,7 @@ class TUIApp:
             return
 
         try:
+            self._reset_pending_attachments()
             # Load message history
             history_data = history_file.read_bytes()
             history = ModelMessagesTypeAdapter.validate_json(history_data)
