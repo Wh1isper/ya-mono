@@ -58,6 +58,12 @@ Run CLI tests from the workspace root:
 make test-cli
 ```
 
+## Clipboard Image Paste
+
+YAACLI reads clipboard images through Pillow first on macOS and Windows.
+macOS also reads Finder-copied image files through Cocoa pasteboard APIs via `pyobjc-framework-Cocoa`.
+Linux image paste still relies on `wl-paste` on Wayland or `xclip` on X11.
+
 ## License
 
 BSD 3-Clause License. See the [repository license](https://github.com/wh1isper/ya-mono/blob/main/LICENSE).
