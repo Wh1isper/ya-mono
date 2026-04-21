@@ -42,6 +42,33 @@ flowchart TB
 | `GET`  | `/api/v1/runs/{run_id}`        | inspect run        |
 | `POST` | `/api/v1/runs/{run_id}/cancel` | cancel run or task |
 
+## Session Query Shape
+
+Session list and session detail responses should expose enough run context for cross-session inspection and tool-driven continuation.
+
+Suggested session summary fields:
+
+- `run_count`
+- `active_run_ids`
+- `latest_run`
+- `profile_name`
+- `project_id`
+- `metadata`
+
+`latest_run` should carry the compact run inspection fields that an agent or UI needs for routing decisions:
+
+- `id`
+- `status`
+- `trigger_type`
+- `profile_name`
+- `project_id`
+- `input_text`
+- `output_summary`
+- `error_message`
+- `created_at`
+- `started_at`
+- `finished_at`
+
 ### Run Scheduling Model
 
 - foreground runs execute within the single-node process
@@ -107,6 +134,22 @@ A run request should carry:
 
 YA Claw consumes `project_id` and metadata.
 YA Claw does not need project CRUD endpoints.
+
+## Custom Toolset Mapping
+
+The API should support a future YA Claw client toolset for start, inspect, and cross-session continuation workflows.
+
+A clean first mapping is:
+
+- `start_conversation` -> `POST /api/v1/runs`
+- `list_sessions` -> `GET /api/v1/sessions`
+- `get_session` -> `GET /api/v1/sessions/{session_id}`
+- `list_session_runs` -> `GET /api/v1/sessions/{session_id}/runs`
+- `get_run` -> `GET /api/v1/runs/{run_id}`
+- `get_session_state` -> `GET /api/v1/sessions/{session_id}/state`
+- `get_session_message` -> `GET /api/v1/sessions/{session_id}/message`
+
+This shape lets an agent implement query and continuation tools similar in spirit to `spawn_delegate`, with the difference that YA Claw targets durable session and run records across process boundaries.
 
 ## API Style
 

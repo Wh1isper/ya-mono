@@ -11,8 +11,10 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from ya_claw.api.health import router as health_router
+from ya_claw.api.runs import router as runs_router
+from ya_claw.api.sessions import router as sessions_router
 from ya_claw.config import ClawSettings, get_settings
-from ya_claw.db.engine import create_engine
+from ya_claw.db.engine import create_engine, create_session_factory
 from ya_claw.runtime_state import InMemoryRuntimeState, create_runtime_state
 
 
@@ -34,6 +36,7 @@ class ClawApplication:
         )
         app.state.settings = self.settings
         app.state.db_engine = None
+        app.state.db_session_factory = None
         app.state.runtime_state = None
 
         self.register_api_token_middleware(app)
@@ -45,6 +48,8 @@ class ClawApplication:
             allow_headers=["*"],
         )
         app.include_router(health_router)
+        app.include_router(sessions_router, prefix="/api/v1")
+        app.include_router(runs_router, prefix="/api/v1")
 
         frontend_registered = self.register_frontend(app)
         if not frontend_registered:
@@ -63,6 +68,7 @@ class ClawApplication:
             max_overflow=self.settings.database_max_overflow,
             pool_recycle=self.settings.database_pool_recycle_seconds,
         )
+        app.state.db_session_factory = create_session_factory(app.state.db_engine)
         app.state.runtime_state = create_runtime_state()
 
         try:
@@ -70,6 +76,8 @@ class ClawApplication:
         finally:
             db_engine = app.state.db_engine
             runtime_state = app.state.runtime_state
+
+            app.state.db_session_factory = None
 
             if isinstance(runtime_state, InMemoryRuntimeState):
                 await runtime_state.aclose()
