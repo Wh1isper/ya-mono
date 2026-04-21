@@ -9,15 +9,19 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
+from prompt_toolkit.widgets import TextArea
+from pydantic_ai import BinaryContent
 from y_agent_environment.shell import BackgroundProcess
 
 # Import the components we're testing
 from yaacli.app import TUIApp, TUIMode, TUIState
-from yaacli.app.tui import _is_benign_contextvar_cleanup_error
+from yaacli.app.tui import PendingAttachment, _is_benign_contextvar_cleanup_error
+from yaacli.clipboard import ClipboardImage, ClipboardImageReadResult
 
 
 @dataclass
@@ -53,6 +57,7 @@ class MockConfigManager:
 
     global_config_dir: Any = field(default_factory=lambda: MagicMock())
     project_config_dir: Any = field(default_factory=lambda: MagicMock())
+    config_dir: Path = field(default_factory=lambda: Path.cwd() / ".yaacli-test-config")
 
     def get_sessions_dir(self) -> Any:
         return MagicMock(exists=lambda: False)
@@ -837,6 +842,112 @@ def test_tui_app_schedule_tui_recovery_schedules_once() -> None:
 
     assert app._screen_recovery_scheduled is True
     loop.call_soon.assert_called_once_with(app._recover_tui_screen)
+
+
+def test_tui_app_build_user_prompt_with_binary_attachment() -> None:
+    """Clipboard attachments should become BinaryContent in the user prompt."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+    app = TUIApp(config=config, config_manager=config_manager)
+
+    prompt = app._build_user_prompt(
+        "",
+        attachments=[PendingAttachment(data=b"png-bytes", media_type="image/png", size_bytes=9)],
+    )
+
+    assert isinstance(prompt, list)
+    assert prompt[0] == "Please analyze the attached image."
+    assert isinstance(prompt[1], BinaryContent)
+    assert prompt[1].data == b"png-bytes"
+    assert prompt[1].media_type == "image/png"
+
+
+@pytest.mark.asyncio
+async def test_tui_app_handle_bracketed_paste_attaches_clipboard_image() -> None:
+    """Bracketed paste should attach clipboard image data before text fallback."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+    app = TUIApp(config=config, config_manager=config_manager)
+    input_area = TextArea(multiline=True)
+
+    with patch("yaacli.app.tui.read_clipboard_image", new=AsyncMock()) as mock_read:
+        mock_read.return_value = ClipboardImageReadResult(
+            image=ClipboardImage(data=b"image-bytes", media_type="image/png")
+        )
+        await app._handle_bracketed_paste("ignored text", input_area)
+
+    assert len(app._pending_attachments) == 1
+    assert app._pending_attachments[0].data == b"image-bytes"
+    assert input_area.buffer.text == ""
+    assert any("Attached image/png" in line for line in app._output_lines)
+
+
+@pytest.mark.asyncio
+async def test_tui_app_handle_bracketed_paste_falls_back_to_text() -> None:
+    """Text paste should still work when clipboard has no image payload."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+    app = TUIApp(config=config, config_manager=config_manager)
+    input_area = TextArea(multiline=True)
+
+    with patch("yaacli.app.tui.read_clipboard_image", new=AsyncMock()) as mock_read:
+        mock_read.return_value = ClipboardImageReadResult(image=None)
+        await app._handle_bracketed_paste("hello\r\nworld", input_area)
+
+    assert app._pending_attachments == []
+    assert input_area.buffer.text == "hello\nworld"
+
+
+@pytest.mark.asyncio
+async def test_tui_app_submit_input_allows_attachment_only_message() -> None:
+    """Submitting with clipboard attachments and no text should start an agent turn."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+    app = TUIApp(config=config, config_manager=config_manager)
+    input_area = TextArea(multiline=True)
+    app._pending_attachments.append(PendingAttachment(data=b"img", media_type="image/png", size_bytes=3))
+
+    fake_task = MagicMock()
+    with (
+        patch.object(app, "_append_user_input") as mock_append_user_input,
+        patch("asyncio.create_task") as mock_create_task,
+    ):
+        mock_create_task.return_value = fake_task
+        app._submit_input("", input_area)
+
+    mock_append_user_input.assert_called_once()
+    mock_create_task.assert_called_once()
+    assert app._pending_attachments == []
+    fake_task.add_done_callback.assert_called_once()
+
+
+def test_tui_app_clear_session_clears_pending_attachments() -> None:
+    """Clearing the session should drop queued clipboard images."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+    app = TUIApp(config=config, config_manager=config_manager)
+    app._pending_attachments.append(PendingAttachment(data=b"img", media_type="image/png", size_bytes=3))
+
+    app._clear_session()
+
+    assert app._pending_attachments == []
+
+
+def test_tui_app_load_history_clears_pending_attachments(tmp_path: Path) -> None:
+    """Loading a session should reset queued clipboard images."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+    app = TUIApp(config=config, config_manager=config_manager)
+    app._pending_attachments.append(PendingAttachment(data=b"img", media_type="image/png", size_bytes=3))
+
+    load_dir = tmp_path / "session"
+    load_dir.mkdir()
+    (load_dir / "message_history.json").write_bytes(b"[]")
+
+    app._load_history(str(load_dir))
+
+    assert app._pending_attachments == []
+    assert app._message_history == []
 
 
 @pytest.mark.asyncio
