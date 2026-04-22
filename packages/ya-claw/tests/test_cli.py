@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+from pathlib import Path
 
 import ya_claw.cli as claw_cli
 from click.testing import CliRunner
@@ -107,6 +108,33 @@ def test_serve_skips_auto_migrate_when_disabled(monkeypatch, tmp_path) -> None:
             },
         )
     ]
+
+
+def test_profiles_seed_command(monkeypatch, tmp_path: Path) -> None:
+    calls: list[tuple[bool, bool, str | None]] = []
+    settings = ClawSettings(
+        api_token=TEST_API_TOKEN,
+        data_dir=tmp_path,
+        workspace_root=tmp_path / "workspace",
+        profile_seed_file=tmp_path / "profiles.yaml",
+    )
+
+    monkeypatch.setattr(claw_cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        claw_cli.cli_application,
+        "seed_profiles",
+        lambda *, prune_missing, migrate, seed_file: (
+            calls.append((prune_missing, migrate, seed_file)) or ["default", "docker"]
+        ),
+    )
+
+    result = runner.invoke(
+        claw_cli.cli, ["profiles", "seed", "--prune-missing", "--seed-file", str(tmp_path / "profiles.yaml")]
+    )
+
+    assert result.exit_code == 0
+    assert calls == [(True, True, str(tmp_path / "profiles.yaml"))]
+    assert "Seeded 2 profile(s): default, docker" in result.output
 
 
 def test_bridge_ls_command() -> None:

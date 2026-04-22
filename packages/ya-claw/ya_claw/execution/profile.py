@@ -1,0 +1,227 @@
+from __future__ import annotations
+
+import hashlib
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from ya_agent_sdk.presets import resolve_model_cfg, resolve_model_settings
+from ya_agent_sdk.subagents import load_subagents_from_dir
+from ya_agent_sdk.subagents.config import SubagentConfig
+
+from ya_claw.config import ClawSettings
+from ya_claw.orm.tables import ProfileRecord
+
+_DEFAULT_TOOLSETS = ["core"]
+_DEFAULT_PROFILE_NAME = "default"
+_DEFAULT_YAACLI_CONFIG_DIR = Path.home() / ".yaacli"
+
+
+@dataclass(slots=True)
+class ResolvedProfile:
+    name: str
+    model: str
+    model_settings: dict[str, Any] | None
+    model_config: dict[str, Any] | None
+    system_prompt: str | None = None
+    toolsets: list[str] = field(default_factory=lambda: list(_DEFAULT_TOOLSETS))
+    subagent_configs: list[SubagentConfig] = field(default_factory=list)
+    include_builtin_subagents: bool = False
+    unified_subagents: bool = False
+    need_user_approve_tools: list[str] = field(default_factory=list)
+    need_user_approve_mcps: list[str] = field(default_factory=list)
+    workspace_backend_hint: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+class ProfileResolver:
+    def __init__(
+        self,
+        *,
+        settings: ClawSettings,
+        session_factory: async_sessionmaker[AsyncSession],
+    ) -> None:
+        self._settings = settings
+        self._session_factory = session_factory
+
+    async def resolve(self, profile_name: str | None) -> ResolvedProfile:
+        resolved_name = profile_name or self._settings.default_profile
+        if isinstance(resolved_name, str) and resolved_name.strip() != "":
+            record = await self._load_profile_record(resolved_name)
+            if isinstance(record, ProfileRecord):
+                return self._resolved_from_record(record)
+        return self._bootstrap_profile(requested_name=resolved_name)
+
+    async def seed_profiles(self, *, prune_missing: bool = False) -> list[str]:
+        seed_file = self._settings.resolved_profile_seed_file
+        if seed_file is None or not seed_file.exists():
+            return []
+        seed_content = seed_file.read_text(encoding="utf-8")
+        rows = _load_seed_rows(seed_content)
+        source_checksum = hashlib.sha256(seed_content.encode("utf-8")).hexdigest()
+        async with self._session_factory() as db_session:
+            existing_result = await db_session.execute(select(ProfileRecord))
+            existing_records = {record.name: record for record in existing_result.scalars().all()}
+            seeded_names: list[str] = []
+            for row in rows:
+                name = str(row.get("name", "")).strip()
+                if name == "":
+                    continue
+                seeded_names.append(name)
+                record = existing_records.get(name)
+                if record is None:
+                    record = ProfileRecord(name=name)
+                    db_session.add(record)
+                _apply_seed_row(record, row, source_checksum=source_checksum)
+            if prune_missing:
+                for name, record in existing_records.items():
+                    if record.source_type == "seed" and name not in seeded_names:
+                        await db_session.delete(record)
+            await db_session.commit()
+        return seeded_names
+
+    async def _load_profile_record(self, profile_name: str) -> ProfileRecord | None:
+        async with self._session_factory() as db_session:
+            record = await db_session.get(ProfileRecord, profile_name)
+            if isinstance(record, ProfileRecord) and record.enabled:
+                return record
+        return None
+
+    def _resolved_from_record(self, record: ProfileRecord) -> ResolvedProfile:
+        return ResolvedProfile(
+            name=record.name,
+            model=record.model,
+            model_settings=_merge_dicts(
+                resolve_model_settings(record.model_settings_preset),
+                record.model_settings_override,
+            ),
+            model_config=_merge_dicts(
+                resolve_model_cfg(record.model_config_preset),
+                record.model_config_override,
+            ),
+            system_prompt=record.system_prompt,
+            toolsets=list(record.toolsets or _DEFAULT_TOOLSETS),
+            subagent_configs=self._resolve_subagent_configs(record.subagents),
+            include_builtin_subagents=bool(record.include_builtin_subagents),
+            unified_subagents=bool(record.unified_subagents),
+            need_user_approve_tools=list(record.need_user_approve_tools or []),
+            need_user_approve_mcps=list(record.need_user_approve_mcps or []),
+            workspace_backend_hint=record.workspace_backend_hint,
+            metadata={
+                "source_type": record.source_type,
+                "source_version": record.source_version,
+                "source_checksum": record.source_checksum,
+            },
+        )
+
+    def _bootstrap_profile(self, *, requested_name: str | None) -> ResolvedProfile:
+        model = self._settings.execution_model
+        if not isinstance(model, str) or model.strip() == "":
+            profile_value = requested_name or self._settings.default_profile or _DEFAULT_PROFILE_NAME
+            raise ValueError(f"Execution profile '{profile_value}' could not be resolved.")
+        default_subagent_configs = self._load_default_subagent_configs()
+        return ResolvedProfile(
+            name=requested_name or self._settings.default_profile or _DEFAULT_PROFILE_NAME,
+            model=model,
+            model_settings=resolve_model_settings(self._settings.execution_model_settings_preset),
+            model_config=resolve_model_cfg(self._settings.execution_model_config_preset),
+            system_prompt=self._settings.execution_system_prompt,
+            toolsets=list(_DEFAULT_TOOLSETS),
+            subagent_configs=default_subagent_configs,
+            include_builtin_subagents=False,
+            unified_subagents=bool(default_subagent_configs),
+            workspace_backend_hint=None,
+            metadata={"source_type": "bootstrap"},
+        )
+
+    def _resolve_subagent_configs(self, raw_subagents: list[dict[str, Any]] | None) -> list[SubagentConfig]:
+        explicit_configs = [SubagentConfig.model_validate(item) for item in raw_subagents or []]
+        if explicit_configs:
+            return explicit_configs
+        return self._load_default_subagent_configs()
+
+    def _load_default_subagent_configs(self) -> list[SubagentConfig]:
+        subagents_dir = _DEFAULT_YAACLI_CONFIG_DIR / "subagents"
+        if not subagents_dir.exists():
+            return []
+        loaded = load_subagents_from_dir(subagents_dir)
+        return [loaded[name] for name in sorted(loaded.keys())]
+
+
+def _merge_dicts(base: dict[str, Any] | None, override: dict[str, Any] | None) -> dict[str, Any] | None:
+    if base is None and override is None:
+        return None
+    merged: dict[str, Any] = {}
+    if isinstance(base, dict):
+        merged.update(base)
+    if isinstance(override, dict):
+        merged.update(override)
+    return merged
+
+
+def _load_seed_rows(seed_content: str) -> list[dict[str, Any]]:
+    payload = yaml.safe_load(seed_content)
+    if payload is None:
+        return []
+    if isinstance(payload, list):
+        rows = payload
+    elif isinstance(payload, dict):
+        candidate = payload.get("profiles")
+        rows = candidate if isinstance(candidate, list) else []
+    else:
+        rows = []
+    normalized_rows: list[dict[str, Any]] = []
+    for row in rows:
+        if isinstance(row, dict):
+            normalized_rows.append(dict(row))
+    return normalized_rows
+
+
+def _apply_seed_row(record: ProfileRecord, row: dict[str, Any], *, source_checksum: str | None) -> None:
+    record.model = str(row.get("model", record.model or "")).strip()
+    record.model_settings_preset = _normalize_optional_str(row.get("model_settings_preset"))
+    record.model_settings_override = _normalize_optional_dict(row.get("model_settings_override"))
+    record.model_config_preset = _normalize_optional_str(row.get("model_config_preset"))
+    record.model_config_override = _normalize_optional_dict(row.get("model_config_override"))
+    record.system_prompt = _normalize_optional_str(row.get("system_prompt"))
+    record.toolsets = _normalize_optional_str_list(row.get("toolsets")) or list(_DEFAULT_TOOLSETS)
+    record.subagents = _normalize_optional_dict_list(row.get("subagents")) or []
+    record.include_builtin_subagents = bool(row.get("include_builtin_subagents", False))
+    record.unified_subagents = bool(row.get("unified_subagents", False))
+    record.need_user_approve_tools = _normalize_optional_str_list(row.get("need_user_approve_tools")) or []
+    record.need_user_approve_mcps = _normalize_optional_str_list(row.get("need_user_approve_mcps")) or []
+    record.workspace_backend_hint = _normalize_optional_str(row.get("workspace_backend_hint"))
+    record.enabled = bool(row.get("enabled", True))
+    record.source_type = _normalize_optional_str(row.get("source_type")) or "seed"
+    record.source_version = _normalize_optional_str(row.get("source_version"))
+    record.source_checksum = _normalize_optional_str(row.get("source_checksum")) or source_checksum
+
+
+def _normalize_optional_str(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _normalize_optional_dict(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return dict(value)
+    return None
+
+
+def _normalize_optional_str_list(value: Any) -> list[str] | None:
+    if not isinstance(value, list):
+        return None
+    values = [str(item).strip() for item in value if str(item).strip() != ""]
+    return values or None
+
+
+def _normalize_optional_dict_list(value: Any) -> list[dict[str, Any]] | None:
+    if not isinstance(value, list):
+        return None
+    rows = [dict(item) for item in value if isinstance(item, dict)]
+    return rows or None

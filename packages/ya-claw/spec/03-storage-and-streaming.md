@@ -1,31 +1,35 @@
 # 03 - Storage and Streaming
 
-YA Claw uses three storage roles with clear separation of concerns.
+YA Claw uses three storage roles with clear ownership.
 
 ## Storage Topology
 
 ```mermaid
 flowchart TB
     subgraph Runtime
-        EXEC[Execution Coordinator]
-        TASKS[Async Task Registry]
-        EVT[Event Fan-out]
+        SUP[ExecutionSupervisor]
+        REG[ExecutionRegistry]
+        COORD[RunCoordinator]
+        BUF[Runtime Event Buffer]
     end
 
     subgraph Durable
         SQL[(SQLite / PostgreSQL)]
         FS[(Local Filesystem)]
+        YAML[Profile Seed YAML]
     end
 
     subgraph Active
         MEM[(In-Process Memory)]
     end
 
-    EXEC --> SQL
-    EXEC --> FS
-    EXEC --> MEM
-    TASKS --> MEM
-    EVT --> MEM
+    SUP --> SQL
+    SUP --> MEM
+    COORD --> SQL
+    COORD --> FS
+    COORD --> MEM
+    BUF --> MEM
+    YAML --> SQL
 ```
 
 ## Relational Store
@@ -34,84 +38,26 @@ The relational store is the durable source of truth for queryable runtime state.
 
 It should store:
 
-- profile records when profiles are runtime-managed
-- session and run indexes
-- status, timestamps, summaries, and searchable metadata
-- opaque `project_id` values carried with sessions and runs
-- event checkpoints or replay summaries where needed
+- session metadata
+- session continuation pointers
+- run indexes and restore relationships
+- queued, running, and terminal run state
+- profile records and seed provenance
+- `project_id`, `profile_name`, and request metadata needed for routing
 
-### Relational Store Principle
+### Session Metadata Principle
 
-The relational store should answer runtime inspection and list queries without requiring large blob reads.
+Session metadata belongs in the database.
+The runtime treats session metadata as structured queryable state.
 
-## Backend Selection
+### Profile Principle
 
-YA Claw should support one relational backend per deployment.
+Execution profiles belong in the database.
+YAML seed is an input source for profile rows, not the runtime source of truth.
 
-- SQLite is the default backend for local and self-hosted single-node deployments
-- PostgreSQL is an optional backend for deployments that prefer an external relational store
+## Run Store
 
-## In-Process Memory
-
-In-process memory owns active runtime state for one node.
-
-It should carry:
-
-- active run handles
-- async task registry entries
-- cancellation and interruption signals
-- live SSE subscriber fan-out
-- short-lived stream buffers for connected clients
-
-### In-Process Memory Principle
-
-Process memory owns active runtime state.
-The relational store owns committed runtime state.
-
-## Local Filesystem
-
-The local filesystem keeps runtime data and project data in separate roots.
-
-- the **runtime data root** holds sensitive session continuity data
-- the **workspace root** holds project-managed data that can participate in normal Git workflows
-
-Inside the runtime data root, YA Claw keeps one durable area:
-
-- a **session store** for durable session state and compacted conversation records
-
-### Session Store
-
-The session store holds durable session continuity data.
-Each session directory should stay simple.
-
-It should store:
-
-- `state.json`
-- `message.json`
-
-### Session State File
-
-Each session should have one durable `state.json` file that captures the committed continuation point.
-
-That file should include:
-
-- exported SDK state
-- message history
-- run and session metadata needed for restore
-- compact metadata such as last committed run, compact version, and timestamps
-- effective `project_id` and useful continuation metadata
-
-### Message File
-
-`message.json` is the durable Web UI conversation record.
-It should be written at session end or at another committed boundary and should contain:
-
-- compacted conversation messages for the completed round
-- AGUI-aligned message metadata for rendering a session timeline
-- references to associated run and session records
-
-`message.json` is the preferred source for Web UI conversation history.
-It keeps the UI aligned with an AGUI-style message model while the runtime continues to use live event streaming for active runs.
+The local filesystem keeps committed continuity data in a flat run store.
 
 Suggested layout:
 
@@ -119,56 +65,129 @@ Suggested layout:
 ~/.ya-claw/
 ├── ya_claw.sqlite3
 ├── data/
-│   └── session-store/
-│       └── {session_id}/
+│   └── run-store/
+│       └── {run_id}/
 │           ├── state.json
 │           └── message.json
 └── workspace/
     └── ... project-managed files ...
 ```
 
-## AGUI Alignment
+### Run Store Principle
 
-YA Claw should align its user-facing session transport with AGUI principles:
+Committed runtime blobs are keyed by `run_id`.
+The filesystem does not need a session-first directory structure.
 
-- event-based streaming for active runs
-- durable message records for user-facing history
-- structured state continuity between the runtime and Web UI
+## `state.json`
 
-The runtime may emit richer internal events than the Web UI needs.
-The session store should retain the committed message view that the UI reads back later.
+Each committed run may write one `state.json` file.
+
+It should include:
+
+- exported `ClawAgentContext` resumable state
+- restore metadata
+- run and session identifiers needed for replay and restore
+- compact metadata such as timestamps and version markers
+- workspace binding snapshot when useful for later inspection
+- resolved profile identity when useful for replay and debugging
+
+## `message.json`
+
+Each committed or best-effort checkpointed run may write one `message.json` file.
+
+`message.json` stores a compacted replay list of AGUI events.
+
+Recommended shape:
+
+- top-level JSON array
+- each item is one AGUI event object
+- event order matches replay order
+- the array is directly replayable by clients without wrapper unwrapping
+
+Related run and session metadata live in the run record and `state.json`.
+Checkpoint metadata belongs in store-side bookkeeping rather than the replay list payload.
+
+## In-Process Runtime State
+
+Process memory owns active runtime state for one node.
+
+Recommended split:
+
+### Execution Registry
+
+Carries:
+
+- active run IDs
+- `run_id -> task` mapping
+- stop and interrupt handles
+- basic supervisor metadata such as started time and dispatch mode
+
+### Event Buffer Store
+
+Carries:
+
+- replayable per-run event buffers
+- session to latest run mapping for live session event routing
+- AGUI replay buffers used for dynamic compaction
+- steering queues
+- termination signals
+- live subscriber counts
+
+## Incremental Event Buffer
+
+The runtime keeps an in-memory incremental event buffer per active run.
+
+Responsibilities:
+
+- capture coordinator-observed SDK events
+- transform them into AGUI events through a protocol adapter boundary
+- stream replayable events over SSE
+- maintain a dynamically compacted AGUI replay list for resume and history queries
+- flush the compacted replay list to `message.json` at commit or best-effort checkpoint boundaries
+
+## Session Read View
+
+Session GET endpoints read from run-store through session pointers.
+
+Recommended behavior:
+
+- session status resolves from the latest run
+- session run history can inline the compacted AGUI replay list for each run
+- explicit rerun requests may target a failed or interrupted `restore_from_run_id`
+- run GET endpoints read the addressed run directly and return `session + run + state + message`
 
 ## Event Delivery Model
 
-### Internal Flow
+### Foreground Streaming
 
-1. SDK emits stream events
-2. execution coordinator enriches them with run context
-3. runtime fan-out publishes them to connected clients from in-process memory
-4. committed summaries, `state.json`, and `message.json` land in durable storage at commit boundaries
+Foreground requests may stream events directly over SSE.
 
-### Transport Shape
+### Background Execution
 
-The single-node baseline should support:
+Queued runs are started by the supervisor and expose SSE endpoints for later subscription.
 
-- direct SSE for browser-native clients
-- in-process subscriber fan-out for connected watchers
-- AGUI-aligned message views for committed session history
-- durable run and session summaries for reconnect and inspection workflows
+### Resume
 
-## Replay Model
+The SSE replay contract should support:
 
-The runtime should retain enough durable summary data to support:
+- monotonic event IDs
+- `Last-Event-ID`
+- replay from the requested cursor
+- live tail after replay completes
 
-- session timeline views
-- run detail views
-- debugging and audit inspection
-- committed conversation history in the Web UI
+## Best-effort Checkpoints
 
-Live event buffers stay scoped to the process lifetime.
-Committed summaries, `state.json`, and `message.json` should stay durable.
+Interrupted or failed runs should still try to persist a usable message view.
+
+Preferred initial checkpoints are:
+
+- after each model request starts or completes
+- after each model response starts or completes when available in the SDK stream
+
+This gives the rerun path a durable best-effort message snapshot without advancing the session success pointer.
 
 ## Storage Principle
 
-Session continuity data should stay in the session store under the runtime data root.
-Project-managed files should stay under the workspace root.
+- database for sessions, runs, profiles, and execution indexes
+- run store for committed or checkpointed continuity blobs
+- in-memory registry and event buffers for active execution and replay

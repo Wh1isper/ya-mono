@@ -16,12 +16,14 @@ def clear_claw_settings(monkeypatch, tmp_path: Path) -> None:
         "YA_CLAW_DATA_DIR",
         "YA_CLAW_WEB_DIST_DIR",
         "YA_CLAW_WORKSPACE_ROOT",
+        "YA_CLAW_AUTO_SEED_PROFILES",
     ):
         monkeypatch.delenv(env_name, raising=False)
 
     monkeypatch.setenv("YA_CLAW_API_TOKEN", "test-token")
     monkeypatch.setenv("YA_CLAW_DATA_DIR", str(tmp_path / "runtime-data"))
     monkeypatch.setenv("YA_CLAW_WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    monkeypatch.setenv("YA_CLAW_AUTO_SEED_PROFILES", "false")
 
     get_settings.cache_clear()
     yield
@@ -33,7 +35,7 @@ def _auth_headers() -> dict[str, str]:
 
 
 def test_create_app_requires_api_token(monkeypatch) -> None:
-    monkeypatch.delenv("YA_CLAW_API_TOKEN", raising=False)
+    monkeypatch.setenv("YA_CLAW_API_TOKEN", "")
     get_settings.cache_clear()
 
     with pytest.raises(RuntimeError, match="YA_CLAW_API_TOKEN"):
@@ -46,6 +48,17 @@ def test_healthz() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "database": "ok", "runtime_state": "ok"}
+
+
+def test_docs_and_openapi_are_public() -> None:
+    with TestClient(create_app()) as client:
+        docs_response = client.get("/docs")
+        openapi_response = client.get("/openapi.json")
+
+    assert docs_response.status_code == 200
+    assert "Swagger UI" in docs_response.text
+    assert openapi_response.status_code == 200
+    assert openapi_response.json()["info"]["title"] == "YA Claw"
 
 
 def test_root_requires_authorization() -> None:
@@ -63,7 +76,7 @@ def test_index_without_frontend_bundle() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["name"] == "YA Claw"
-    assert payload["surfaces"] == ["sessions", "runs", "schedules", "bridges"]
+    assert payload["surfaces"] == ["profiles", "sessions", "runs", "schedules", "bridges"]
 
 
 def test_serves_frontend_bundle(monkeypatch, tmp_path: Path) -> None:

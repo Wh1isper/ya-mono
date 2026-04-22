@@ -57,13 +57,32 @@ From the workspace root, start the default runtime flow:
 ```bash
 uv sync --all-packages
 cp packages/ya-claw/.env.example packages/ya-claw/.env
-uv run --package ya-claw ya-claw serve --reload
+make run-claw
 ```
 
 Set `YA_CLAW_API_TOKEN` before starting the service.
 The development server listens on `http://127.0.0.1:9042` by default.
 YA Claw loads `YA_CLAW_*` settings from `packages/ya-claw/.env` and the process environment.
-Use [`packages/ya-agent-sdk/.env.example`](../ya-agent-sdk/.env.example) for SDK and tool environment variables.
+YA Claw startup also exports provider variables such as `GATEWAY_API_KEY` and `GATEWAY_BASE_URL` from `packages/ya-claw/.env` into the process environment.
+Use [`packages/ya-agent-sdk/.env.example`](../ya-agent-sdk/.env.example) for shared SDK and tool environment variables when you want the same keys outside YA Claw startup.
+Set `YA_CLAW_PROFILE_SEED_FILE` plus `YA_CLAW_AUTO_SEED_PROFILES=true` when you want packaged profiles to seed into the database on startup.
+Set `YA_CLAW_EXECUTION_MODEL` when you want runs to auto-dispatch through the built-in coordinator.
+Without that setting, created runs stay queued until another execution path picks them up.
+
+Profile and coordinator settings:
+
+- `YA_CLAW_PROFILE_SEED_FILE=packages/ya-claw/profiles.yaml`
+- `YA_CLAW_AUTO_SEED_PROFILES=true`
+- `YA_CLAW_DEFAULT_PROFILE=default`
+- `YA_CLAW_WORKSPACE_PROVIDER_BACKEND=local|docker`
+- `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE=python:3.11`
+- `YA_CLAW_EXECUTION_CONTEXT_WINDOW=200000`
+
+Profiles can be managed through:
+
+- REST API: `/api/v1/profiles`
+- Seed API: `POST /api/v1/profiles/seed`
+- CLI: `ya-claw profiles seed`
 
 Default local paths:
 
@@ -121,8 +140,18 @@ docker build -f Dockerfile.ya-claw -t ya-claw:dev .
 Every HTTP route except `/healthz` expects `Authorization: Bearer <YA_CLAW_API_TOKEN>`.
 
 - `GET /healthz` — service health probe with storage and runtime component status
-- `GET /api/v1/schedules` — session schedule inspection surface
-- `POST /api/v1/bridges/{bridge_id}/dispatch` — bridge ingress surface
+- `POST /api/v1/sessions` — create a session with optional first run
+- `GET /api/v1/sessions` — list sessions
+- `GET /api/v1/sessions/{session_id}` — inspect a session plus paginated runs and optional compacted message replay lists
+- `POST /api/v1/sessions/{session_id}/runs` — create a run under a session
+- `POST /api/v1/sessions/{session_id}/steer` — steer the active run through the session surface
+- `POST /api/v1/sessions/{session_id}/interrupt` — interrupt the active run through the session surface
+- `POST /api/v1/sessions/{session_id}/cancel` — cancel the active run through the session surface
+- `POST /api/v1/runs` — create a run directly through the low-level surface
+- `GET /api/v1/runs/{run_id}` — inspect a run plus session summary, committed state, and optional compacted message replay list
+- `POST /api/v1/runs/{run_id}/steer` — steer a specific active run
+- `POST /api/v1/runs/{run_id}/interrupt` — interrupt a specific active run
+- `POST /api/v1/runs/{run_id}/cancel` — cancel a specific active run
 
 ## Spec Set
 
