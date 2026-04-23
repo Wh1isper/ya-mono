@@ -863,39 +863,64 @@ def test_tui_app_build_user_prompt_with_binary_attachment() -> None:
 
 
 @pytest.mark.asyncio
-async def test_tui_app_handle_bracketed_paste_attaches_clipboard_image() -> None:
-    """Bracketed paste should attach clipboard image data before text fallback."""
+async def test_tui_app_handle_bracketed_paste_inserts_plain_text() -> None:
+    """Bracketed paste should always insert plain text into the input buffer."""
     config = MockConfig()
     config_manager = MockConfigManager()
     app = TUIApp(config=config, config_manager=config_manager)
     input_area = TextArea(multiline=True)
+
+    await app._handle_bracketed_paste("hello\r\nworld", input_area)
+
+    assert app._pending_attachments == []
+    assert input_area.buffer.text == "hello\nworld"
+
+
+@pytest.mark.asyncio
+async def test_tui_app_paste_clipboard_image_attaches_image() -> None:
+    """Explicit image paste should queue clipboard image data as an attachment."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+    app = TUIApp(config=config, config_manager=config_manager)
 
     with patch("yaacli.app.tui.read_clipboard_image", new=AsyncMock()) as mock_read:
         mock_read.return_value = ClipboardImageReadResult(
             image=ClipboardImage(data=b"image-bytes", media_type="image/png")
         )
-        await app._handle_bracketed_paste("ignored text", input_area)
+        await app._paste_clipboard_image()
 
     assert len(app._pending_attachments) == 1
     assert app._pending_attachments[0].data == b"image-bytes"
-    assert input_area.buffer.text == ""
     assert any("Attached image/png" in line for line in app._output_lines)
 
 
 @pytest.mark.asyncio
-async def test_tui_app_handle_bracketed_paste_falls_back_to_text() -> None:
-    """Text paste should still work when clipboard has no image payload."""
+async def test_tui_app_paste_clipboard_image_reports_error() -> None:
+    """Explicit image paste should surface clipboard errors."""
     config = MockConfig()
     config_manager = MockConfigManager()
     app = TUIApp(config=config, config_manager=config_manager)
-    input_area = TextArea(multiline=True)
 
     with patch("yaacli.app.tui.read_clipboard_image", new=AsyncMock()) as mock_read:
-        mock_read.return_value = ClipboardImageReadResult(image=None)
-        await app._handle_bracketed_paste("hello\r\nworld", input_area)
+        mock_read.return_value = ClipboardImageReadResult(image=None, error="Clipboard unavailable")
+        await app._paste_clipboard_image()
 
     assert app._pending_attachments == []
-    assert input_area.buffer.text == "hello\nworld"
+    assert any("Clipboard unavailable" in line for line in app._output_lines)
+
+
+@pytest.mark.asyncio
+async def test_tui_app_handle_command_paste_image_invokes_clipboard_paste() -> None:
+    """Slash command should trigger explicit clipboard image paste."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+    app = TUIApp(config=config, config_manager=config_manager)
+
+    with patch.object(app, "_paste_clipboard_image", new=AsyncMock()) as mock_paste:
+        await app._handle_command_inner("/paste-image")
+
+    mock_paste.assert_awaited_once()
+    assert any("/paste-image" in line for line in app._output_lines)
 
 
 @pytest.mark.asyncio
