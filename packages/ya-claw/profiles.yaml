@@ -206,7 +206,7 @@ profiles:
       - Include code examples for fixes
       - Acknowledge good practices
       - Prioritize issues by severity and impact
-    model: homelab@openai-responses:gpt-5.3-codex
+    model: gateway@openai-responses:gpt-5.3-codex
     model_settings_preset: openai_responses_high
     model_config_preset: gpt5_270k
   - name: debugger
@@ -355,7 +355,7 @@ profiles:
       - Do not request user input - return to main agent instead
       - Keep changes focused and minimal
       - Test changes when possible
-    model: homelab@anthropic:claude-opus-4-6
+    model: gateway@anthropic:claude-opus-4-6
     model_settings_preset: inherit
     model_config_preset: inherit
   - name: explorer
@@ -451,7 +451,7 @@ profiles:
       - Note any inconsistencies or interesting findings
       - Provide actionable paths for further exploration
       ```
-    model: homelab@anthropic:claude-sonnet-4-6
+    model: gateway@anthropic:claude-sonnet-4-6
     model_settings_preset: inherit
     model_config_preset: inherit
   - name: searcher
@@ -547,7 +547,7 @@ profiles:
       - Cite all sources
       - Distinguish between facts and opinions
       - Highlight any uncertainty or conflicting information
-    model: homelab@anthropic:claude-sonnet-4-6
+    model: gateway@anthropic:claude-sonnet-4-6
     model_settings_preset: inherit
     model_config_preset: inherit
   include_builtin_subagents: false
