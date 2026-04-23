@@ -227,6 +227,17 @@ class ControlResponse(BaseModel):
     accepted: bool = True
 
 
+class ProfileSubagent(BaseModel):
+    name: str
+    description: str
+    system_prompt: str
+    model: str | None = None
+    model_settings_preset: str | None = None
+    model_settings_override: dict[str, Any] | None = None
+    model_config_preset: str | None = None
+    model_config_override: dict[str, Any] | None = None
+
+
 class ProfileUpsertRequest(BaseModel):
     model: str
     model_settings_preset: str | None = None
@@ -235,7 +246,7 @@ class ProfileUpsertRequest(BaseModel):
     model_config_override: dict[str, Any] | None = None
     system_prompt: str | None = None
     toolsets: list[str] = Field(default_factory=list)
-    subagents: list[dict[str, Any]] = Field(default_factory=list)
+    subagents: list[ProfileSubagent] = Field(default_factory=list)
     include_builtin_subagents: bool = False
     unified_subagents: bool = False
     need_user_approve_tools: list[str] = Field(default_factory=list)
@@ -264,7 +275,7 @@ class ProfileDetail(ProfileSummary):
     model_config_override: dict[str, Any] | None = None
     system_prompt: str | None = None
     toolsets: list[str] = Field(default_factory=list)
-    subagents: list[dict[str, Any]] = Field(default_factory=list)
+    subagents: list[ProfileSubagent] = Field(default_factory=list)
     include_builtin_subagents: bool = False
     unified_subagents: bool = False
     need_user_approve_tools: list[str] = Field(default_factory=list)

@@ -62,7 +62,12 @@ profiles:
     model: gateway@openai-responses:gpt-5.4
     model_settings_preset: openai_responses_high
     model_config_preset: gpt5_270k
-    workspace_backend_hint: docker
+    unified_subagents: true
+    subagents:
+      - name: explorer
+        description: Explore the codebase
+        system_prompt: |
+          You explore the codebase.
 """.strip(),
         encoding="utf-8",
     )
@@ -76,7 +81,15 @@ profiles:
                 "model_settings_preset": "openai_responses_high",
                 "model_config_preset": "gpt5_270k",
                 "toolsets": ["filesystem", "shell"],
-                "include_builtin_subagents": True,
+                "subagents": [
+                    {
+                        "name": "debugger",
+                        "description": "Debug runtime issues",
+                        "system_prompt": "You debug runtime issues.",
+                        "model": "inherit",
+                    }
+                ],
+                "include_builtin_subagents": False,
                 "unified_subagents": True,
                 "workspace_backend_hint": "local",
                 "enabled": True,
@@ -91,8 +104,9 @@ profiles:
 
         get_response = client.get("/api/v1/profiles/custom", headers=_auth_headers())
         assert get_response.status_code == 200
-        assert get_response.json()["include_builtin_subagents"] is True
         assert get_response.json()["unified_subagents"] is True
+        assert get_response.json()["subagents"][0]["name"] == "debugger"
+        assert get_response.json()["subagents"][0]["model"] == "inherit"
 
         seed_response = client.post(
             "/api/v1/profiles/seed",
@@ -105,6 +119,10 @@ profiles:
         list_after_seed_response = client.get("/api/v1/profiles", headers=_auth_headers())
         assert list_after_seed_response.status_code == 200
         assert [item["name"] for item in list_after_seed_response.json()] == ["custom", "seeded"]
+
+        seeded_get_response = client.get("/api/v1/profiles/seeded", headers=_auth_headers())
+        assert seeded_get_response.status_code == 200
+        assert seeded_get_response.json()["subagents"][0]["name"] == "explorer"
 
         delete_response = client.delete("/api/v1/profiles/custom", headers=_auth_headers())
         assert delete_response.status_code == 204
