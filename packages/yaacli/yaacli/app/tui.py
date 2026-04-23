@@ -1960,14 +1960,12 @@ class TUIApp:
         if self._app:
             self._app.invalidate()
 
-    async def _handle_bracketed_paste(self, pasted_text: str, input_area: TextArea) -> None:
-        """Handle a paste gesture with clipboard-image priority."""
-        normalized_text = pasted_text.replace("\r\n", "\n").replace("\r", "\n")
-
+    async def _paste_clipboard_image(self) -> None:
+        """Attach an image from the system clipboard when available."""
         try:
             clipboard_result = await read_clipboard_image()
         except Exception as e:
-            logger.exception("Failed to inspect clipboard image during paste")
+            logger.exception("Failed to inspect clipboard image during explicit paste")
             clipboard_result = ClipboardImageReadResult(image=None, error=_safe_exception_str(e))
 
         image = clipboard_result.image
@@ -1985,14 +1983,16 @@ class TUIApp:
                 self._app.invalidate()
             return
 
+        error = clipboard_result.error or "No clipboard image available."
+        self._append_system_output(error)
+        if self._app:
+            self._app.invalidate()
+
+    async def _handle_bracketed_paste(self, pasted_text: str, input_area: TextArea) -> None:
+        """Handle terminal paste as plain text."""
+        normalized_text = pasted_text.replace("\r\n", "\n").replace("\r", "\n")
         if normalized_text:
             input_area.buffer.insert_text(normalized_text)
-            if self._app:
-                self._app.invalidate()
-            return
-
-        if clipboard_result.error:
-            self._append_system_output(clipboard_result.error)
             if self._app:
                 self._app.invalidate()
 
@@ -2192,12 +2192,20 @@ class TUIApp:
 
         @kb.add(Keys.BracketedPaste, eager=True)
         def handle_bracketed_paste(event: KeyPressEvent) -> None:
-            """Handle terminal paste events with clipboard image priority."""
+            """Handle terminal paste events as plain text."""
             pasted_text = event.data or ""
             if self._app:
                 self._app.create_background_task(self._handle_bracketed_paste(pasted_text, input_area))
             else:
                 self._track_managed_task(asyncio.create_task(self._handle_bracketed_paste(pasted_text, input_area)))
+
+        @kb.add("c-v")
+        def handle_paste_image(event: KeyPressEvent) -> None:
+            """Attach an image from the system clipboard."""
+            if self._app:
+                self._app.create_background_task(self._paste_clipboard_image())
+            else:
+                self._track_managed_task(asyncio.create_task(self._paste_clipboard_image()))
 
         @kb.add("tab")
         def handle_tab(event: KeyPressEvent) -> None:
@@ -2310,6 +2318,9 @@ class TUIApp:
             case "/tasks":
                 self._append_user_input(command)
                 self._show_tasks()
+            case "/paste-image":
+                self._append_user_input(command)
+                await self._paste_clipboard_image()
             case "/loop":
                 self._append_user_input(command)
                 ctx = self.runtime.ctx
@@ -2436,6 +2447,7 @@ class TUIApp:
         sys_table.add_row("/tasks", "Show background tasks and processes")
         sys_table.add_row("/perf", "Show performance stats (YAACLI_PERF=1)")
         sys_table.add_row("/session [id]", "List sessions or restore by ID")
+        sys_table.add_row("/paste-image", "Attach image from system clipboard")
         sys_table.add_row("/dump [folder]", "Export session to folder")
         sys_table.add_row("/load <folder>", "Load session from folder")
         sys_table.add_row("/act", "Switch to ACT mode")
@@ -2472,6 +2484,7 @@ class TUIApp:
         kb_table.add_column("Action")
         kb_table.add_row("Ctrl+C", "Cancel / double-press exit")
         kb_table.add_row("Ctrl+D", "Exit")
+        kb_table.add_row("Ctrl+V", "Attach image from clipboard")
         kb_table.add_row("Tab", "Toggle input mode")
         kb_table.add_row("Escape", "Toggle mouse mode")
         kb_table.add_row("Up/Down", "Browse history")

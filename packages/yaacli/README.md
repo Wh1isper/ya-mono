@@ -60,6 +60,10 @@ make test-cli
 
 ## Clipboard Image Paste
 
+Plain terminal paste always inserts text into the input box.
+Use `Ctrl+V` or `/paste-image` to attach an image from the system clipboard.
+On macOS terminal apps over SSH, map `Command+Shift+V` to send `Ctrl+V` if you want a native-feeling shortcut.
+
 YAACLI reads clipboard images through Pillow first on macOS and Windows.
 macOS also reads Finder-copied image files through Cocoa pasteboard APIs via `pyobjc-framework-Cocoa`.
 Linux image paste still relies on `wl-paste` on Wayland or `xclip` on X11.
