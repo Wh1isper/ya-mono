@@ -8,6 +8,7 @@ from ya_claw.config import ClawSettings
 from ya_claw.controller.models import (
     ProfileDetail,
     ProfileSeedResponse,
+    ProfileSubagent,
     ProfileSummary,
     ProfileUpsertRequest,
 )
@@ -46,7 +47,7 @@ class ProfileController:
         record.model_config_override = request.model_config_override
         record.system_prompt = request.system_prompt
         record.toolsets = list(request.toolsets)
-        record.subagents = [dict(item) for item in request.subagents]
+        record.subagents = [item.model_dump(mode="json", exclude_none=True) for item in request.subagents]
         record.include_builtin_subagents = request.include_builtin_subagents
         record.unified_subagents = request.unified_subagents
         record.need_user_approve_tools = list(request.need_user_approve_tools)
@@ -110,7 +111,7 @@ def profile_detail_from_record(record: ProfileRecord) -> ProfileDetail:
         else None,
         system_prompt=record.system_prompt,
         toolsets=list(record.toolsets or []),
-        subagents=[dict(item) for item in record.subagents or []],
+        subagents=[ProfileSubagent.model_validate(item) for item in record.subagents or []],
         include_builtin_subagents=bool(record.include_builtin_subagents),
         unified_subagents=bool(record.unified_subagents),
         need_user_approve_tools=list(record.need_user_approve_tools or []),

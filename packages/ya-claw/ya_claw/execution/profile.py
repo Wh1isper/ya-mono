@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ya_agent_sdk.presets import resolve_model_cfg, resolve_model_settings
-from ya_agent_sdk.subagents import load_subagents_from_dir
 from ya_agent_sdk.subagents.config import SubagentConfig
 
 from ya_claw.config import ClawSettings
@@ -17,7 +16,17 @@ from ya_claw.orm.tables import ProfileRecord
 
 _DEFAULT_TOOLSETS = ["core"]
 _DEFAULT_PROFILE_NAME = "default"
-_DEFAULT_YAACLI_CONFIG_DIR = Path.home() / ".yaacli"
+
+
+class InlineSubagentDefinition(BaseModel):
+    name: str
+    description: str
+    system_prompt: str
+    model: str | None = None
+    model_settings_preset: str | None = None
+    model_settings_override: dict[str, Any] | None = None
+    model_config_preset: str | None = None
+    model_config_override: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
@@ -122,7 +131,6 @@ class ProfileResolver:
         if not isinstance(model, str) or model.strip() == "":
             profile_value = requested_name or self._settings.default_profile or _DEFAULT_PROFILE_NAME
             raise ValueError(f"Execution profile '{profile_value}' could not be resolved.")
-        default_subagent_configs = self._load_default_subagent_configs()
         return ResolvedProfile(
             name=requested_name or self._settings.default_profile or _DEFAULT_PROFILE_NAME,
             model=model,
@@ -130,25 +138,36 @@ class ProfileResolver:
             model_config=resolve_model_cfg(self._settings.execution_model_config_preset),
             system_prompt=self._settings.execution_system_prompt,
             toolsets=list(_DEFAULT_TOOLSETS),
-            subagent_configs=default_subagent_configs,
+            subagent_configs=[],
             include_builtin_subagents=False,
-            unified_subagents=bool(default_subagent_configs),
+            unified_subagents=False,
             workspace_backend_hint=None,
             metadata={"source_type": "bootstrap"},
         )
 
     def _resolve_subagent_configs(self, raw_subagents: list[dict[str, Any]] | None) -> list[SubagentConfig]:
-        explicit_configs = [SubagentConfig.model_validate(item) for item in raw_subagents or []]
-        if explicit_configs:
-            return explicit_configs
-        return self._load_default_subagent_configs()
-
-    def _load_default_subagent_configs(self) -> list[SubagentConfig]:
-        subagents_dir = _DEFAULT_YAACLI_CONFIG_DIR / "subagents"
-        if not subagents_dir.exists():
-            return []
-        loaded = load_subagents_from_dir(subagents_dir)
-        return [loaded[name] for name in sorted(loaded.keys())]
+        resolved_configs: list[SubagentConfig] = []
+        for raw_subagent in raw_subagents or []:
+            inline = InlineSubagentDefinition.model_validate(raw_subagent)
+            resolved_configs.append(
+                SubagentConfig(
+                    name=inline.name,
+                    description=inline.description,
+                    system_prompt=inline.system_prompt,
+                    model=inline.model,
+                    model_settings=_merge_dicts(
+                        resolve_model_settings(inline.model_settings_preset),
+                        inline.model_settings_override,
+                    ),
+                    model_cfg=_merge_dicts(
+                        resolve_model_cfg(inline.model_config_preset),
+                        inline.model_config_override,
+                    ),
+                    tools=None,
+                    optional_tools=None,
+                )
+            )
+        return resolved_configs
 
 
 def _merge_dicts(base: dict[str, Any] | None, override: dict[str, Any] | None) -> dict[str, Any] | None:

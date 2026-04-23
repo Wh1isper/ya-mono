@@ -123,9 +123,7 @@ def test_profiles_seed_command(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
         claw_cli.cli_application,
         "seed_profiles",
-        lambda *, prune_missing, migrate, seed_file: (
-            calls.append((prune_missing, migrate, seed_file)) or ["default", "docker"]
-        ),
+        lambda *, prune_missing, migrate, seed_file: calls.append((prune_missing, migrate, seed_file)) or ["default"],
     )
 
     result = runner.invoke(
@@ -134,7 +132,7 @@ def test_profiles_seed_command(monkeypatch, tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert calls == [(True, True, str(tmp_path / "profiles.yaml"))]
-    assert "Seeded 2 profile(s): default, docker" in result.output
+    assert "Seeded 1 profile(s): default" in result.output
 
 
 def test_bridge_ls_command() -> None:
