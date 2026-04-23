@@ -155,6 +155,8 @@ class RunCoordinator:
                 session_record, run_record = await _load_run_scope(db_session, run_id)
                 if run_record.status != "running":
                     return
+                if self._runtime_state.get_termination_requested(run_id) is not None:
+                    return
 
                 profile = await self._profile_resolver.resolve(run_record.profile_name or session_record.profile_name)
                 workspace_binding = self._resolve_workspace_binding(run_record, session_record, profile)
@@ -250,24 +252,26 @@ class RunCoordinator:
                         message=self._runtime_state.get_replay_events(run_id),
                     )
                     write_message_checkpoint(self._run_store, checkpoint)
-                if run_record.status != "cancelled":
-                    fail_run(session_record, run_record)
-                    run_record.error_message = self._stringify_error(exc)
-                    run_record.output_summary = buffers.output_summary
+                termination_requested = self._runtime_state.get_termination_requested(run_id)
+                if run_record.status == "cancelled" or termination_requested is not None:
                     await db_session.commit()
-                    await db_session.refresh(run_record)
-                    agui_adapter = AguiEventAdapter(session_id=session_record.id, run_id=run_id)
-                    await self._runtime_state.append_run_event(
-                        run_id,
-                        agui_adapter.build_run_error_event(
-                            message=run_record.error_message or "YA Claw run failed.",
-                            code=run_record.termination_reason,
-                        ),
-                        terminal=True,
-                    )
-                    terminal_event_emitted = True
-                else:
-                    await db_session.commit()
+                    return
+
+                fail_run(session_record, run_record)
+                run_record.error_message = self._stringify_error(exc)
+                run_record.output_summary = buffers.output_summary
+                await db_session.commit()
+                await db_session.refresh(run_record)
+                agui_adapter = AguiEventAdapter(session_id=session_record.id, run_id=run_id)
+                await self._runtime_state.append_run_event(
+                    run_id,
+                    agui_adapter.build_run_error_event(
+                        message=run_record.error_message or "YA Claw run failed.",
+                        code=run_record.termination_reason,
+                    ),
+                    terminal=True,
+                )
+                terminal_event_emitted = True
         finally:
             if not terminal_event_emitted:
                 await self._runtime_state.close_run(run_id)

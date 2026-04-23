@@ -14,6 +14,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.widgets import TextArea
 from pydantic_ai import BinaryContent
 from y_agent_environment.shell import BackgroundProcess
@@ -892,6 +893,19 @@ async def test_tui_app_paste_clipboard_image_attaches_image() -> None:
     assert len(app._pending_attachments) == 1
     assert app._pending_attachments[0].data == b"image-bytes"
     assert any("Attached image/png" in line for line in app._output_lines)
+
+
+def test_tui_app_setup_keybindings_marks_ctrl_v_as_eager() -> None:
+    """Ctrl+V image paste binding should outrank prompt_toolkit default handlers."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+    app = TUIApp(config=config, config_manager=config_manager)
+    input_area = TextArea(multiline=True)
+
+    kb = app._setup_keybindings(input_area)
+    binding = next(b for b in kb.bindings if b.keys == (Keys.ControlV,))
+
+    assert binding.eager()
 
 
 @pytest.mark.asyncio

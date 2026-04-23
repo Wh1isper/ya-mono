@@ -9,7 +9,7 @@ from ya_claw.config import ClawSettings
 from ya_claw.db.engine import create_engine, create_session_factory
 from ya_claw.execution.coordinator import ExecutionBuffers, ExecutionSupervisor, RunCoordinator
 from ya_claw.execution.profile import ResolvedProfile
-from ya_claw.execution.state_machine import mark_run_running
+from ya_claw.execution.state_machine import interrupt_run, mark_run_running
 from ya_claw.execution.store import RunStore
 from ya_claw.orm.base import Base
 from ya_claw.orm.tables import RunRecord, SessionRecord
@@ -151,6 +151,48 @@ class StubRunCoordinator(RunCoordinator):
         buffers.output_summary = f"completed {run_id}"
         if self.failure is not None:
             raise self.failure
+
+
+class InterruptingFailureRunCoordinator(StubRunCoordinator):
+    async def _execute_agent_run(
+        self,
+        *,
+        run_id: str,
+        session_id: str,
+        dispatch_mode: str,
+        workspace_binding: WorkspaceBinding,
+        restore_point,
+        input_parts,
+        profile,
+        profile_name: str | None,
+        project_id: str | None,
+        trigger_type: str,
+        run_metadata: dict[str, Any],
+        buffers: ExecutionBuffers,
+    ) -> None:
+        await super()._execute_agent_run(
+            run_id=run_id,
+            session_id=session_id,
+            dispatch_mode=dispatch_mode,
+            workspace_binding=workspace_binding,
+            restore_point=restore_point,
+            input_parts=input_parts,
+            profile=profile,
+            profile_name=profile_name,
+            project_id=project_id,
+            trigger_type=trigger_type,
+            run_metadata=run_metadata,
+            buffers=buffers,
+        )
+        async with self._session_factory() as db_session:
+            session_record = await db_session.get(SessionRecord, session_id)
+            run_record = await db_session.get(RunRecord, run_id)
+            assert isinstance(session_record, SessionRecord)
+            assert isinstance(run_record, RunRecord)
+            await self._runtime_state.request_stop(run_id, "interrupt")
+            interrupt_run(session_record, run_record)
+            await db_session.commit()
+        raise RuntimeError("boom")
 
 
 @pytest.fixture
@@ -435,3 +477,48 @@ async def test_run_coordinator_marks_run_failed_on_exception(
     handle = runtime_state.get_run_handle("run-1")
     assert handle is not None
     assert handle.events[-1].payload["type"] == "RUN_ERROR"
+
+
+async def test_run_coordinator_preserves_interrupt_when_failure_races_with_stop(
+    db_session: AsyncSession,
+    db_engine: AsyncEngine,
+    settings: ClawSettings,
+    runtime_state: InMemoryRuntimeState,
+) -> None:
+    session_record = SessionRecord(id="session-1", profile_name="general", project_id="repo-a", session_metadata={})
+    run_record = RunRecord(
+        id="run-1",
+        session_id="session-1",
+        sequence_no=1,
+        restore_from_run_id=None,
+        status="queued",
+        trigger_type="api",
+        profile_name="general",
+        project_id="repo-a",
+        input_parts=[{"type": "text", "text": "hello"}],
+        run_metadata={},
+    )
+    db_session.add(session_record)
+    db_session.add(run_record)
+    mark_run_running(session_record, run_record)
+    await db_session.commit()
+
+    runtime_state.register_run("session-1", "run-1")
+    coordinator = InterruptingFailureRunCoordinator(
+        settings=settings,
+        session_factory=create_session_factory(db_engine),
+        runtime_state=runtime_state,
+        workspace_provider=StubWorkspaceProvider(settings.resolved_workspace_root),
+    )
+
+    await coordinator.execute("run-1")
+
+    refreshed_run = await db_session.get(RunRecord, "run-1")
+    assert isinstance(refreshed_run, RunRecord)
+    await db_session.refresh(refreshed_run)
+    assert refreshed_run.status == "cancelled"
+    assert refreshed_run.termination_reason == "interrupt"
+
+    handle = runtime_state.get_run_handle("run-1")
+    assert handle is not None
+    assert all(event.payload["type"] != "RUN_ERROR" for event in handle.events)
