@@ -11,16 +11,24 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from ya_claw.api.health import router as health_router
+from ya_claw.api.profiles import router as profiles_router
 from ya_claw.api.runs import router as runs_router
 from ya_claw.api.sessions import router as sessions_router
 from ya_claw.config import ClawSettings, get_settings
 from ya_claw.db.engine import create_engine, create_session_factory
+from ya_claw.execution import ClawRuntimeBuilder, ExecutionSupervisor, ProfileResolver
 from ya_claw.runtime_state import InMemoryRuntimeState, create_runtime_state
+from ya_claw.workspace import (
+    DefaultEnvironmentFactory,
+    DockerWorkspaceProvider,
+    LocalWorkspaceProvider,
+    WorkspaceProvider,
+)
 
 
 class ClawApplication:
     reserved_frontend_paths = ("api", "docs", "redoc", "openapi.json", "healthz")
-    auth_exempt_paths = frozenset({"/healthz"})
+    auth_exempt_paths = frozenset({"/healthz", "/docs", "/redoc", "/openapi.json"})
 
     def __init__(self, settings: ClawSettings):
         self.settings = settings
@@ -38,6 +46,11 @@ class ClawApplication:
         app.state.db_engine = None
         app.state.db_session_factory = None
         app.state.runtime_state = None
+        app.state.workspace_provider = None
+        app.state.environment_factory = None
+        app.state.profile_resolver = None
+        app.state.runtime_builder = None
+        app.state.execution_supervisor = None
 
         self.register_api_token_middleware(app)
         app.add_middleware(
@@ -48,6 +61,7 @@ class ClawApplication:
             allow_headers=["*"],
         )
         app.include_router(health_router)
+        app.include_router(profiles_router, prefix="/api/v1")
         app.include_router(sessions_router, prefix="/api/v1")
         app.include_router(runs_router, prefix="/api/v1")
 
@@ -70,6 +84,36 @@ class ClawApplication:
         )
         app.state.db_session_factory = create_session_factory(app.state.db_engine)
         app.state.runtime_state = create_runtime_state()
+        app.state.workspace_provider = self.create_workspace_provider()
+        app.state.environment_factory = DefaultEnvironmentFactory(
+            docker_image=self.settings.workspace_provider_docker_image,
+        )
+
+        if app.state.db_session_factory is not None:
+            app.state.profile_resolver = ProfileResolver(
+                settings=self.settings,
+                session_factory=app.state.db_session_factory,
+            )
+            if self.settings.auto_seed_profiles:
+                await app.state.profile_resolver.seed_profiles()
+            app.state.runtime_builder = ClawRuntimeBuilder(settings=self.settings)
+
+        if (
+            isinstance(app.state.runtime_state, InMemoryRuntimeState)
+            and app.state.db_session_factory is not None
+            and app.state.profile_resolver is not None
+            and app.state.runtime_builder is not None
+        ):
+            supervisor = ExecutionSupervisor(
+                settings=self.settings,
+                session_factory=app.state.db_session_factory,
+                runtime_state=app.state.runtime_state,
+                workspace_provider=app.state.workspace_provider,
+                environment_factory=app.state.environment_factory,
+                profile_resolver=app.state.profile_resolver,
+                runtime_builder=app.state.runtime_builder,
+            )
+            app.state.execution_supervisor = supervisor
 
         try:
             yield
@@ -78,12 +122,25 @@ class ClawApplication:
             runtime_state = app.state.runtime_state
 
             app.state.db_session_factory = None
+            app.state.workspace_provider = None
+            app.state.environment_factory = None
+            app.state.profile_resolver = None
+            app.state.runtime_builder = None
+            app.state.execution_supervisor = None
 
             if isinstance(runtime_state, InMemoryRuntimeState):
                 await runtime_state.aclose()
 
             if isinstance(db_engine, AsyncEngine):
                 await db_engine.dispose()
+
+    def create_workspace_provider(self) -> WorkspaceProvider:
+        if self.settings.workspace_provider_backend == "docker":
+            return DockerWorkspaceProvider(
+                self.settings.resolved_workspace_root,
+                image=self.settings.workspace_provider_docker_image,
+            )
+        return LocalWorkspaceProvider(self.settings.resolved_workspace_root)
 
     def register_api_token_middleware(self, app: FastAPI) -> None:
         expected_token = self.settings.require_api_token()
@@ -169,7 +226,7 @@ class ClawApplication:
                 "environment": self.settings.environment,
                 "docs_url": "/docs",
                 "spec_path": "packages/ya-claw/spec",
-                "surfaces": ["sessions", "runs", "schedules", "bridges"],
+                "surfaces": ["profiles", "sessions", "runs", "schedules", "bridges"],
             }
 
 

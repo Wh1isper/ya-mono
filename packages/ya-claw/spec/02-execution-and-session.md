@@ -1,249 +1,243 @@
 # 02 - Execution and Session
 
-The execution coordinator owns one run from initial request to final state commit.
+YA Claw uses queued runs as the durable execution intent.
 
-## Execution Flow
+The execution stack has two runtime layers:
 
-```mermaid
-sequenceDiagram
-    participant Client
-    participant API
-    participant CFG as Config Resolver
-    participant PROJ as Project Resolver
-    participant SESS as Session Manager
-    participant TASKS as Async Task Registry
-    participant EXEC as Execution Coordinator
-    participant SDK as ya-agent-sdk
+- `ExecutionSupervisor` manages queued claims and active coordinators
+- `RunCoordinator` executes one claimed run from start to terminal state
 
-    Client->>API: start run
-    API->>CFG: resolve profile and request inputs
-    API->>PROJ: resolve execution scope
-    CFG-->>API: resolved configuration
-    PROJ-->>API: execution scope
-    API->>SESS: create run record
-    API->>TASKS: register active task
-    API->>EXEC: execute run
-    EXEC->>SDK: create_agent(...)
-    EXEC->>SDK: stream_agent(...)
-    loop events
-        SDK-->>EXEC: stream event
-    end
-    EXEC->>SESS: persist state and finalize
-    EXEC->>TASKS: clear active task
-    EXEC-->>API: terminal result
-```
+## Core Model
 
-## Execution Responsibilities
+YA Claw uses two durable layers:
 
-The coordinator is responsible for:
-
-- loading the previous committed session state when continuing
-- constructing the SDK runtime and execution environment
-- processing stream events into external protocol events
-- persisting final summaries and exported state
-- updating the in-process task registry during active execution
-- coordinating schedule-triggered runs and bridge-triggered runs through the same session model
-
-## Session Model
-
-YA Claw should use a durable session model with explicit continuation points.
-A session carries the committed state that the next run can restore.
-A fork creates a new lineage from a historical point.
+- a **run** is the atomic execution and commit unit
+- a **session** is the high-level view over a run lineage and its continuation pointers
 
 ```mermaid
 flowchart LR
-    S0((S0)) --> S1((S1))
-    S1 --> S2((S2))
-    S1 --> S3((S3 Fork))
-    S3 --> S4((S4))
+    S[Session]
+    R1[Queued Run]
+    R2[Running Run]
+    R3[Completed Run]
+    S --> R1
+    S --> R2
+    S --> R3
 ```
+
+## Session Model
+
+A session carries durable metadata plus continuation pointers stored in the relational database.
+
+Suggested session fields:
+
+- `id`
+- `parent_session_id`
+- `profile_name`
+- `project_id`
+- `metadata`
+- `head_run_id`
+- `head_success_run_id`
+- `active_run_id`
+- `created_at`
+- `updated_at`
+
+### Session Meaning
+
+- `head_run_id` points to the latest run created in the session
+- `head_success_run_id` points to the latest successfully committed run
+- `active_run_id` points to the currently claimed and executing run when one exists
+
+### Session Continuation Rule
+
+A high-level session continuation follows this rule:
+
+1. use explicit `restore_from_run_id` when provided
+2. otherwise use `head_success_run_id`
 
 ## Run Model
 
 A run is one execution attempt inside a session.
 
+Suggested run fields:
+
+- `id`
+- `session_id`
+- `sequence_no`
+- `restore_from_run_id`
+- `status`
+- `trigger_type`
+- `profile_name`
+- `project_id`
+- `input_parts`
+- `metadata`
+- `output_summary`
+- `error_message`
+- `termination_reason`
+- `created_at`
+- `started_at`
+- `finished_at`
+- `committed_at`
+
 ### Run States
 
-| Status      | Meaning                    |
-| ----------- | -------------------------- |
-| `queued`    | accepted but not started   |
-| `running`   | currently executing        |
-| `completed` | finished successfully      |
-| `failed`    | finished with error        |
-| `cancelled` | stopped by user or cleanup |
+| Status      | Meaning                                            |
+| ----------- | -------------------------------------------------- |
+| `queued`    | durable run intent accepted, waiting to be claimed |
+| `running`   | claimed by supervisor and currently executing      |
+| `completed` | committed successfully                             |
+| `failed`    | ended with error                                   |
+| `cancelled` | stopped before completion                          |
 
-## Runtime Setup
+### Run State Flow
 
-A run starts from four inputs:
+```mermaid
+stateDiagram-v2
+    [*] --> queued
+    queued --> running
+    queued --> cancelled
+    running --> completed
+    running --> failed
+    running --> cancelled
+```
 
-- session context
-- agent profile
-- project selector and request metadata
-- user input payload
+### Why `queued` Exists
 
-The runtime should resolve those inputs into one execution scope and then construct the SDK `Environment` from that scope, including:
+`queued` is the durable handoff point between ingress and execution.
 
-- default working directory
-- readable and writable file paths
-- environment variables
-- resolver metadata exposed as runtime context instructions when useful
+It enables:
 
-## In-Process Active State
+- API acceptance before execution begins
+- unified execution for API, schedules, and bridges
+- concurrency control and future worker scaling
+- cancellation before claim
+- restart recovery and claim scans after process restart
 
-The single-node runtime keeps active state inside the process.
+## ExecutionSupervisor
 
-That active state should include:
+`ExecutionSupervisor` is the long-lived in-process execution manager.
 
-- foreground run handles
-- background task handles
-- cancellation tokens
-- connected event subscribers
-- transient stream buffers
-- schedule timers and wake-up bookkeeping
-- bridge relay handles
+Responsibilities:
 
-Durable session continuity and run summaries still commit to storage.
+- accept new queued run notifications
+- scan and claim queued runs on startup or recovery
+- atomically transition `queued -> running`
+- create and track one `RunCoordinator` task per active run
+- route stop signals to active runs
+- enforce concurrency limits and execution policy
 
-## State Restore
+### Claim Rule
 
-If the run continues an existing session, YA Claw restores:
+Claim should be explicit and atomic.
 
-- exported SDK state
-- message history
-- environment resource state
+Recommended shape:
 
-## Background Task Model
+1. load candidate queued run
+2. update `status` from `queued` to `running` with a conditional write
+3. update `started_at` and session `active_run_id`
+4. only the successful claimant starts the coordinator
 
-Background tasks stay attached to one YA Claw process.
+## RunCoordinator
 
-The in-process task registry should track:
+`RunCoordinator` is the short-lived per-run executor.
 
-- task identity
-- associated session or run
-- lifecycle status
-- start and finish timestamps
-- cancellation hooks
+Responsibilities:
 
-Longer-lived work should commit durable checkpoints at natural run boundaries.
+- load session and run state
+- load restore point from prior committed run when available
+- resolve profile and workspace binding
+- assemble the SDK runtime through `ClawRuntimeBuilder`
+- stream execution events into runtime state buffers
+- persist best-effort checkpoints
+- commit final continuity blobs
+- advance run and session pointers through the execution state machine
 
-## Session Commit Output
+## Execution Registry and Runtime State
 
-At a committed boundary, especially at session end, YA Claw should write:
+The single-node runtime keeps active execution state in memory.
 
-- the latest session state snapshot to `state.json`
-- exported SDK state
-- the compacted committed conversation record to `message.json`
-- metadata that links the committed message view to the session and run
-- the effective `project_id` and useful request metadata for continuation and UI restore
+Recommended split:
 
-## Session Schedule Model
+- `ExecutionRegistry` for active coordinator tasks and control handles
+- runtime event buffer store for replayable events, steering queues, and termination signals
 
-A session schedule triggers a run on a defined cadence or at a defined time.
+This split keeps execution ownership separate from event delivery.
 
-A schedule should bind:
+## Input Model
 
-- one target session or session template
-- one profile
-- one `project_id` selection or project selection rule
-- one trigger definition
-- one delivery policy
-- one enabled state
+Run creation, session continuation, and steering share one structured input protocol.
 
-### Schedule Trigger Types
+The request payload should use:
 
-- interval trigger
-- cron trigger
-- one-shot trigger
+- `input_parts: Sequence[InputPart]`
 
-### Schedule Dispatch Flow
+`InputPart` supports:
+
+- `text`
+- `url`
+- `file`
+- `binary`
+- `mode`
+- `command`
+
+The execution input mapper converts `input_parts` into the SDK `UserPrompt` shape.
+
+## Event Flow
 
 ```mermaid
 sequenceDiagram
-    participant TIMER as Schedule Timer
-    participant DISP as Schedule Dispatcher
-    participant SESS as Session Manager
-    participant EXEC as Execution Coordinator
+    participant Client
+    participant API
+    participant SUP as ExecutionSupervisor
+    participant COORD as RunCoordinator
+    participant SDK as ya-agent-sdk
+    participant ADAPTER as AGUI Protocol Adapter
+    participant STORE as Session Message Store
 
-    TIMER->>DISP: trigger fired
-    DISP->>SESS: create scheduled run record
-    DISP->>EXEC: execute scheduled run
-    EXEC->>SESS: persist result and next continuation point
+    Client->>API: create run
+    API->>API: write queued run
+    API->>SUP: submit(run_id)
+    SUP->>SUP: claim queued run
+    SUP->>COORD: start coordinator
+    COORD->>SDK: stream_agent(...)
+    loop runtime events
+        SDK-->>COORD: stream event
+        COORD->>ADAPTER: transform SDK event -> AGUI event
+        ADAPTER->>STORE: append + compact replay buffer
+        STORE-->>Client: SSE replay and live tail
+    end
 ```
 
-### Schedule Delivery Policy
+## Commit Semantics
 
-A schedule may target one of these delivery policies:
+Successful completion commits run output into the durable run store.
 
-- stored result only
-- bridge callback delivery
-- channel post delivery
+A successful commit should:
 
-## Bridge Relay Model
+1. persist `state.json` for the run
+2. persist compacted AGUI replay events to `message.json`
+3. set `committed_at`
+4. set session `head_success_run_id`
+5. clear session `active_run_id`
 
-Bridge-triggered execution also reuses the same session and run model.
+## Failure and Interrupt Semantics
 
-### Task Relay
+A failed or interrupted run keeps value as an explicit restore source.
 
-Task relay is the default bridge path for async work.
+The coordinator should:
 
-The flow is:
-
-1. bridge receives a channel event
-2. bridge decides the effective `project_id`
-3. bridge creates or continues an async session
-4. execution runs in background task form
-5. bridge adapter or channel CLI delivers the resulting output back to the IM channel
-
-### Stream Relay
-
-Stream relay is the interactive bridge path for foreground work.
-
-The flow is:
-
-1. bridge receives a channel event
-2. bridge decides the effective `project_id`
-3. bridge starts a foreground run through the YA Claw service
-4. bridge consumes SSE from the run event stream
-5. bridge transforms runtime events into channel-ready messages
-6. bridge pushes incremental output to the IM channel
-
-## Completion Path
-
-On successful completion the coordinator should:
-
-1. collect final output summary
-2. export SDK state
-3. persist the latest session state snapshot to `state.json`
-4. compact and persist the committed conversation record to `message.json`
-5. mark the run `completed`
-6. advance the session into a ready-to-continue state
-7. release in-process task resources
-
-## Failure Path
-
-On failure the coordinator should:
-
-1. capture error metadata
-2. flush terminal events when possible
-3. mark the run `failed`
-4. preserve the previously committed session state as the latest valid continuation point
-5. release in-process task resources
-
-## Recovery Principle
-
-The runtime should keep the last known good exported state until the new run has committed successfully.
-
-## Subagents and Compact
-
-YA Claw should preserve SDK-native support for:
-
-- subagent delegation
-- compaction checkpoints
-- continuation from compacted state
-
-The architecture should record these as run- and session-level events without freezing the final data model too early.
+1. keep `head_success_run_id` unchanged when no new successful commit exists
+2. best-effort persist the latest compacted AGUI replay list for the interrupted or failed run
+3. make that run addressable through `restore_from_run_id`
 
 ## Concurrency Rule
 
-One active foreground run per session is the clean default for the single-node runtime.
-Parallelism should come from independent sessions, subagents, scheduled runs, or background tasks tracked by the same process.
+One active run per session is the clean default for the single-node runtime.
+
+Parallelism should come from:
+
+- independent sessions
+- supervisor-managed background execution
+- schedules
+- bridges
+- SDK subagents

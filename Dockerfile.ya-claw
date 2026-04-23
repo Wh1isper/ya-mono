@@ -53,7 +53,8 @@ RUN sdk_wheel=$(ls /tmp/dist/ya_agent_sdk-*.whl) \
 
 COPY --from=frontend-builder /workspace/apps/ya-claw-web/dist ./web-dist
 COPY packages/ya-claw/start.sh ./start.sh
-RUN chmod +x ./start.sh
+COPY packages/ya-claw/scripts ./scripts
+RUN chmod +x ./start.sh ./scripts/*.sh
 
 EXPOSE 9042
 

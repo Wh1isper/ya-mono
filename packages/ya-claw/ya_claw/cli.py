@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import click
@@ -9,6 +10,8 @@ from alembic.config import Config
 
 from ya_claw.bridge.cli import bridge
 from ya_claw.config import ClawSettings, get_settings
+from ya_claw.db.engine import create_engine, create_session_factory
+from ya_claw.execution.profile import ProfileResolver
 
 
 class ClawCliApplication:
@@ -42,6 +45,35 @@ class ClawCliApplication:
     def show_history(self) -> None:
         self.resolved_database_url()
         command.history(self.alembic_config(), verbose=True)
+
+    def seed_profiles(
+        self,
+        *,
+        prune_missing: bool,
+        migrate: bool,
+        seed_file: str | None,
+    ) -> list[str]:
+        settings = self.settings()
+        effective_settings = settings.model_copy(
+            update={"profile_seed_file": Path(seed_file).expanduser()} if isinstance(seed_file, str) else {}
+        )
+        resolved_seed_file = effective_settings.resolved_profile_seed_file
+        if resolved_seed_file is None or not resolved_seed_file.exists():
+            raise click.ClickException("Profile seed file is not configured or does not exist.")
+
+        if migrate:
+            self.upgrade_database()
+
+        async def _run() -> list[str]:
+            engine = create_engine(effective_settings.resolved_database_url)
+            session_factory = create_session_factory(engine)
+            try:
+                resolver = ProfileResolver(settings=effective_settings, session_factory=session_factory)
+                return await resolver.seed_profiles(prune_missing=prune_missing)
+            finally:
+                await engine.dispose()
+
+        return asyncio.run(_run())
 
     def serve(
         self,
@@ -95,6 +127,28 @@ def serve(host: str | None, port: int | None, reload: bool | None, migrate: bool
 @cli.group()
 def db() -> None:
     """Database migration and management commands."""
+
+
+@cli.group()
+def profiles() -> None:
+    """Profile management commands."""
+
+
+@profiles.command("seed")
+@click.option(
+    "--prune-missing/--keep-missing",
+    default=False,
+    help="Delete seeded DB profiles that are missing from the seed file.",
+)
+@click.option("--migrate/--no-migrate", default=True, help="Run database migrations before seeding profiles.")
+@click.option("--seed-file", default=None, help="Override the configured profile seed YAML path.")
+def profiles_seed(prune_missing: bool, migrate: bool, seed_file: str | None) -> None:
+    seeded_names = cli_application.seed_profiles(
+        prune_missing=prune_missing,
+        migrate=migrate,
+        seed_file=seed_file,
+    )
+    click.echo(f"Seeded {len(seeded_names)} profile(s): {', '.join(seeded_names)}")
 
 
 @db.command("upgrade")

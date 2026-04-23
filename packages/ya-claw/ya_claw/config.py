@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
+from dotenv import dotenv_values, load_dotenv
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -10,7 +12,27 @@ _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_DATABASE_FILENAME = "ya_claw.sqlite3"
 _DEFAULT_DATA_DIR = Path("~/.ya-claw/data")
 _DEFAULT_WORKSPACE_ROOT = Path("~/.ya-claw/workspace")
-_DEFAULT_SESSION_STORE_DIRNAME = "session-store"
+_DEFAULT_RUN_STORE_DIRNAME = "run-store"
+
+
+def load_runtime_environment() -> dict[str, str]:
+    package_env_file = (_PACKAGE_ROOT / ".env").expanduser()
+    cwd_env_file = Path(".env").expanduser()
+
+    merged: dict[str, str] = {}
+    for env_file in (package_env_file, cwd_env_file):
+        if env_file.exists():
+            merged.update({
+                key: value
+                for key, value in dotenv_values(env_file).items()
+                if isinstance(key, str) and isinstance(value, str)
+            })
+
+    for env_file in (cwd_env_file, package_env_file):
+        if env_file.exists():
+            load_dotenv(env_file, override=False, encoding="utf-8")
+
+    return merged
 
 
 class ClawSettings(BaseSettings):
@@ -39,6 +61,17 @@ class ClawSettings(BaseSettings):
     database_max_overflow: int = 10
     database_pool_recycle_seconds: int = 3600
 
+    workspace_provider_backend: Literal["local", "docker"] = "docker"
+    workspace_provider_docker_image: str = "python:3.11"
+    default_profile: str = "default"
+    profile_seed_file: Path | None = None
+    auto_seed_profiles: bool = False
+    execution_model: str | None = None
+    execution_model_settings_preset: str | None = None
+    execution_model_config_preset: str | None = None
+    execution_system_prompt: str | None = None
+    execution_context_window: int = 200_000
+
     auto_migrate: bool = True
 
     @property
@@ -54,8 +87,14 @@ class ClawSettings(BaseSettings):
         return self.workspace_root.expanduser()
 
     @property
-    def session_store_dir(self) -> Path:
-        return self.runtime_data_dir / _DEFAULT_SESSION_STORE_DIRNAME
+    def resolved_profile_seed_file(self) -> Path | None:
+        if self.profile_seed_file is None:
+            return None
+        return self.profile_seed_file.expanduser()
+
+    @property
+    def run_store_dir(self) -> Path:
+        return self.runtime_data_dir / _DEFAULT_RUN_STORE_DIRNAME
 
     @property
     def api_token_value(self) -> str | None:
@@ -84,10 +123,11 @@ class ClawSettings(BaseSettings):
 
     def ensure_runtime_directories(self) -> None:
         self.runtime_data_dir.mkdir(parents=True, exist_ok=True)
-        self.session_store_dir.mkdir(parents=True, exist_ok=True)
+        self.run_store_dir.mkdir(parents=True, exist_ok=True)
         self.resolved_workspace_root.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> ClawSettings:
+    load_runtime_environment()
     return ClawSettings()

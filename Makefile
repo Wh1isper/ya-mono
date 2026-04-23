@@ -138,6 +138,21 @@ test-claw: ## Run YA Claw tests
 	@echo "Running YA Claw pytest"
 	@uv run python -m pytest packages/ya-claw/tests -n auto -vv --inline-snapshot=disable --cov --cov-config=pyproject.toml --cov-report term-missing
 
+.PHONY: claw-smoke
+claw-smoke: ## Run YA Claw HTTP smoke test against the configured local server
+	@echo "Running YA Claw smoke test"
+	@sh packages/ya-claw/scripts/e2e_smoke.sh
+
+.PHONY: claw-sse-close-smoke
+claw-sse-close-smoke: ## Run YA Claw SSE cancel/close smoke test against the configured local server
+	@echo "Running YA Claw SSE close smoke test"
+	@sh packages/ya-claw/scripts/e2e_sse_close.sh
+
+.PHONY: claw-sse-complete-smoke
+claw-sse-complete-smoke: ## Run YA Claw SSE completion smoke test against the configured local server
+	@echo "Running YA Claw SSE completion smoke test"
+	@sh packages/ya-claw/scripts/e2e_sse_complete.sh
+
 .PHONY: test-fix
 test-fix: ## Run pytest with inline snapshot updates
 	@echo "Running pytest with inline snapshot updates"

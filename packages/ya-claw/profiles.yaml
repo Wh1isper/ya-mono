@@ -1,0 +1,61 @@
+version: 1
+profiles:
+  - name: default
+    model: gateway@openai-responses:gpt-5.4
+    model_settings_preset: openai_responses_high
+    model_config_preset: gpt5_270k
+    system_prompt: |
+      You are the YA Claw execution agent.
+      Work inside the provided workspace, use filesystem and shell tools carefully,
+      and leave the workspace in a useful committed state for the next run.
+      Prefer concise, action-oriented execution.
+    toolsets:
+      - core
+    subagents: []
+    include_builtin_subagents: false
+    unified_subagents: true
+    need_user_approve_tools: []
+    need_user_approve_mcps: []
+    enabled: true
+    source_type: seed
+    source_version: 1
+
+  - name: general
+    model: gateway@openai-responses:gpt-5.4
+    model_settings_preset: openai_responses_high
+    model_config_preset: gpt5_270k
+    system_prompt: |
+      You are the YA Claw execution agent.
+      Work inside the provided workspace, use filesystem and shell tools carefully,
+      and leave the workspace in a useful committed state for the next run.
+      Prefer concise, action-oriented execution.
+    toolsets:
+      - core
+    subagents: []
+    include_builtin_subagents: false
+    unified_subagents: true
+    need_user_approve_tools: []
+    need_user_approve_mcps: []
+    enabled: true
+    source_type: seed
+    source_version: 1
+
+  - name: docker
+    model: gateway@openai-responses:gpt-5.4
+    model_settings_preset: openai_responses_high
+    model_config_preset: gpt5_270k
+    system_prompt: |
+      You are the YA Claw execution agent.
+      Work inside the provided workspace, use filesystem and shell tools carefully,
+      and leave the workspace in a useful committed state for the next run.
+      Prefer concise, action-oriented execution.
+    toolsets:
+      - core
+    subagents: []
+    include_builtin_subagents: false
+    unified_subagents: true
+    need_user_approve_tools: []
+    need_user_approve_mcps: []
+    enabled: true
+    source_type: seed
+    source_version: 1

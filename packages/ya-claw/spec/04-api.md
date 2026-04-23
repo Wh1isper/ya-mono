@@ -2,7 +2,15 @@
 
 YA Claw exposes one local HTTP API under `/api/v1`.
 
-The API should stay small enough to match the single-node runtime shape.
+The API has two layers:
+
+- **session API** for the common high-level workflow
+- **run API** for explicit low-level orchestration
+
+## API Principle
+
+The API accepts durable execution intent first.
+Run creation writes a queued run record before active execution begins.
 
 ## Resource Groups
 
@@ -11,9 +19,8 @@ flowchart TB
     ROOT[/api/v1]
     ROOT --> SESSIONS[/sessions]
     ROOT --> RUNS[/runs]
-    ROOT --> EVENTS[/events]
-    ROOT --> SCHEDULES[/schedules]
-    ROOT --> BRIDGES[/bridges]
+    ROOT --> EVENTS[/events via nested session and run routes]
+    ROOT --> PROFILES[/profiles and seed operations later]
 ```
 
 ## Top-level Endpoints
@@ -24,156 +31,200 @@ flowchart TB
 
 ## Sessions
 
-| Method | Path                                    | Purpose                               |
-| ------ | --------------------------------------- | ------------------------------------- |
-| `POST` | `/api/v1/sessions`                      | create root session                   |
-| `GET`  | `/api/v1/sessions`                      | list sessions                         |
-| `GET`  | `/api/v1/sessions/{session_id}`         | inspect session                       |
-| `GET`  | `/api/v1/sessions/{session_id}/state`   | read committed session state snapshot |
-| `GET`  | `/api/v1/sessions/{session_id}/message` | read committed compacted message view |
-| `POST` | `/api/v1/sessions/{session_id}/fork`    | fork session lineage                  |
-| `POST` | `/api/v1/sessions/{session_id}/compact` | compact session state                 |
+| Method | Path                                      | Purpose                                         |
+| ------ | ----------------------------------------- | ----------------------------------------------- |
+| `POST` | `/api/v1/sessions`                        | create a session with optional first queued run |
+| `GET`  | `/api/v1/sessions`                        | list sessions                                   |
+| `GET`  | `/api/v1/sessions/{session_id}`           | inspect session and committed state             |
+| `POST` | `/api/v1/sessions/{session_id}/runs`      | create a new queued run under the session       |
+| `POST` | `/api/v1/sessions/{session_id}/steer`     | steer the active run through the session        |
+| `POST` | `/api/v1/sessions/{session_id}/interrupt` | interrupt the active run through the session    |
+| `POST` | `/api/v1/sessions/{session_id}/cancel`    | cancel the active run through the session       |
+| `POST` | `/api/v1/sessions/{session_id}/fork`      | fork a new session lineage                      |
+| `GET`  | `/api/v1/sessions/{session_id}/events`    | replay and tail session events                  |
 
 ## Runs
 
-| Method | Path                           | Purpose            |
-| ------ | ------------------------------ | ------------------ |
-| `POST` | `/api/v1/runs`                 | start run          |
-| `GET`  | `/api/v1/runs/{run_id}`        | inspect run        |
-| `POST` | `/api/v1/runs/{run_id}/cancel` | cancel run or task |
+| Method | Path                              | Purpose                         |
+| ------ | --------------------------------- | ------------------------------- |
+| `POST` | `/api/v1/runs`                    | create a queued run directly    |
+| `GET`  | `/api/v1/runs/{run_id}`           | inspect run and committed state |
+| `POST` | `/api/v1/runs/{run_id}/steer`     | steer a specific active run     |
+| `POST` | `/api/v1/runs/{run_id}/interrupt` | interrupt a specific active run |
+| `POST` | `/api/v1/runs/{run_id}/cancel`    | cancel a specific active run    |
+| `GET`  | `/api/v1/runs/{run_id}/events`    | replay and tail run events      |
 
-## Session Query Shape
+## Request Model
 
-Session list and session detail responses should expose enough run context for cross-session inspection and tool-driven continuation.
+Run creation and steering use structured input parts.
 
-Suggested session summary fields:
+### Shared Input Field
 
-- `run_count`
-- `active_run_ids`
-- `latest_run`
+```json
+{
+  "input_parts": [{ "type": "text", "text": "hello" }]
+}
+```
+
+Supported part types:
+
+- `text`
+- `url`
+- `file`
+- `binary`
+- `mode`
+- `command`
+
+### Session Create Request
+
+Suggested fields:
+
 - `profile_name`
 - `project_id`
 - `metadata`
+- `input_parts`
+- `dispatch_mode`
+- `trigger_type`
 
-`latest_run` should carry the compact run inspection fields that an agent or UI needs for routing decisions:
+### Session Continue Request
+
+Suggested fields:
+
+- `restore_from_run_id`
+- `input_parts`
+- `metadata`
+- `dispatch_mode`
+- `trigger_type`
+
+### Run Create Request
+
+Suggested fields:
+
+- `session_id`
+- `restore_from_run_id`
+- `profile_name`
+- `project_id`
+- `input_parts`
+- `metadata`
+- `dispatch_mode`
+- `trigger_type`
+
+## Creation Semantics
+
+Run-creating endpoints should:
+
+1. write the durable run record with `status=queued`
+2. update session pointers such as `head_run_id`
+3. notify the in-process supervisor when execution is available
+4. return the queued run record immediately
+
+## Run Summary Shape
+
+Suggested run summary fields:
 
 - `id`
+- `session_id`
+- `sequence_no`
+- `restore_from_run_id`
 - `status`
 - `trigger_type`
 - `profile_name`
 - `project_id`
-- `input_text`
+- `input_preview`
 - `output_summary`
 - `error_message`
+- `termination_reason`
 - `created_at`
 - `started_at`
 - `finished_at`
+- `committed_at`
 
-### Run Scheduling Model
+### Status Semantics in API
 
-- foreground runs execute within the single-node process
-- background work stays attached to the same runtime and surfaces through run status and events
-- task coordination stays in process memory
-- schedule dispatch and bridge ingress both create runs through the same execution path
+- `queued` means accepted and durable, waiting to be claimed
+- `running` means claimed by the supervisor and currently executing
+- `completed`, `failed`, and `cancelled` are terminal states
 
-## Schedules
+## GET Response Shape
 
-| Method  | Path                                      | Purpose                       |
-| ------- | ----------------------------------------- | ----------------------------- |
-| `POST`  | `/api/v1/schedules`                       | create session schedule       |
-| `GET`   | `/api/v1/schedules`                       | list schedules                |
-| `GET`   | `/api/v1/schedules/{schedule_id}`         | inspect schedule              |
-| `PATCH` | `/api/v1/schedules/{schedule_id}`         | update schedule               |
-| `POST`  | `/api/v1/schedules/{schedule_id}/enable`  | enable schedule               |
-| `POST`  | `/api/v1/schedules/{schedule_id}/disable` | disable schedule              |
-| `POST`  | `/api/v1/schedules/{schedule_id}/trigger` | trigger schedule immediately  |
-| `GET`   | `/api/v1/schedules/{schedule_id}/runs`    | list runs created by schedule |
+Session and run GET endpoints should return the structured record plus committed blobs.
 
-## Bridges
+### Session GET
 
-| Method | Path                                       | Purpose                         |
-| ------ | ------------------------------------------ | ------------------------------- |
-| `GET`  | `/api/v1/bridges`                          | list bridge endpoints           |
-| `GET`  | `/api/v1/bridges/{bridge_id}`              | inspect bridge endpoint         |
-| `POST` | `/api/v1/bridges/{bridge_id}/dispatch`     | ingest channel event or message |
-| `GET`  | `/api/v1/bridges/{bridge_id}/events`       | stream bridge runtime events    |
-| `POST` | `/api/v1/bridges/{bridge_id}/task-relay`   | submit async bridge work        |
-| `POST` | `/api/v1/bridges/{bridge_id}/stream-relay` | start foreground bridge relay   |
-
-### Bridge Request Model
-
-A bridge dispatch request should carry:
-
-- bridge endpoint identity
-- source platform event payload
-- target relay mode
-- session routing policy
-- opaque `project_id` or project-selection metadata
-- optional reply target metadata
-
-## Events
-
-| Method | Path                                   | Purpose                                |
-| ------ | -------------------------------------- | -------------------------------------- |
-| `GET`  | `/api/v1/events/runs/{run_id}`         | stream live run events                 |
-| `GET`  | `/api/v1/events/sessions/{session_id}` | stream session timeline                |
-| `GET`  | `/api/v1/events/agui/{session_id}`     | stream AGUI-aligned session event flow |
-
-## Request Model
-
-A run request should carry:
-
-- session creation or continuation intent
-- selected profile when profiles are runtime-managed
-- opaque `project_id`
-- input payload parts
-- request metadata for project resolution and delivery
-- optional transport override
-
-### Request Design Principle
-
-YA Claw consumes `project_id` and metadata.
-YA Claw does not need project CRUD endpoints.
-
-## Custom Toolset Mapping
-
-The API should support a future YA Claw client toolset for start, inspect, and cross-session continuation workflows.
-
-A clean first mapping is:
-
-- `start_conversation` -> `POST /api/v1/runs`
-- `list_sessions` -> `GET /api/v1/sessions`
-- `get_session` -> `GET /api/v1/sessions/{session_id}`
-- `list_session_runs` -> `GET /api/v1/sessions/{session_id}/runs`
-- `get_run` -> `GET /api/v1/runs/{run_id}`
-- `get_session_state` -> `GET /api/v1/sessions/{session_id}/state`
-- `get_session_message` -> `GET /api/v1/sessions/{session_id}/message`
-
-This shape lets an agent implement query and continuation tools similar in spirit to `spawn_delegate`, with the difference that YA Claw targets durable session and run records across process boundaries.
-
-## API Style
-
-- `GET` for pure reads
-- `POST` or `PATCH` for mutations
-- SSE for browser-native live delivery, AGUI-aligned session events, and bridge stream relay
-
-## Error Envelope
-
-Suggested error shape:
+`GET /api/v1/sessions/{session_id}?include_message=true`
 
 ```json
 {
-  "error": {
-    "code": "project_resolution_failed",
-    "message": "The runtime could not resolve the requested execution scope.",
-    "details": {}
-  }
+  "session": {
+    "id": "session_123",
+    "head_run_id": "run_3",
+    "head_success_run_id": "run_2",
+    "active_run_id": "run_3",
+    "recent_runs": []
+  },
+  "state": {},
+  "message": {}
 }
 ```
+
+### Run GET
+
+`GET /api/v1/runs/{run_id}?include_message=true`
+
+```json
+{
+  "run": {
+    "id": "run_2",
+    "session_id": "session_123",
+    "restore_from_run_id": "run_1",
+    "input_parts": [],
+    "has_state": true,
+    "has_message": true
+  },
+  "state": {},
+  "message": {}
+}
+```
+
+## Control Endpoints
+
+Control endpoints stay flat and explicit.
+
+Recommended shape:
+
+- `POST /sessions/{session_id}/steer`
+- `POST /sessions/{session_id}/interrupt`
+- `POST /sessions/{session_id}/cancel`
+- `POST /runs/{run_id}/steer`
+- `POST /runs/{run_id}/interrupt`
+- `POST /runs/{run_id}/cancel`
+
+Session control routes to `active_run_id`.
+Run control routes to the addressed run.
+
+## Event Streaming
+
+Event streaming uses SSE.
+
+### Replay Contract
+
+- each event has a monotonic SSE ID
+- reconnect uses `Last-Event-ID`
+- the server replays buffered events after that cursor
+- the server then tails live events
+
+### Transport Principle
+
+The single-node baseline keeps the event buffer in memory.
+Queued-run creation and active execution are separate concerns.
+SSE reflects active or recently buffered execution, not the act of durable creation itself.
+
+## Future Profile API
+
+YA Claw should eventually expose profile management and seed sync APIs.
+The profile records remain durable database state even when seeded from YAML.
 
 ## Authentication
 
 The single-node baseline uses one shared bearer token configured through `YA_CLAW_API_TOKEN`.
 Every HTTP route except `/healthz` sends `Authorization: Bearer <token>`.
-
-Authentication stays orthogonal to session, run, schedule, and bridge structure.

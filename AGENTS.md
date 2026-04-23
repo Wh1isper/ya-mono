@@ -56,6 +56,21 @@ Most architecture work in this repository targets `packages/ya-agent-sdk` and `p
 - implementation style: organize runtime code by `api/`, `controller/`, and `orm/`
 - internal data objects use Pydantic `BaseModel`
 - code prefers explicit typing and `isinstance` checks
+- session API is the high-level surface and run API is the low-level surface
+- session metadata lives in the database
+- committed continuity blobs live in `run-store/{run_id}/state.json` and `run-store/{run_id}/message.json`
+- `message.json` stores the compacted replay list of AGUI-aligned events as a top-level JSON array
+- session GET exposes paginated runs with optional compacted message replay lists and derives session status from the latest run
+- run GET returns `session + run + optional state + optional message`
+- session GET reads committed state through `head_success_run_id`
+- rerun can explicitly target failed or interrupted runs through `restore_from_run_id`
+- input payloads use `input_parts` rather than a single `input_text`
+- foundational execution modules live under `ya_claw/execution/`
+- workspace provider modules live under `ya_claw/workspace/`
+- `LocalWorkspaceProvider` uses `VirtualLocalFileOperator` plus `LocalShell`
+- `DockerWorkspaceProvider` uses Docker mounts through `SandboxEnvironment`
+- built-in run orchestration lives in `ya_claw/execution/coordinator.py`
+- built-in coordinator auto-dispatches only when `YA_CLAW_EXECUTION_MODEL` is configured
 
 ### `packages/ya-agent-platform`
 
