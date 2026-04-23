@@ -16,7 +16,7 @@ from typing import Any, cast
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, ModelSettings, ThinkingPart, ToolOutput, UserContent
+from pydantic_ai import Agent, AgentRunResult, ModelSettings, ThinkingPart, ToolOutput, UserContent
 from pydantic_ai.messages import (
     BinaryContent,
     ImageUrl,
@@ -590,6 +590,46 @@ def condense_result_to_markdown(result: CondenseResult) -> str:
 """
 
 
+async def _run_compact_iter(
+    agent: Agent[AgentContext, CondenseResult],
+    *,
+    prompt: str,
+    message_history: list[ModelMessage],
+    deps: AgentContext,
+) -> AgentRunResult[CondenseResult]:
+    """Run compact using the agent iterator path.
+
+    Args:
+        agent: Compact agent instance.
+        prompt: Prompt sent to the compact agent.
+        message_history: Trimmed history to summarize.
+        deps: Fresh context for the compact run.
+
+    Returns:
+        AgentRunResult from the compact execution.
+
+    Raises:
+        RuntimeError: If the iterator completes without a final result.
+    """
+    async with agent.iter(
+        prompt,
+        message_history=message_history,
+        deps=deps,
+    ) as run:
+        async for node in run:
+            if Agent.is_user_prompt_node(node) or Agent.is_end_node(node):
+                continue
+            elif Agent.is_model_request_node(node) or Agent.is_call_tools_node(node):
+                async with node.stream(run.ctx) as request_stream:
+                    async for _ in request_stream:
+                        pass
+
+    if run.result is None:
+        raise RuntimeError("Compact iteration completed without a result")
+
+    return run.result
+
+
 def _need_compact(ctx: AgentContext, message_history: list[ModelMessage]) -> bool:
     """Check if compaction is needed based on token usage threshold.
 
@@ -748,10 +788,12 @@ def create_compact_filter(
             )
 
             # Run compact agent on trimmed message history with AgentContext as deps
-            result = await agent.run(
-                DEFAULT_COMPACT_INSTRUCTION,
+            result = await _run_compact_iter(
+                agent,
+                prompt=DEFAULT_COMPACT_INSTRUCTION,
                 message_history=trimmed_history,
                 deps=AgentContext(
+                    env=agent_ctx.env,
                     model_cfg=model_cfg or ModelConfig(),
                 ),
             )

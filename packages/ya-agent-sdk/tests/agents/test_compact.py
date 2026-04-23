@@ -1,5 +1,8 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
+from unittest.mock import MagicMock
 
+import pytest
 from pydantic_ai import ThinkingPart
 from pydantic_ai.messages import (
     BinaryContent,
@@ -13,11 +16,14 @@ from pydantic_ai.messages import (
     UserPromptPart,
     VideoUrl,
 )
+from pydantic_ai.usage import RunUsage
+from ya_agent_sdk.agents import compact as compact_module
 from ya_agent_sdk.agents.compact import (
     _COMPACT_STRIP_KEYS,
     _DEFAULT_INJECTED_TAGS,
     _INCOMPATIBLE_BETAS,
     _MAX_TOOL_RETURN_CHARS,
+    CondenseResult,
     _find_last_user_turn_index,
     _is_media_content,
     _media_to_placeholder,
@@ -25,8 +31,10 @@ from ya_agent_sdk.agents.compact import (
     _strip_injected_context,
     _trim_history_for_compact,
     _truncate_str,
+    create_compact_filter,
 )
 from ya_agent_sdk.agents.main import create_agent
+from ya_agent_sdk.context import AgentContext, ModelConfig
 from ya_agent_sdk.context.agent import PROJECT_GUIDANCE_TAG, USER_RULES_TAG
 from ya_agent_sdk.environment.local import LocalEnvironment
 from ya_agent_sdk.filters.auto_load_files import process_auto_load_files
@@ -1093,3 +1101,125 @@ def test_trim_history_truncates_untagged_tool_return() -> None:
     assert len(tool_returns) == 1
     # Should be truncated (original was 1000 chars, max is 500)
     assert len(tool_returns[0].model_response_str()) < len(long_content)
+
+
+class _FakeCompactResult:
+    def __init__(self, output: CondenseResult, usage: RunUsage) -> None:
+        self.output = output
+        self._usage = usage
+
+    def usage(self) -> RunUsage:
+        return self._usage
+
+
+class _FakeCompactRun:
+    def __init__(self, result: _FakeCompactResult) -> None:
+        self.result = result
+        self._yielded = False
+
+    async def __aenter__(self) -> "_FakeCompactRun":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool | None:
+        return None
+
+    def __aiter__(self) -> "_FakeCompactRun":
+        return self
+
+    async def __anext__(self):
+        if self._yielded:
+            raise StopAsyncIteration
+        self._yielded = True
+        return object()
+
+
+@pytest.mark.asyncio
+async def test_compact_filter_uses_agent_iter_and_records_usage(agent_context: AgentContext, monkeypatch):
+    message_history = [
+        ModelRequest(parts=[UserPromptPart(content="hello")]),
+        ModelResponse(parts=[TextPart(content="world")]),
+    ]
+    agent_context.model_cfg = ModelConfig(context_window=10, compact_threshold=0.1)
+    agent_context.user_prompts = "hello"
+    object.__setattr__(agent_context, "_stream_queue_enabled", True)
+
+    mock_run_ctx = MagicMock()
+    mock_run_ctx.deps = agent_context
+
+    condense_result = CondenseResult(
+        analysis="analysis",
+        context="context",
+        original_prompt="hello",
+        auto_load_files=["packages/ya-agent-sdk/README.md"],
+    )
+    run_result = _FakeCompactResult(
+        output=condense_result,
+        usage=RunUsage(input_tokens=3, output_tokens=5, requests=1),
+    )
+
+    fake_agent = MagicMock()
+    fake_agent.model = MagicMock(model_name="test-model")
+    fake_agent.iter.return_value = _FakeCompactRun(run_result)
+
+    monkeypatch.setattr(compact_module, "get_compact_agent", lambda **kwargs: fake_agent)
+    monkeypatch.setattr(compact_module, "_need_compact", lambda *_args, **_kwargs: True)
+
+    compact_filter = create_compact_filter(model_cfg=agent_context.model_cfg)
+    compacted = await compact_filter(mock_run_ctx, message_history)
+
+    fake_agent.iter.assert_called_once()
+    call_args = fake_agent.iter.call_args
+    assert call_args.args[0] == compact_module.DEFAULT_COMPACT_INSTRUCTION
+    assert call_args.kwargs["message_history"] == message_history
+    compact_deps = call_args.kwargs["deps"]
+    assert isinstance(compact_deps, AgentContext)
+    assert compact_deps.env is agent_context.env
+    assert compact_deps.model_cfg == agent_context.model_cfg
+
+    assert len(compacted) == 3
+    assert agent_context.auto_load_files == ["packages/ya-agent-sdk/README.md"]
+    assert agent_context.force_inject_instructions is True
+    assert len(agent_context.extra_usages) == 1
+    assert agent_context.extra_usages[0].agent == "compact"
+    assert agent_context.extra_usages[0].model_id == "test-model"
+
+    queue = agent_context.agent_stream_queues[agent_context.agent_id]
+    events = []
+    while not queue.empty():
+        events.append(queue.get_nowait())
+    assert [event.__class__.__name__ for event in events] == ["CompactStartEvent", "CompactCompleteEvent"]
+
+
+@pytest.mark.asyncio
+async def test_compact_filter_returns_original_history_when_iter_fails(agent_context: AgentContext, monkeypatch):
+    message_history = [
+        ModelRequest(parts=[UserPromptPart(content="hello")]),
+        ModelResponse(parts=[TextPart(content="world")]),
+    ]
+    agent_context.model_cfg = ModelConfig(context_window=10, compact_threshold=0.1)
+    object.__setattr__(agent_context, "_stream_queue_enabled", True)
+
+    mock_run_ctx = MagicMock()
+    mock_run_ctx.deps = agent_context
+
+    fake_agent = MagicMock()
+    fake_agent.model = MagicMock(model_name="test-model")
+
+    @asynccontextmanager
+    async def _failing_iter(*args, **kwargs):
+        raise RuntimeError("iter failed")
+        yield
+
+    fake_agent.iter.side_effect = _failing_iter
+    monkeypatch.setattr(compact_module, "get_compact_agent", lambda **kwargs: fake_agent)
+    monkeypatch.setattr(compact_module, "_need_compact", lambda *_args, **_kwargs: True)
+
+    compact_filter = create_compact_filter(model_cfg=agent_context.model_cfg)
+    result = await compact_filter(mock_run_ctx, message_history)
+
+    assert result == message_history
+    queue = agent_context.agent_stream_queues[agent_context.agent_id]
+    events = []
+    while not queue.empty():
+        events.append(queue.get_nowait())
+    assert [event.__class__.__name__ for event in events] == ["CompactStartEvent", "CompactFailedEvent"]
