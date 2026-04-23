@@ -2199,9 +2199,11 @@ class TUIApp:
             else:
                 self._track_managed_task(asyncio.create_task(self._handle_bracketed_paste(pasted_text, input_area)))
 
-        @kb.add("c-v")
+        @kb.add("c-v", eager=True)
         def handle_paste_image(event: KeyPressEvent) -> None:
             """Attach an image from the system clipboard."""
+            # Use eager matching so this app-level binding wins over prompt_toolkit's
+            # default buffer/control Ctrl+V handlers on macOS terminals.
             if self._app:
                 self._app.create_background_task(self._paste_clipboard_image())
             else:
