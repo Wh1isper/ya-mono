@@ -616,8 +616,13 @@ async def _run_compact_iter(
         message_history=message_history,
         deps=deps,
     ) as run:
-        async for _node in run:
-            pass
+        async for node in run:
+            if Agent.is_user_prompt_node(node) or Agent.is_end_node(node):
+                continue
+            elif Agent.is_model_request_node(node) or Agent.is_call_tools_node(node):
+                async with node.stream(run.ctx) as request_stream:
+                    async for _ in request_stream:
+                        pass
 
     if run.result is None:
         raise RuntimeError("Compact iteration completed without a result")
