@@ -30,9 +30,24 @@ from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from ya_agent_sdk.mcp import MCPServerSpec
+from ya_agent_sdk.mcp import MCPConfig, MCPServerConfig, load_mcp_config_file
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+
+__all__ = [
+    "CommandDefinition",
+    "ConfigManager",
+    "EnvSettings",
+    "GeneralConfig",
+    "MCPConfig",
+    "MCPServerConfig",
+    "SubagentOverride",
+    "SubagentsConfig",
+    "ToolsConfig",
+    "YaacliConfig",
+    "get_config_manager",
+    "load_config",
+]
 
 # =============================================================================
 # Configuration Models
@@ -160,59 +175,6 @@ DEFAULT_COMMANDS: dict[str, CommandDefinition] = {
         description="Initialize AGENTS.md",
     ),
 }
-
-
-class MCPServerConfig(MCPServerSpec):
-    """MCP server configuration.
-
-    Inherits from SDK's MCPServerSpec. CLI-specific fields can be added here.
-    """
-
-    description: str = ""
-    """Human-readable description of this MCP server's purpose.
-
-    Used as namespace description when MCP servers are wrapped in ToolSearchToolSet.
-    If empty, falls back to MCP server's instructions or auto-generated description.
-
-    Example in mcp.json::
-
-        {
-            "servers": {
-                "filesystem": {
-                    "command": "uvx",
-                    "args": ["mcp-server-filesystem"],
-                    "description": "File system operations (read, write, search)"
-                }
-            }
-        }
-    """
-
-    required: bool = True
-    """Whether this server is required for startup.
-
-    If True (default), connection failure will prevent the application from
-    starting. If False, the server will be skipped with a warning when it
-    fails to connect.
-
-    Example in mcp.json::
-
-        {
-            "servers": {
-                "context7": {
-                    "transport": "streamable_http",
-                    "url": "https://mcp.context7.com/mcp",
-                    "required": false
-                }
-            }
-        }
-    """
-
-
-class MCPConfig(BaseModel):
-    """MCP configuration from mcp.json."""
-
-    servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
-    """MCP server configurations."""
 
 
 class S3Config(BaseModel):
@@ -507,20 +469,12 @@ class ConfigManager:
         # Check project first
         project_mcp = self._project_dir / self.PROJECT_CONFIG_DIR / "mcp.json"
         if project_mcp.exists():
-            import json
-
-            with open(project_mcp) as f:
-                data = json.load(f)
-            return MCPConfig.model_validate(data)
+            return load_mcp_config_file(project_mcp)
 
         # Fall back to global
         global_mcp = self._config_dir / "mcp.json"
         if global_mcp.exists():
-            import json
-
-            with open(global_mcp) as f:
-                data = json.load(f)
-            return MCPConfig.model_validate(data)
+            return load_mcp_config_file(global_mcp)
 
         return None
 

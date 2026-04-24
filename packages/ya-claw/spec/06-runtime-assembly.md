@@ -26,10 +26,12 @@ Suggested fields:
 - `model_settings`
 - `model_config`
 - `system_prompt`
-- `toolsets`
+- `builtin_toolsets`
 - `subagent_configs`
 - `need_user_approve_tools`
 - `need_user_approve_mcps`
+- `enabled_mcps`
+- `disabled_mcps`
 - `workspace_backend_hint`
 - `metadata`
 
@@ -152,8 +154,9 @@ Recommended context construction inputs:
 - pass the concrete environment into `create_agent`
 - use `context_type=ClawAgentContext`
 - inject restored `ResumableState` when present
-- attach SDK toolsets from profile resolution
-- attach approval policy
+- attach builtin tools from profile resolution
+- attach runtime-wide MCP toolsets from the active MCP JSON file
+- apply profile MCP filters and approval policy
 - attach subagent configs
 - construct system prompt or template variables from resolved profile and binding
 

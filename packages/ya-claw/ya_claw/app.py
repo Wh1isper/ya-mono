@@ -17,6 +17,7 @@ from ya_claw.api.sessions import router as sessions_router
 from ya_claw.config import ClawSettings, get_settings
 from ya_claw.db.engine import create_engine, create_session_factory
 from ya_claw.execution import ClawRuntimeBuilder, ExecutionSupervisor, ProfileResolver
+from ya_claw.mcp import ClawMCPConfigResolver
 from ya_claw.runtime_state import InMemoryRuntimeState, create_runtime_state
 from ya_claw.workspace import (
     DefaultEnvironmentFactory,
@@ -49,6 +50,7 @@ class ClawApplication:
         app.state.workspace_provider = None
         app.state.environment_factory = None
         app.state.profile_resolver = None
+        app.state.mcp_config_resolver = None
         app.state.runtime_builder = None
         app.state.execution_supervisor = None
 
@@ -94,9 +96,13 @@ class ClawApplication:
                 settings=self.settings,
                 session_factory=app.state.db_session_factory,
             )
+            app.state.mcp_config_resolver = ClawMCPConfigResolver(settings=self.settings)
             if self.settings.auto_seed_profiles:
                 await app.state.profile_resolver.seed_profiles()
-            app.state.runtime_builder = ClawRuntimeBuilder(settings=self.settings)
+            app.state.runtime_builder = ClawRuntimeBuilder(
+                settings=self.settings,
+                mcp_config_resolver=app.state.mcp_config_resolver,
+            )
 
         if (
             isinstance(app.state.runtime_state, InMemoryRuntimeState)
@@ -125,6 +131,7 @@ class ClawApplication:
             app.state.workspace_provider = None
             app.state.environment_factory = None
             app.state.profile_resolver = None
+            app.state.mcp_config_resolver = None
             app.state.runtime_builder = None
             app.state.execution_supervisor = None
 

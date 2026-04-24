@@ -34,6 +34,7 @@ from pydantic_ai import DeferredToolRequests, ModelSettings
 from pydantic_ai.output import OutputSpec
 from ya_agent_sdk.agents.main import AgentRuntime, create_agent
 from ya_agent_sdk.context import ModelCapability, ModelConfig, ToolConfig
+from ya_agent_sdk.mcp import build_mcp_servers, extract_mcp_descriptions, extract_optional_mcps
 from ya_agent_sdk.presets import resolve_model_cfg, resolve_model_settings
 from ya_agent_sdk.subagents import SubagentConfig, load_subagents_from_dir
 from ya_agent_sdk.toolsets.core.base import BaseTool
@@ -55,7 +56,6 @@ from yaacli.config import ConfigManager, MCPConfig, SubagentsConfig, YaacliConfi
 from yaacli.environment import TUIEnvironment
 from yaacli.guards import attach_loop_guard
 from yaacli.logging import get_logger
-from yaacli.mcp import build_mcp_servers, extract_mcp_descriptions, extract_optional_mcps
 from yaacli.session import TUIContext
 from yaacli.toolsets.background import background_tools
 
@@ -173,6 +173,7 @@ def create_tui_runtime(
     *,
     working_dir: Path | None = None,
     system_prompt: str | None = None,
+    config_dir: Path | None = None,
 ) -> AgentRuntime[TUIContext, str | DeferredToolRequests, TUIEnvironment]:
     """Create AgentRuntime configured for TUI.
 
@@ -191,6 +192,7 @@ def create_tui_runtime(
             its toolset will be included.
         working_dir: Working directory for the environment. Defaults to cwd.
         system_prompt: Custom system prompt. If None, uses default.
+        config_dir: Global config directory used for subagents and allowed paths.
 
     Returns:
         AgentRuntime configured for TUI usage. Use as async context manager.
@@ -243,9 +245,9 @@ def create_tui_runtime(
     # Include ~/.agents for shared skills following the Agent Skills open standard.
     # Order matters for skill priority (later = higher priority):
     #   ~/.agents < ~/.yaacli < project dir
-    global_config_dir = ConfigManager.DEFAULT_CONFIG_DIR
+    global_config_dir = config_dir or ConfigManager.DEFAULT_CONFIG_DIR
     # Ensure .gitignore exists in config dir to keep session data out of file tree context
-    ConfigManager().ensure_config_dir()
+    ConfigManager(config_dir=global_config_dir).ensure_config_dir()
     shared_agents_dir = Path.home() / ".agents"
     env_kwargs: dict[str, Any] = {}
     if working_dir:
@@ -311,7 +313,7 @@ def create_tui_runtime(
         logger.debug("MCP servers requiring approval: %s", config.tools.need_approval_mcps)
 
     # Load subagent configs from user config directory
-    subagent_configs = _load_subagent_configs(config.subagents)
+    subagent_configs = _load_subagent_configs(config.subagents, config_dir=global_config_dir)
 
     # Core tools
     core_tools: list[type[BaseTool]] = [

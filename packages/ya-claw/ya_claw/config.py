@@ -66,6 +66,8 @@ class ClawSettings(BaseSettings):
     default_profile: str = "default"
     profile_seed_file: Path | None = None
     auto_seed_profiles: bool = False
+    mcp_config_file: Path | None = None
+    project_mcp_config_path: str = ".ya-claw/mcp.json"
     execution_model: str | None = None
     execution_model_settings_preset: str | None = None
     execution_model_config_preset: str | None = None
@@ -91,6 +93,22 @@ class ClawSettings(BaseSettings):
         if self.profile_seed_file is None:
             return None
         return self.profile_seed_file.expanduser()
+
+    @property
+    def resolved_mcp_config_file(self) -> Path:
+        if self.mcp_config_file is not None:
+            return self.mcp_config_file.expanduser()
+        return self.runtime_root / "mcp.json"
+
+    @property
+    def resolved_project_mcp_config_path(self) -> Path | None:
+        normalized_value = self.project_mcp_config_path.strip()
+        if normalized_value == "":
+            return None
+        resolved_path = Path(normalized_value)
+        if resolved_path.is_absolute():
+            raise ValueError("YA_CLAW_PROJECT_MCP_CONFIG_PATH must be a relative path inside each workspace.")
+        return resolved_path
 
     @property
     def run_store_dir(self) -> Path:

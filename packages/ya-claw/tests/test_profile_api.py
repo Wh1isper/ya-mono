@@ -21,6 +21,8 @@ def clear_claw_settings(monkeypatch, tmp_path: Path) -> None:
         "YA_CLAW_WORKSPACE_ROOT",
         "YA_CLAW_PROFILE_SEED_FILE",
         "YA_CLAW_AUTO_SEED_PROFILES",
+        "YA_CLAW_MCP_CONFIG_FILE",
+        "YA_CLAW_PROJECT_MCP_CONFIG_PATH",
     ):
         monkeypatch.delenv(env_name, raising=False)
 
@@ -62,6 +64,8 @@ profiles:
     model: gateway@openai-responses:gpt-5.4
     model_settings_preset: openai_responses_high
     model_config_preset: gpt5_270k
+    builtin_toolsets: [core, web]
+    enabled_mcps: [context7]
     unified_subagents: true
     subagents:
       - name: explorer
@@ -81,6 +85,9 @@ profiles:
                 "model_settings_preset": "openai_responses_high",
                 "model_config_preset": "gpt5_270k",
                 "toolsets": ["filesystem", "shell"],
+                "need_user_approve_mcps": ["context7"],
+                "enabled_mcps": ["context7", "github"],
+                "disabled_mcps": ["github"],
                 "subagents": [
                     {
                         "name": "debugger",
@@ -97,6 +104,11 @@ profiles:
         )
         assert put_response.status_code == 200
         assert put_response.json()["name"] == "custom"
+        assert put_response.json()["builtin_toolsets"] == ["filesystem", "shell"]
+        assert put_response.json()["toolsets"] == ["filesystem", "shell"]
+        assert put_response.json()["need_user_approve_mcps"] == ["context7"]
+        assert put_response.json()["enabled_mcps"] == ["context7", "github"]
+        assert put_response.json()["disabled_mcps"] == ["github"]
 
         list_response = client.get("/api/v1/profiles", headers=_auth_headers())
         assert list_response.status_code == 200
@@ -107,6 +119,8 @@ profiles:
         assert get_response.json()["unified_subagents"] is True
         assert get_response.json()["subagents"][0]["name"] == "debugger"
         assert get_response.json()["subagents"][0]["model"] == "inherit"
+        assert get_response.json()["builtin_toolsets"] == ["filesystem", "shell"]
+        assert get_response.json()["toolsets"] == ["filesystem", "shell"]
 
         seed_response = client.post(
             "/api/v1/profiles/seed",
@@ -123,6 +137,8 @@ profiles:
         seeded_get_response = client.get("/api/v1/profiles/seeded", headers=_auth_headers())
         assert seeded_get_response.status_code == 200
         assert seeded_get_response.json()["subagents"][0]["name"] == "explorer"
+        assert seeded_get_response.json()["builtin_toolsets"] == ["core", "web"]
+        assert seeded_get_response.json()["enabled_mcps"] == ["context7"]
 
         delete_response = client.delete("/api/v1/profiles/custom", headers=_auth_headers())
         assert delete_response.status_code == 204

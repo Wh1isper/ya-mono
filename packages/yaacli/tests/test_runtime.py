@@ -38,6 +38,23 @@ def test_create_tui_runtime_minimal(tmp_path: Path) -> None:
     assert runtime.agent is not None
 
 
+async def test_create_tui_runtime_uses_custom_config_dir_for_allowed_paths(tmp_path: Path) -> None:
+    """Test runtime wiring with a custom global config directory."""
+    config = YaacliConfig(
+        general=GeneralConfig(model="openai:gpt-4"),
+    )
+    config_dir = tmp_path / "custom-config"
+
+    runtime = create_tui_runtime(
+        config=config,
+        working_dir=tmp_path,
+        config_dir=config_dir,
+    )
+
+    async with runtime:
+        assert config_dir.resolve() in runtime.env.file_operator._allowed_paths
+
+
 def test_create_tui_runtime_with_model_settings(tmp_path: Path) -> None:
     """Test creating runtime with model settings preset."""
     # Use openai which is more commonly mocked in tests

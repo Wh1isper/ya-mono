@@ -439,6 +439,7 @@ class TUIApp:
             mcp_config=mcp_config,
             browser_manager=self._browser,
             working_dir=self.working_dir,
+            config_dir=self.config_manager.config_dir,
         )
         await self._exit_stack.enter_async_context(self._runtime)
 

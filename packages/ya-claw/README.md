@@ -69,14 +69,18 @@ Set `YA_CLAW_PROFILE_SEED_FILE` plus `YA_CLAW_AUTO_SEED_PROFILES=true` when you 
 Set `YA_CLAW_EXECUTION_MODEL` when you want runs to auto-dispatch through the built-in coordinator.
 Without that setting, created runs stay queued until another execution path picks them up.
 
-Profile and coordinator settings:
+Profile, MCP, and coordinator settings:
 
 - `YA_CLAW_PROFILE_SEED_FILE=packages/ya-claw/profiles.yaml`
 - `YA_CLAW_AUTO_SEED_PROFILES=true`
 - `YA_CLAW_DEFAULT_PROFILE=default`
+- `YA_CLAW_MCP_CONFIG_FILE=~/.ya-claw/mcp.json`
+- `YA_CLAW_PROJECT_MCP_CONFIG_PATH=.ya-claw/mcp.json`
 - `YA_CLAW_WORKSPACE_PROVIDER_BACKEND=local|docker`
 - `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE=python:3.11`
 - `YA_CLAW_EXECUTION_CONTEXT_WINDOW=200000`
+
+Profiles store model, prompt, builtin tool groups, subagents, approval policy, and MCP namespace filters. Runtime-wide MCP server definitions load from `~/.ya-claw/mcp.json` with per-workspace override at `.ya-claw/mcp.json`. Every YA Claw agent runtime receives the active MCP configuration through `ToolProxyToolset`, and each profile can narrow that surface with `enabled_mcps` and `disabled_mcps`.
 
 Profiles can be managed through:
 

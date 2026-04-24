@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 from ya_claw.orm.tables import RunRecord, SessionRecord
 
@@ -245,12 +245,17 @@ class ProfileUpsertRequest(BaseModel):
     model_config_preset: str | None = None
     model_config_override: dict[str, Any] | None = None
     system_prompt: str | None = None
-    toolsets: list[str] = Field(default_factory=list)
+    builtin_toolsets: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("builtin_toolsets", "toolsets"),
+    )
     subagents: list[ProfileSubagent] = Field(default_factory=list)
     include_builtin_subagents: bool = False
     unified_subagents: bool = False
     need_user_approve_tools: list[str] = Field(default_factory=list)
     need_user_approve_mcps: list[str] = Field(default_factory=list)
+    enabled_mcps: list[str] = Field(default_factory=list)
+    disabled_mcps: list[str] = Field(default_factory=list)
     workspace_backend_hint: str | None = None
     enabled: bool = True
     source_type: str | None = None
@@ -274,12 +279,15 @@ class ProfileDetail(ProfileSummary):
     model_config_preset: str | None = None
     model_config_override: dict[str, Any] | None = None
     system_prompt: str | None = None
+    builtin_toolsets: list[str] = Field(default_factory=list)
     toolsets: list[str] = Field(default_factory=list)
     subagents: list[ProfileSubagent] = Field(default_factory=list)
     include_builtin_subagents: bool = False
     unified_subagents: bool = False
     need_user_approve_tools: list[str] = Field(default_factory=list)
     need_user_approve_mcps: list[str] = Field(default_factory=list)
+    enabled_mcps: list[str] = Field(default_factory=list)
+    disabled_mcps: list[str] = Field(default_factory=list)
     source_checksum: str | None = None
     created_at: datetime
 
