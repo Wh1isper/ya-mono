@@ -66,6 +66,10 @@ from ya_agent_sdk.presets import (
     ANTHROPIC_MEDIUM_INTERLEAVED_THINKING,
     ANTHROPIC_OFF,
     ANTHROPIC_OFF_INTERLEAVED_THINKING,
+    DEEPSEEK_V4_DEFAULT,
+    DEEPSEEK_V4_HIGH,
+    DEEPSEEK_V4_MAX,
+    DEEPSEEK_V4_OFF,
     INHERIT,
     OPENAI_DEFAULT,
     OPENAI_HIGH,
@@ -350,6 +354,20 @@ def test_openai_responses_presets_structure() -> None:
         assert "openai_reasoning_summary" in preset
 
 
+def test_deepseek_v4_presets_structure() -> None:
+    """Test that DeepSeek V4 presets have expected structure."""
+    for preset in [DEEPSEEK_V4_DEFAULT, DEEPSEEK_V4_HIGH, DEEPSEEK_V4_MAX]:
+        assert preset["extra_body"] == {"thinking": {"type": "enabled"}}
+        assert preset["openai_reasoning_effort"] in {"high", "max"}
+        assert "max_tokens" in preset
+
+    assert DEEPSEEK_V4_DEFAULT == DEEPSEEK_V4_HIGH
+    assert DEEPSEEK_V4_HIGH["openai_reasoning_effort"] == "high"
+    assert DEEPSEEK_V4_MAX["openai_reasoning_effort"] == "max"
+    assert DEEPSEEK_V4_OFF["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert "openai_reasoning_effort" not in DEEPSEEK_V4_OFF
+
+
 def test_get_model_settings_by_enum() -> None:
     """Test getting model settings by enum."""
     settings = get_model_settings(ModelSettingsPreset.ANTHROPIC_HIGH)
@@ -368,6 +386,9 @@ def test_get_model_settings_by_enum() -> None:
     settings_1m_interleaved = get_model_settings(ModelSettingsPreset.ANTHROPIC_1M_HIGH_INTERLEAVED_THINKING)
     assert settings_1m_interleaved == ANTHROPIC_1M_HIGH_INTERLEAVED_THINKING
 
+    settings_deepseek = get_model_settings(ModelSettingsPreset.DEEPSEEK_V4_MAX)
+    assert settings_deepseek == DEEPSEEK_V4_MAX
+
 
 def test_get_model_settings_by_string() -> None:
     """Test getting model settings by string name."""
@@ -380,6 +401,9 @@ def test_get_model_settings_by_string() -> None:
     # Test 1M preset
     settings_1m = get_model_settings("anthropic_1m_high")
     assert settings_1m == ANTHROPIC_1M_HIGH
+
+    settings_deepseek = get_model_settings("deepseek_v4_max")
+    assert settings_deepseek == DEEPSEEK_V4_MAX
 
 
 def test_get_model_settings_by_alias() -> None:
@@ -423,6 +447,12 @@ def test_get_model_settings_by_alias() -> None:
 
     settings = get_model_settings("openai")
     assert settings == OPENAI_DEFAULT
+
+    settings = get_model_settings("deepseek")
+    assert settings == DEEPSEEK_V4_DEFAULT
+
+    settings = get_model_settings("deepseek_v4")
+    assert settings == DEEPSEEK_V4_DEFAULT
 
 
 def test_get_model_settings_invalid() -> None:
@@ -531,6 +561,12 @@ def test_list_presets() -> None:
         "anthropic_medium_interleaved_thinking",
         "anthropic_off",
         "anthropic_off_interleaved_thinking",
+        "deepseek",
+        "deepseek_v4",
+        "deepseek_v4_default",
+        "deepseek_v4_high",
+        "deepseek_v4_max",
+        "deepseek_v4_off",
         "gemini",
         "gemini_2.5",
         "gemini_3",
@@ -714,6 +750,14 @@ def test_model_cfg_presets_structure() -> None:
     assert cfg_gpt_1m["image_split_max_height"] == 4096
     assert cfg_gpt_1m["image_split_overlap"] == 50
 
+    cfg_deepseek_v4_1m = get_model_cfg("deepseek_v4_1m")
+    assert cfg_deepseek_v4_1m["context_window"] == 1_000_000
+    assert cfg_deepseek_v4_1m["max_images"] == 0
+    assert cfg_deepseek_v4_1m["max_videos"] == 0
+    assert cfg_deepseek_v4_1m["split_large_images"] is False
+    assert cfg_deepseek_v4_1m["image_split_max_height"] == 4096
+    assert cfg_deepseek_v4_1m["image_split_overlap"] == 50
+
 
 def test_model_cfg_capabilities() -> None:
     """Test that ModelConfig presets have correct capabilities."""
@@ -734,6 +778,10 @@ def test_model_cfg_capabilities() -> None:
     assert ModelCapability.vision in cfg_gpt_1m["capabilities"]
     assert ModelCapability.video_understanding not in cfg_gpt_1m["capabilities"]
 
+    cfg_deepseek_v4 = get_model_cfg("deepseek_v4_1m")
+    assert ModelCapability.vision not in cfg_deepseek_v4["capabilities"]
+    assert ModelCapability.video_understanding not in cfg_deepseek_v4["capabilities"]
+
     # Gemini: vision + video + document
     cfg_gemini = get_model_cfg("gemini_1m")
     assert ModelCapability.vision in cfg_gemini["capabilities"]
@@ -752,6 +800,10 @@ def test_get_model_cfg_by_enum() -> None:
     cfg_gpt = get_model_cfg(ModelConfigPreset.GPT5_1M)
     assert cfg_gpt["context_window"] == 922_000
     assert cfg_gpt["max_videos"] == 0  # GPT doesn't support video
+
+    cfg_deepseek_v4 = get_model_cfg(ModelConfigPreset.DEEPSEEK_V4_1M)
+    assert cfg_deepseek_v4["context_window"] == 1_000_000
+    assert cfg_deepseek_v4["max_videos"] == 0
 
     cfg_gemini = get_model_cfg(ModelConfigPreset.GEMINI_1M)
     assert cfg_gemini["context_window"] == 1_000_000
@@ -774,6 +826,10 @@ def test_get_model_cfg_by_string() -> None:
     assert cfg_gpt_1m["context_window"] == 922_000
     assert cfg_gpt_1m["max_videos"] == 0  # GPT doesn't support video
 
+    cfg_deepseek_v4 = get_model_cfg("deepseek_v4_1m")
+    assert cfg_deepseek_v4["context_window"] == 1_000_000
+    assert cfg_deepseek_v4["max_videos"] == 0
+
 
 def test_get_model_cfg_by_alias() -> None:
     """Test getting model config by alias."""
@@ -791,6 +847,12 @@ def test_get_model_cfg_by_alias() -> None:
 
     cfg = get_model_cfg("gemini")
     assert cfg["context_window"] == 200_000  # Default to 200K (cheaper)
+
+    cfg = get_model_cfg("deepseek")
+    assert cfg["context_window"] == 1_000_000
+
+    cfg = get_model_cfg("deepseek_v4")
+    assert cfg["context_window"] == 1_000_000
 
 
 def test_get_model_cfg_invalid() -> None:
@@ -842,6 +904,9 @@ def test_list_model_cfg_presets() -> None:
         "claude_1m",
         "claude_200k",
         "claude_400k",
+        "deepseek",
+        "deepseek_v4",
+        "deepseek_v4_1m",
         "gemini",
         "gemini_1m",
         "gemini_200k",

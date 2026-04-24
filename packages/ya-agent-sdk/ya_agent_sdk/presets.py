@@ -1,7 +1,7 @@
 """ModelSettings presets for different providers and thinking levels.
 
 This module provides pre-configured ModelSettings for common use cases across
-different model providers (Anthropic, OpenAI, Gemini). Each provider has presets
+different model providers (Anthropic, OpenAI, DeepSeek, Gemini). Each provider has presets
 for different "thinking levels" (reasoning intensity).
 
 Naming Convention:
@@ -303,6 +303,12 @@ class ModelSettingsPreset(StrEnum):
     OPENAI_RESPONSES_HIGH = "openai_responses_high"
     OPENAI_RESPONSES_MEDIUM = "openai_responses_medium"
     OPENAI_RESPONSES_LOW = "openai_responses_low"
+
+    # DeepSeek V4 presets (OpenAI-compatible API)
+    DEEPSEEK_V4_DEFAULT = "deepseek_v4_default"
+    DEEPSEEK_V4_HIGH = "deepseek_v4_high"
+    DEEPSEEK_V4_MAX = "deepseek_v4_max"
+    DEEPSEEK_V4_OFF = "deepseek_v4_off"
 
     # Gemini thinking_budget presets (for Gemini 2.5)
     GEMINI_THINKING_BUDGET_DEFAULT = "gemini_thinking_budget_default"
@@ -727,6 +733,65 @@ OPENAI_RESPONSES_LOW: dict[str, Any] = _openai_responses_settings(
 
 
 # =============================================================================
+# DeepSeek V4 Presets (OpenAI-compatible API)
+# =============================================================================
+
+
+def _deepseek_v4_settings(
+    *,
+    thinking_enabled: bool = True,
+    reasoning_effort: Literal["high", "max"] = "high",
+    max_tokens: int | None = None,
+) -> dict[str, Any]:
+    """Create DeepSeek V4 OpenAI-compatible model settings.
+
+    DeepSeek V4 supports both thinking and non-thinking modes. In thinking mode,
+    DeepSeek accepts ``reasoning_effort`` values ``high`` and ``max``.
+
+    Args:
+        thinking_enabled: Whether to enable DeepSeek thinking mode.
+        reasoning_effort: Thinking intensity for enabled thinking mode.
+        max_tokens: Maximum output tokens.
+
+    Returns:
+        Dict suitable for OpenAI Chat Completions model settings.
+    """
+    settings: dict[str, Any] = {
+        "extra_body": {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}},
+    }
+    if thinking_enabled:
+        settings["openai_reasoning_effort"] = reasoning_effort
+    if max_tokens is not None:
+        settings["max_tokens"] = max_tokens
+    return settings
+
+
+DEEPSEEK_V4_DEFAULT: dict[str, Any] = _deepseek_v4_settings(
+    reasoning_effort="high",
+    max_tokens=128 * K_TOKENS,
+)
+"""DeepSeek V4 default: thinking enabled with high effort."""
+
+DEEPSEEK_V4_HIGH: dict[str, Any] = _deepseek_v4_settings(
+    reasoning_effort="high",
+    max_tokens=128 * K_TOKENS,
+)
+"""DeepSeek V4 high: thinking enabled with high effort."""
+
+DEEPSEEK_V4_MAX: dict[str, Any] = _deepseek_v4_settings(
+    reasoning_effort="max",
+    max_tokens=384 * K_TOKENS,
+)
+"""DeepSeek V4 max: thinking enabled with maximum effort and max output length."""
+
+DEEPSEEK_V4_OFF: dict[str, Any] = _deepseek_v4_settings(
+    thinking_enabled=False,
+    max_tokens=128 * K_TOKENS,
+)
+"""DeepSeek V4 off: thinking disabled."""
+
+
+# =============================================================================
 # Gemini thinking_budget Presets (for Gemini 2.5)
 # =============================================================================
 
@@ -940,6 +1005,11 @@ _PRESET_REGISTRY: dict[str, dict[str, Any]] = {
     ModelSettingsPreset.OPENAI_RESPONSES_HIGH.value: OPENAI_RESPONSES_HIGH,
     ModelSettingsPreset.OPENAI_RESPONSES_MEDIUM.value: OPENAI_RESPONSES_MEDIUM,
     ModelSettingsPreset.OPENAI_RESPONSES_LOW.value: OPENAI_RESPONSES_LOW,
+    # DeepSeek V4
+    ModelSettingsPreset.DEEPSEEK_V4_DEFAULT.value: DEEPSEEK_V4_DEFAULT,
+    ModelSettingsPreset.DEEPSEEK_V4_HIGH.value: DEEPSEEK_V4_HIGH,
+    ModelSettingsPreset.DEEPSEEK_V4_MAX.value: DEEPSEEK_V4_MAX,
+    ModelSettingsPreset.DEEPSEEK_V4_OFF.value: DEEPSEEK_V4_OFF,
     # Gemini thinking_budget (for Gemini 2.5)
     ModelSettingsPreset.GEMINI_THINKING_BUDGET_DEFAULT.value: GEMINI_THINKING_BUDGET_DEFAULT,
     ModelSettingsPreset.GEMINI_THINKING_BUDGET_HIGH.value: GEMINI_THINKING_BUDGET_HIGH,
@@ -970,6 +1040,8 @@ _PRESET_ALIASES: dict[str, str] = {
     "anthropic_1m_cm_interleaved": ModelSettingsPreset.ANTHROPIC_1M_CM_DEFAULT_INTERLEAVED_THINKING.value,
     "openai": ModelSettingsPreset.OPENAI_DEFAULT.value,
     "openai_responses": ModelSettingsPreset.OPENAI_RESPONSES_DEFAULT.value,
+    "deepseek": ModelSettingsPreset.DEEPSEEK_V4_DEFAULT.value,
+    "deepseek_v4": ModelSettingsPreset.DEEPSEEK_V4_DEFAULT.value,
     "gemini_2.5": ModelSettingsPreset.GEMINI_THINKING_BUDGET_DEFAULT.value,
     "gemini_3": ModelSettingsPreset.GEMINI_THINKING_LEVEL_DEFAULT.value,
     "gemini": ModelSettingsPreset.GEMINI_THINKING_LEVEL_DEFAULT.value,  # Default to Gemini 3
@@ -1089,6 +1161,9 @@ class ModelConfigPreset(StrEnum):
     GPT5_270K = "gpt5_270k"
     GPT5_1M = "gpt5_1m"
 
+    # DeepSeek models
+    DEEPSEEK_V4_1M = "deepseek_v4_1m"
+
     # Gemini models
     GEMINI_200K = "gemini_200k"
     GEMINI_1M = "gemini_1m"
@@ -1148,6 +1223,17 @@ _MODEL_CFG_REGISTRY: dict[str, dict[str, Any]] = {
         "image_split_overlap": 50,
         "capabilities": {ModelCapability.vision},
     },
+    # DeepSeek V4 models (1M context, 384K max output)
+    ModelConfigPreset.DEEPSEEK_V4_1M.value: {
+        "context_window": 1_000_000,
+        "max_images": 0,
+        "max_videos": 0,
+        "support_gif": False,
+        "split_large_images": False,
+        "image_split_max_height": 4096,
+        "image_split_overlap": 50,
+        "capabilities": set(),
+    },
     # Gemini models (vision + video support)
     ModelConfigPreset.GEMINI_200K.value: {
         "context_window": 200_000,
@@ -1188,6 +1274,8 @@ _MODEL_CFG_ALIASES: dict[str, str] = {
     "anthropic_400k": ModelConfigPreset.CLAUDE_400K.value,
     "gpt5": ModelConfigPreset.GPT5_270K.value,
     "openai": ModelConfigPreset.GPT5_270K.value,
+    "deepseek": ModelConfigPreset.DEEPSEEK_V4_1M.value,
+    "deepseek_v4": ModelConfigPreset.DEEPSEEK_V4_1M.value,
     "gemini": ModelConfigPreset.GEMINI_200K.value,
 }
 
