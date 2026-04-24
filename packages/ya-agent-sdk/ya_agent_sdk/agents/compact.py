@@ -16,7 +16,7 @@ from typing import Any, cast
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, AgentRunResult, ModelSettings, ThinkingPart, ToolOutput, UserContent
+from pydantic_ai import Agent, AgentRunResult, ModelSettings, PromptedOutput, UserContent
 from pydantic_ai.messages import (
     BinaryContent,
     ImageUrl,
@@ -71,8 +71,8 @@ IMPORTANT: If the message history contains any access to Skills (files in /skill
 # Settings keys that should NOT be inherited by compact agent.
 # Cache: compact has different prompts/tools/history; inheriting cache settings
 # would create separate entries that waste cache write tokens.
-# Thinking: compact uses ToolOutput for structured output, which is incompatible
-# with Anthropic thinking mode (thinking + output tools not supported).
+# Thinking: compact uses structured output; inherited thinking settings can be
+# incompatible across providers and are not needed for summarization.
 _COMPACT_STRIP_KEYS = frozenset({
     # Cache keys
     "anthropic_cache_tool_definitions",
@@ -84,7 +84,7 @@ _COMPACT_STRIP_KEYS = frozenset({
     "anthropic_effort",
 })
 
-# Anthropic beta headers that are incompatible with compact agent's ToolOutput mode.
+# Anthropic beta headers that are incompatible with compact agent output mode.
 _INCOMPATIBLE_BETAS = frozenset({
     "interleaved-thinking-2025-05-14",
 })
@@ -145,7 +145,7 @@ def _strip_incompatible_settings(settings: ModelSettings) -> ModelSettings:
 
     Removes:
     - Anthropic cache settings (compact has different prompts/tools/history)
-    - Thinking settings (incompatible with ToolOutput-based structured output)
+    - Thinking settings (incompatible across providers for compact structured output)
     - Incompatible beta headers from extra_headers
     - clear_thinking edits from context_management (requires thinking enabled)
 
@@ -393,7 +393,7 @@ def _trim_history_for_compact(
 
     Performs multiple operations to aggressively reduce token count:
 
-    1. Strips ThinkingPart from ModelResponse (internal reasoning, not useful for summary)
+    1. Preserves ThinkingPart in ModelResponse for providers that require reasoning round-trips
     2. Truncates large ToolReturnPart content (keeps head + tail)
     3. Drops all image/video content from UserPromptPart
     4. Strips injected context blocks (identified by ``injected_context_tags``) from UserPromptPart
@@ -424,10 +424,9 @@ def _trim_history_for_compact(
             continue
 
         if isinstance(message, ModelResponse):
-            # Strip ThinkingParts (internal reasoning, not needed for summary)
-            filtered_parts = [part for part in message.parts if not isinstance(part, ThinkingPart)]
-            if len(filtered_parts) != len(message.parts):
-                message = replace(message, parts=filtered_parts)
+            # Preserve ThinkingPart. Some providers, including DeepSeek reasoning
+            # models, require reasoning content to be round-tripped in follow-up
+            # requests.
             trimmed.append(message)
             continue
 
@@ -554,7 +553,7 @@ def get_compact_agent(
     return Agent[AgentContext, CondenseResult](
         model=infer_model(effective_model),
         model_settings=effective_settings,
-        output_type=ToolOutput(CondenseResult),
+        output_type=PromptedOutput(CondenseResult),
         deps_type=AgentContext,
         system_prompt=system_prompt,
         history_processors=[

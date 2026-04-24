@@ -3,8 +3,9 @@
 This module provides a history processor that injects handoff summaries
 into the message history when a context reset occurs.
 
-Uses a virtual tool call pattern so the model understands handoff as a tool
-operation result, avoiding confusion when users mention "handoff" in conversation.
+Handoff summaries are injected as restored context with a system reminder. This
+avoids fabricating assistant/tool-call history and keeps reasoning-model message
+history compatible with OpenAI-compatible APIs.
 
 Note:
     This processor must be used together with `ya_agent_sdk.toolsets.context.handoff.HandoffTool`.
@@ -18,10 +19,7 @@ from pydantic_ai import UserContent
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
-    ModelResponse,
     SystemPromptPart,
-    ToolCallPart,
-    ToolReturnPart,
     UserPromptPart,
 )
 from pydantic_ai.tools import RunContext
@@ -50,12 +48,13 @@ def _build_handoff_messages(
     steering_messages: list[str] | None = None,
     tool_call_id: str = "handoff-ack",
 ) -> list[ModelMessage]:
-    """Build compacted message history after handoff.
+    """Build restored message history after handoff.
 
-    Uses a virtual tool call pattern:
-    1. Request with system prompt + original user prompt
-    2. Response with virtual summarize tool call
-    3. Request with summarize tool return (summary) + steering + summary-complete marker
+    The restored history uses a single user request containing the handoff
+    summary, original prompt, steering messages, and a system reminder that the
+    handoff has already completed. It intentionally avoids mock assistant tool
+    calls so reasoning providers do not receive fabricated assistant messages
+    without provider-required reasoning fields.
 
     Messages are tagged with ``keep:handoff`` metadata so that subsequent
     compaction cycles preserve them instead of trimming away the summary.
@@ -64,43 +63,33 @@ def _build_handoff_messages(
         summary: The handoff summary content.
         original_prompt: The initial user prompt from the session.
         steering_messages: Additional steering messages from user during execution.
-        tool_call_id: Tool call ID for the virtual handoff call.
+        tool_call_id: Deprecated compatibility parameter; ignored.
 
     Returns:
-        List of ModelMessage representing the compacted history.
+        List of ModelMessage representing the restored history.
     """
+    _ = tool_call_id
     keep_metadata = {KEEP_TAG_KEY: KEEP_HANDOFF}
 
-    # Message 1: system + labeled original user prompt
-    # Placeholder will be replaced by create_system_prompt_filter downstream
+    # Placeholder will be replaced by create_system_prompt_filter downstream.
     request_parts: list[SystemPromptPart | UserPromptPart] = [
         SystemPromptPart(content="Placeholder system prompt"),
         *build_original_request_parts(original_prompt),
-    ]
-
-    # Message 2: virtual handoff tool call
-    tool_call = ToolCallPart(
-        tool_name="summarize",
-        args={"content": "[summary injected as tool return]"},
-        tool_call_id=tool_call_id,
-    )
-
-    # Message 3: summarize tool return + steering + summary-complete
-    final_parts: list[ToolReturnPart | UserPromptPart] = [
-        ToolReturnPart(
-            tool_name="summarize",
-            content=summary,
-            tool_call_id=tool_call_id,
-        ),
+        UserPromptPart(content=summary),
         *build_steering_parts(steering_messages),
         build_context_restored_part(),
+        UserPromptPart(
+            content=(
+                "<system-reminder>"
+                "<item>The summarize tool has already completed this handoff. "
+                "Continue work directly from the restored context summary, original request, "
+                "and any user steering messages.</item>"
+                "</system-reminder>"
+            )
+        ),
     ]
 
-    return [
-        ModelRequest(parts=request_parts),
-        ModelResponse(parts=[tool_call], metadata=keep_metadata),
-        ModelRequest(parts=final_parts, metadata=keep_metadata),
-    ]
+    return [ModelRequest(parts=request_parts, metadata=keep_metadata)]
 
 
 async def process_handoff_message(
@@ -113,13 +102,9 @@ async def process_handoff_message(
     history_processors parameter. When a handoff occurs, the previous context
     is cleared but a summary message is preserved in ctx.deps.handoff_message.
 
-    Uses a virtual tool call pattern:
-    1. Request with system prompt + original user prompt
-    2. Response with virtual summarize tool call
-    3. Request with summarize tool return (summary) + steering + summary-complete marker
-
-    This ensures the model understands the summary as a tool result,
-    and downstream filters like auto_load_files can append to the last request.
+    The restored history is a single request containing the context summary,
+    original prompt, user steering, and a system reminder that handoff already
+    completed. Downstream filters like auto_load_files can append to that request.
 
     Note: Subagents created via enter_subagent() have handoff_message cleared,
     so they won't be affected by the main agent's handoff state.
@@ -157,15 +142,11 @@ async def process_handoff_message(
 
         handoff_content = agent_ctx.handoff_message
 
-        # Virtual tool call ID for the handoff acknowledgment
-        virtual_tool_call_id = f"handoff-ack-{event_id}"
-
-        # Build compacted messages using virtual tool call pattern
+        # Build restored messages without fabricating assistant/tool-call history.
         result = _build_handoff_messages(
             handoff_content,
             agent_ctx.user_prompts,
             agent_ctx.steering_messages or None,
-            tool_call_id=virtual_tool_call_id,
         )
 
         if agent_ctx.steering_messages:
@@ -176,7 +157,7 @@ async def process_handoff_message(
         # Clear steering_messages after successful handoff (content is now in summary)
         agent_ctx.steering_messages.clear()
 
-        # Force downstream filters to inject instructions despite ToolReturnPart
+        # Force downstream filters to inject instructions after history restoration.
         agent_ctx.force_inject_instructions = True
 
         # Emit complete event with the actual handoff content
