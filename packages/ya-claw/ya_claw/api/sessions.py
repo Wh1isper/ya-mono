@@ -41,7 +41,8 @@ async def create_session(
             raise HTTPException(status_code=503, detail="Execution supervisor is unavailable.")
         return EventSourceResponse(runtime_state.stream_run_events(response.run.id))
 
-    _submit_run(request, response.run.id if response.run is not None else None)
+    if _auto_dispatch_enabled(settings):
+        _submit_run(request, response.run.id if response.run is not None else None)
     return response
 
 
@@ -88,7 +89,8 @@ async def create_session_run(
             raise HTTPException(status_code=503, detail="Execution supervisor is unavailable.")
         return EventSourceResponse(runtime_state.stream_run_events(run.id))
 
-    _submit_run(request, run.id)
+    if _auto_dispatch_enabled(settings):
+        _submit_run(request, run.id)
     return run
 
 
@@ -147,6 +149,10 @@ def _submit_run(request: Request, run_id: str | None) -> bool:
     if not isinstance(supervisor, ExecutionSupervisor):
         return False
     return supervisor.submit_run(run_id)
+
+
+def _auto_dispatch_enabled(settings: ClawSettings) -> bool:
+    return isinstance(settings.execution_model, str) and settings.execution_model.strip() != ""
 
 
 def _get_settings(request: Request) -> ClawSettings:

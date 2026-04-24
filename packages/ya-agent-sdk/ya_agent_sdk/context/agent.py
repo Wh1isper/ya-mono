@@ -255,6 +255,12 @@ class ModelCapability(StrEnum):
     video_url = "video_url"
     """Model supports receiving videos via URL."""
 
+    reasoning_required = "reasoning_required"
+    """Provider requires assistant messages to include reasoning content."""
+
+    reasoning_foreign_incompatible = "reasoning_foreign_incompatible"
+    """Provider rejects thinking parts tagged with a different provider."""
+
 
 # =============================================================================
 # Tool Settings
@@ -1625,6 +1631,7 @@ class AgentContext(BaseModel):
             drop_gif_images,
             split_large_images,
         )
+        from ya_agent_sdk.filters.reasoning_normalize import normalize_reasoning_for_model
         from ya_agent_sdk.filters.runtime_instructions import inject_runtime_instructions
         from ya_agent_sdk.filters.tool_args import fix_truncated_tool_args
 
@@ -1633,7 +1640,7 @@ class AgentContext(BaseModel):
             return ctx.deps.tool_id_wrapper.wrap_messages(ctx, messages)
 
         return [
-            # handle_model_switch, # Disabled as response.model_name is not the same as ctx.model.model_name
+            normalize_reasoning_for_model,
             split_large_images,
             compress_large_images,
             drop_extra_images,

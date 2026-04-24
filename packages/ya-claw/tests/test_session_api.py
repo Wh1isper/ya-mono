@@ -23,6 +23,11 @@ def clear_claw_settings(monkeypatch, tmp_path: Path) -> None:
         "YA_CLAW_DATA_DIR",
         "YA_CLAW_WEB_DIST_DIR",
         "YA_CLAW_WORKSPACE_ROOT",
+        "YA_CLAW_EXECUTION_MODEL",
+        "YA_CLAW_EXECUTION_MODEL_SETTINGS_PRESET",
+        "YA_CLAW_EXECUTION_MODEL_CONFIG_PRESET",
+        "YA_CLAW_EXECUTION_SYSTEM_PROMPT",
+        "YA_CLAW_EXECUTION_CONTEXT_WINDOW",
     ):
         monkeypatch.delenv(env_name, raising=False)
 
