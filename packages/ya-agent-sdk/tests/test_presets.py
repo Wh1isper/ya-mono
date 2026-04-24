@@ -707,6 +707,13 @@ def test_model_cfg_presets_structure() -> None:
     assert cfg_1m["image_split_max_height"] == 4096
     assert cfg_1m["image_split_overlap"] == 50
 
+    cfg_gpt_1m = get_model_cfg("gpt5_1m")
+    assert cfg_gpt_1m["context_window"] == 922_000
+    assert cfg_gpt_1m["max_videos"] == 0  # GPT doesn't support video
+    assert cfg_gpt_1m["split_large_images"] is True
+    assert cfg_gpt_1m["image_split_max_height"] == 4096
+    assert cfg_gpt_1m["image_split_overlap"] == 50
+
 
 def test_model_cfg_capabilities() -> None:
     """Test that ModelConfig presets have correct capabilities."""
@@ -723,6 +730,10 @@ def test_model_cfg_capabilities() -> None:
     assert ModelCapability.vision in cfg_gpt["capabilities"]
     assert ModelCapability.video_understanding not in cfg_gpt["capabilities"]
 
+    cfg_gpt_1m = get_model_cfg("gpt5_1m")
+    assert ModelCapability.vision in cfg_gpt_1m["capabilities"]
+    assert ModelCapability.video_understanding not in cfg_gpt_1m["capabilities"]
+
     # Gemini: vision + video + document
     cfg_gemini = get_model_cfg("gemini_1m")
     assert ModelCapability.vision in cfg_gemini["capabilities"]
@@ -737,6 +748,10 @@ def test_get_model_cfg_by_enum() -> None:
 
     cfg_400k = get_model_cfg(ModelConfigPreset.CLAUDE_400K)
     assert cfg_400k["context_window"] == 400_000
+
+    cfg_gpt = get_model_cfg(ModelConfigPreset.GPT5_1M)
+    assert cfg_gpt["context_window"] == 922_000
+    assert cfg_gpt["max_videos"] == 0  # GPT doesn't support video
 
     cfg_gemini = get_model_cfg(ModelConfigPreset.GEMINI_1M)
     assert cfg_gemini["context_window"] == 1_000_000
@@ -754,6 +769,10 @@ def test_get_model_cfg_by_string() -> None:
     cfg_gpt = get_model_cfg("gpt5_270k")
     assert cfg_gpt["context_window"] == 270_000
     assert cfg_gpt["max_videos"] == 0  # GPT doesn't support video
+
+    cfg_gpt_1m = get_model_cfg("gpt5_1m")
+    assert cfg_gpt_1m["context_window"] == 922_000
+    assert cfg_gpt_1m["max_videos"] == 0  # GPT doesn't support video
 
 
 def test_get_model_cfg_by_alias() -> None:
@@ -827,6 +846,7 @@ def test_list_model_cfg_presets() -> None:
         "gemini_1m",
         "gemini_200k",
         "gpt5",
+        "gpt5_1m",
         "gpt5_270k",
         "openai",
     ])
