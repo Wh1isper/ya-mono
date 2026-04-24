@@ -1233,7 +1233,7 @@ _MODEL_CFG_REGISTRY: dict[str, dict[str, Any]] = {
         "split_large_images": False,
         "image_split_max_height": 4096,
         "image_split_overlap": 50,
-        "capabilities": set(),
+        "capabilities": {ModelCapability.reasoning_required},
     },
     ModelConfigPreset.DEEPSEEK_V4_1M.value: {
         "context_window": 1_000_000,
@@ -1243,7 +1243,7 @@ _MODEL_CFG_REGISTRY: dict[str, dict[str, Any]] = {
         "split_large_images": False,
         "image_split_max_height": 4096,
         "image_split_overlap": 50,
-        "capabilities": set(),
+        "capabilities": {ModelCapability.reasoning_required},
     },
     # Gemini models (vision + video support)
     ModelConfigPreset.GEMINI_200K.value: {

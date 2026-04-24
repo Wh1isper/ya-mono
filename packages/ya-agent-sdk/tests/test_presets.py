@@ -787,14 +787,12 @@ def test_model_cfg_capabilities() -> None:
     assert ModelCapability.vision in cfg_gpt_1m["capabilities"]
     assert ModelCapability.video_understanding not in cfg_gpt_1m["capabilities"]
 
-    # DeepSeek V4 400K capabilities
+    # DeepSeek V4: reasoning round-trip required
     cfg_deepseek_400k = get_model_cfg("deepseek_v4_400k")
-    assert cfg_deepseek_400k["capabilities"] == set()
+    assert cfg_deepseek_400k["capabilities"] == {ModelCapability.reasoning_required}
 
-    # DeepSeek V4 1M capabilities
     cfg_deepseek_v4 = get_model_cfg("deepseek_v4_1m")
-    assert ModelCapability.vision not in cfg_deepseek_v4["capabilities"]
-    assert ModelCapability.video_understanding not in cfg_deepseek_v4["capabilities"]
+    assert cfg_deepseek_v4["capabilities"] == {ModelCapability.reasoning_required}
 
     # Gemini: vision + video + document
     cfg_gemini = get_model_cfg("gemini_1m")
