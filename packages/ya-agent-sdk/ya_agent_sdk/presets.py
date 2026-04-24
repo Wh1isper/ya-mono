@@ -1162,6 +1162,7 @@ class ModelConfigPreset(StrEnum):
     GPT5_1M = "gpt5_1m"
 
     # DeepSeek models
+    DEEPSEEK_V4_400K = "deepseek_v4_400k"
     DEEPSEEK_V4_1M = "deepseek_v4_1m"
 
     # Gemini models
@@ -1223,7 +1224,17 @@ _MODEL_CFG_REGISTRY: dict[str, dict[str, Any]] = {
         "image_split_overlap": 50,
         "capabilities": {ModelCapability.vision},
     },
-    # DeepSeek V4 models (1M context, 384K max output)
+    # DeepSeek V4 models (text-only, high output limits)
+    ModelConfigPreset.DEEPSEEK_V4_400K.value: {
+        "context_window": 400_000,
+        "max_images": 0,
+        "max_videos": 0,
+        "support_gif": False,
+        "split_large_images": False,
+        "image_split_max_height": 4096,
+        "image_split_overlap": 50,
+        "capabilities": set(),
+    },
     ModelConfigPreset.DEEPSEEK_V4_1M.value: {
         "context_window": 1_000_000,
         "max_images": 0,
@@ -1275,6 +1286,7 @@ _MODEL_CFG_ALIASES: dict[str, str] = {
     "gpt5": ModelConfigPreset.GPT5_270K.value,
     "openai": ModelConfigPreset.GPT5_270K.value,
     "deepseek": ModelConfigPreset.DEEPSEEK_V4_1M.value,
+    "deepseek_400k": ModelConfigPreset.DEEPSEEK_V4_400K.value,
     "deepseek_v4": ModelConfigPreset.DEEPSEEK_V4_1M.value,
     "gemini": ModelConfigPreset.GEMINI_200K.value,
 }
