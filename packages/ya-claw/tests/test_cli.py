@@ -110,6 +110,87 @@ def test_serve_skips_auto_migrate_when_disabled(monkeypatch, tmp_path) -> None:
     ]
 
 
+def test_start_runs_migrate_seed_and_serve(monkeypatch, tmp_path: Path) -> None:
+    calls: list[tuple[str, object]] = []
+    seed_file = tmp_path / "profiles.yaml"
+    seed_file.write_text("version: 1\nprofiles: []\n", encoding="utf-8")
+    settings = ClawSettings(
+        host="127.0.0.1",
+        port=9042,
+        reload=True,
+        auto_migrate=True,
+        auto_seed_profiles=True,
+        api_token=TEST_API_TOKEN,
+        database_url=None,
+        data_dir=tmp_path,
+        workspace_root=tmp_path / "workspace",
+        profile_seed_file=seed_file,
+    )
+
+    monkeypatch.setattr(claw_cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        claw_cli.cli_application,
+        "upgrade_database",
+        lambda revision="head": calls.append(("migrate", revision)),
+    )
+    monkeypatch.setattr(
+        claw_cli.cli_application,
+        "seed_profiles",
+        lambda *, prune_missing, migrate, seed_file: (
+            calls.append(("seed", (prune_missing, migrate, seed_file))) or ["default"]
+        ),
+    )
+    monkeypatch.setattr(
+        claw_cli.cli_application,
+        "serve",
+        lambda *, host, port, reload, migrate: calls.append(("serve", (host, port, reload, migrate))),
+    )
+
+    result = runner.invoke(claw_cli.cli, ["start", "--host", "127.0.0.2", "--port", "9999"])
+
+    assert result.exit_code == 0
+    assert calls == [
+        ("migrate", "head"),
+        ("seed", (False, False, None)),
+        ("serve", ("127.0.0.2", 9999, False, False)),
+    ]
+    assert "Database migrations applied." in result.output
+    assert "Seeded 1 profile(s): default" in result.output
+
+
+def test_start_requires_api_token(monkeypatch, tmp_path: Path) -> None:
+    settings = ClawSettings(
+        api_token=None,
+        data_dir=tmp_path,
+        workspace_root=tmp_path / "workspace",
+    )
+
+    monkeypatch.setattr(claw_cli, "get_settings", lambda: settings)
+
+    result = runner.invoke(claw_cli.cli, ["start"])
+
+    assert result.exit_code == 1
+    assert "YA_CLAW_API_TOKEN must be configured before starting YA Claw." in result.output
+
+
+def test_start_reports_missing_seed_file(monkeypatch, tmp_path: Path) -> None:
+    settings = ClawSettings(
+        auto_migrate=False,
+        auto_seed_profiles=True,
+        api_token=TEST_API_TOKEN,
+        data_dir=tmp_path,
+        workspace_root=tmp_path / "workspace",
+        profile_seed_file=tmp_path / "missing.yaml",
+    )
+
+    monkeypatch.setattr(claw_cli, "get_settings", lambda: settings)
+
+    result = runner.invoke(claw_cli.cli, ["start"])
+
+    assert result.exit_code == 1
+    assert "Profile seed file is not configured or does not exist." in result.output
+
+
 def test_profiles_seed_command(monkeypatch, tmp_path: Path) -> None:
     calls: list[tuple[bool, bool, str | None]] = []
     settings = ClawSettings(
