@@ -12,6 +12,7 @@ from ya_agent_sdk.toolsets.core.filesystem import tools as filesystem_tools
 from ya_agent_sdk.toolsets.core.multimodal import tools as multimodal_tools
 from ya_agent_sdk.toolsets.core.shell import tools as shell_tools
 from ya_agent_sdk.toolsets.core.web import tools as web_tools
+from ya_agent_sdk.toolsets.skills.toolset import SHARED_SKILLS_DIR_NAME, SkillToolset
 from ya_agent_sdk.toolsets.tool_proxy.toolset import ToolProxyToolset
 from ya_agent_sdk.toolsets.tool_search import create_best_strategy
 
@@ -127,9 +128,12 @@ class ClawRuntimeBuilder:
         profile: ResolvedProfile,
         binding: WorkspaceBinding,
     ) -> list[AbstractToolset[Any]]:
+        toolsets: list[AbstractToolset[Any]] = [
+            SkillToolset(toolset_id="skills", extra_dir_names=[SHARED_SKILLS_DIR_NAME]),
+        ]
         loaded_config = self._mcp_config_resolver.load_for_workspace(binding.host_path)
         if loaded_config is None:
-            return []
+            return toolsets
 
         filtered_config = filter_mcp_config(
             loaded_config.config,
@@ -137,22 +141,23 @@ class ClawRuntimeBuilder:
             disabled_mcps=profile.disabled_mcps,
         )
         if not filtered_config.servers:
-            return []
+            return toolsets
 
         mcp_servers = build_mcp_servers(filtered_config, need_approval_mcps=profile.need_user_approve_mcps)
         if not mcp_servers:
-            return []
+            return toolsets
 
         mcp_descriptions = extract_mcp_descriptions(filtered_config)
         optional_mcps = extract_optional_mcps(filtered_config)
-        return [
+        toolsets.append(
             ToolProxyToolset(
                 toolsets=mcp_servers,
                 namespace_descriptions=mcp_descriptions if mcp_descriptions else None,
                 search_strategy=create_best_strategy(),
                 optional_namespaces=optional_mcps if optional_mcps else None,
             )
-        ]
+        )
+        return toolsets
 
     def _build_system_prompt(
         self,
@@ -166,6 +171,11 @@ class ClawRuntimeBuilder:
         prompt_lines.append(f"Default working directory: {binding.cwd}")
         prompt_lines.append(f"Readable paths: {', '.join(str(path) for path in binding.readable_paths)}")
         prompt_lines.append(f"Writable paths: {', '.join(str(path) for path in binding.writable_paths)}")
+        prompt_lines.append("Mounted projects:")
+        for mount in binding.project_mounts:
+            description = f" -- {mount.description}" if isinstance(mount.description, str) and mount.description else ""
+            prompt_lines.append(f"- {mount.project_id}: {mount.virtual_path}{description}")
+        prompt_lines.append("Project skills are discovered from each mounted project's .agents/skills/ directory.")
         prompt_lines.append(f"Profile: {profile.name}")
         if isinstance(project_id, str) and project_id.strip() != "":
             prompt_lines.append(f"Project ID: {project_id}")

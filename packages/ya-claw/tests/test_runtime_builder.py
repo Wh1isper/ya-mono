@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from ya_agent_sdk.environment import SandboxEnvironment, VirtualMount
+from ya_agent_sdk.toolsets.skills.toolset import SkillToolset
 from ya_agent_sdk.toolsets.tool_proxy.toolset import ToolProxyToolset
 from ya_claw.config import ClawSettings
 from ya_claw.execution.profile import ResolvedProfile
@@ -139,10 +140,11 @@ def test_runtime_builder_resolves_runtime_mcp_toolsets_with_profile_filters(tmp_
 
     toolsets = builder._resolve_runtime_toolsets(profile=profile, binding=binding)
 
-    assert len(toolsets) == 1
-    assert isinstance(toolsets[0], ToolProxyToolset)
-    assert [toolset.tool_prefix for toolset in toolsets[0]._toolsets] == ["context7"]
-    assert toolsets[0]._optional_namespaces == {"context7"}
+    assert len(toolsets) == 2
+    assert isinstance(toolsets[0], SkillToolset)
+    assert isinstance(toolsets[1], ToolProxyToolset)
+    assert [toolset.tool_prefix for toolset in toolsets[1]._toolsets] == ["context7"]
+    assert toolsets[1]._optional_namespaces == {"context7"}
 
 
 async def test_runtime_builder_runs_with_pydantic_ai_test_model(tmp_path: Path) -> None:

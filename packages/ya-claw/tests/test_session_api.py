@@ -171,6 +171,40 @@ def test_session_and_run_endpoints_support_rerun_controls_and_events() -> None:
     assert "ya_claw.run_interrupted" in run_events_response.text
 
 
+def test_session_create_accepts_project_references() -> None:
+    _create_schema()
+
+    with TestClient(create_app()) as client:
+        create_session_response = client.post(
+            "/api/v1/sessions",
+            headers=_auth_headers(),
+            json={
+                "projects": [
+                    {"project_id": "repo-a", "description": "primary repo"},
+                    {"project_id": "repo-b", "description": "reference repo"},
+                ],
+                "input_parts": [{"type": "text", "text": "hello from multi project session"}],
+            },
+        )
+
+    assert create_session_response.status_code == 201
+    payload = create_session_response.json()
+    assert payload["session"]["project_id"] == "repo-a"
+    assert payload["session"]["projects"] == [
+        {"project_id": "repo-a", "description": "primary repo"},
+        {"project_id": "repo-b", "description": "reference repo"},
+    ]
+    assert payload["session"]["metadata"]["projects"] == [
+        {"project_id": "repo-a", "description": "primary repo"},
+        {"project_id": "repo-b", "description": "reference repo"},
+    ]
+    assert payload["run"]["project_id"] == "repo-a"
+    assert payload["run"]["projects"] == [
+        {"project_id": "repo-a", "description": "primary repo"},
+        {"project_id": "repo-b", "description": "reference repo"},
+    ]
+
+
 def test_session_detail_can_include_message_and_paginate_runs() -> None:
     _create_schema()
 
@@ -190,6 +224,9 @@ def test_session_detail_can_include_message_and_paginate_runs() -> None:
         assert first_run_response.status_code == 201
         first_run_id = first_run_response.json()["id"]
 
+    _mark_run_completed(session_id, first_run_id)
+
+    with TestClient(create_app()) as client:
         second_run_response = client.post(
             f"/api/v1/sessions/{session_id}/runs",
             headers=_auth_headers(),
@@ -200,7 +237,6 @@ def test_session_detail_can_include_message_and_paginate_runs() -> None:
         assert second_run_response.status_code == 201
         second_run_id = second_run_response.json()["id"]
 
-    _mark_run_completed(session_id, first_run_id)
     _mark_run_completed(session_id, second_run_id)
 
     settings = get_settings()

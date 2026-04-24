@@ -8,12 +8,22 @@ from ya_agent_sdk.context import AgentContext
 from ya_claw.workspace import WorkspaceBinding
 
 
+class ClawProjectMountSnapshot(BaseModel):
+    project_id: str
+    description: str | None = None
+    virtual_path: str
+    readable: bool = True
+    writable: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class ClawWorkspaceBindingSnapshot(BaseModel):
     project_id: str
     virtual_path: str
     cwd: str
     readable_paths: list[str] = Field(default_factory=list)
     writable_paths: list[str] = Field(default_factory=list)
+    project_mounts: list[ClawProjectMountSnapshot] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     backend_hint: str | None = None
 
@@ -25,6 +35,17 @@ class ClawWorkspaceBindingSnapshot(BaseModel):
             cwd=str(binding.cwd),
             readable_paths=[str(path) for path in binding.readable_paths],
             writable_paths=[str(path) for path in binding.writable_paths],
+            project_mounts=[
+                ClawProjectMountSnapshot(
+                    project_id=mount.project_id,
+                    description=mount.description,
+                    virtual_path=str(mount.virtual_path),
+                    readable=mount.readable,
+                    writable=mount.writable,
+                    metadata=dict(mount.metadata),
+                )
+                for mount in binding.project_mounts
+            ],
             metadata=dict(binding.metadata),
             backend_hint=binding.backend_hint,
         )
