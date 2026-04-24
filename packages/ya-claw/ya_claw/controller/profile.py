@@ -46,12 +46,14 @@ class ProfileController:
         record.model_config_preset = request.model_config_preset
         record.model_config_override = request.model_config_override
         record.system_prompt = request.system_prompt
-        record.toolsets = list(request.toolsets)
+        record.builtin_toolsets = _normalize_name_list(request.builtin_toolsets)
         record.subagents = [item.model_dump(mode="json", exclude_none=True) for item in request.subagents]
         record.include_builtin_subagents = request.include_builtin_subagents
         record.unified_subagents = request.unified_subagents
-        record.need_user_approve_tools = list(request.need_user_approve_tools)
-        record.need_user_approve_mcps = list(request.need_user_approve_mcps)
+        record.need_user_approve_tools = _normalize_name_list(request.need_user_approve_tools)
+        record.need_user_approve_mcps = _normalize_name_list(request.need_user_approve_mcps)
+        record.enabled_mcps = _normalize_name_list(request.enabled_mcps)
+        record.disabled_mcps = _normalize_name_list(request.disabled_mcps)
         record.workspace_backend_hint = request.workspace_backend_hint
         record.enabled = request.enabled
         record.source_type = request.source_type or "api"
@@ -110,12 +112,24 @@ def profile_detail_from_record(record: ProfileRecord) -> ProfileDetail:
         if isinstance(record.model_config_override, dict)
         else None,
         system_prompt=record.system_prompt,
-        toolsets=list(record.toolsets or []),
+        builtin_toolsets=list(record.builtin_toolsets or []),
+        toolsets=list(record.builtin_toolsets or []),
         subagents=[ProfileSubagent.model_validate(item) for item in record.subagents or []],
         include_builtin_subagents=bool(record.include_builtin_subagents),
         unified_subagents=bool(record.unified_subagents),
         need_user_approve_tools=list(record.need_user_approve_tools or []),
         need_user_approve_mcps=list(record.need_user_approve_mcps or []),
+        enabled_mcps=list(record.enabled_mcps or []),
+        disabled_mcps=list(record.disabled_mcps or []),
         source_checksum=record.source_checksum,
         created_at=record.created_at,
     )
+
+
+def _normalize_name_list(values: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for value in values:
+        stripped = value.strip()
+        if stripped != "":
+            normalized.append(stripped)
+    return normalized

@@ -44,6 +44,8 @@ flowchart TB
 | `YA_CLAW_AUTO_SEED_PROFILES`              | load or refresh seeded profiles on startup                         |
 | `YA_CLAW_WORKSPACE_PROVIDER_BACKEND`      | bootstrap workspace backend hint for local development or fallback |
 | `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE` | default Docker image for Docker-backed environment construction    |
+| `YA_CLAW_MCP_CONFIG_FILE`                 | global MCP JSON file injected into every runtime                   |
+| `YA_CLAW_PROJECT_MCP_CONFIG_PATH`         | per-workspace MCP JSON path with project-level priority            |
 
 LLM provider keys and tool API keys stay in environment variables and follow `ya-agent-sdk` conventions.
 
@@ -65,10 +67,12 @@ A profile should define:
 - `model_config_preset`
 - `model_config_override`
 - `system_prompt`
-- `toolsets`
+- `builtin_toolsets`
 - `subagents`
 - `need_user_approve_tools`
 - `need_user_approve_mcps`
+- `enabled_mcps`
+- `disabled_mcps`
 - `workspace_backend_hint`
 - `enabled`
 - seed metadata such as `source_type` and `source_version`
@@ -83,6 +87,18 @@ Recommended resolution order:
 2. load `model_config_preset` through a YA Claw model config resolver built on SDK preset metadata
 3. merge optional override JSON blocks
 4. apply request-level transient overrides when explicitly allowed
+
+### Runtime-Wide MCP Configuration
+
+YA Claw loads MCP server definitions from a dedicated JSON file layer.
+
+Resolution order:
+
+1. project file at `<workspace>/.ya-claw/mcp.json`
+2. global file at `~/.ya-claw/mcp.json`
+
+The runtime builder injects the resolved MCP servers into every agent through one `ToolProxyToolset`.
+Profiles keep the policy surface through `need_user_approve_mcps`, `enabled_mcps`, and `disabled_mcps`.
 
 ### YAML Seed
 
@@ -197,7 +213,7 @@ Responsibilities:
 - resolve workspace binding
 - build the concrete environment through `EnvironmentFactory`
 - construct `ClawAgentContext`
-- assemble SDK toolsets, approvals, subagents, and prompt template variables
+- assemble builtin tools, MCP toolsets, approvals, subagents, and prompt template variables
 - create the final `AgentRuntime`
 
 ## Runtime Assembly Flow

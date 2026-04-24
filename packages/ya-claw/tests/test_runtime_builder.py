@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 from ya_agent_sdk.environment import SandboxEnvironment, VirtualMount
+from ya_agent_sdk.toolsets.tool_proxy.toolset import ToolProxyToolset
 from ya_claw.config import ClawSettings
 from ya_claw.execution.profile import ResolvedProfile
 from ya_claw.execution.runtime import ClawRuntimeBuilder
@@ -74,7 +76,7 @@ def test_runtime_builder_propagates_container_id_from_workspace_metadata(
     assert runtime.ctx.workspace_binding.metadata["sandbox"]["container_id"] == "container-xyz"
 
 
-def test_runtime_builder_resolves_core_toolset(tmp_path: Path) -> None:
+def test_runtime_builder_resolves_core_builtin_toolset(tmp_path: Path) -> None:
     settings = ClawSettings(
         api_token="test-token",  # noqa: S106
         data_dir=tmp_path / "runtime-data",
@@ -82,10 +84,65 @@ def test_runtime_builder_resolves_core_toolset(tmp_path: Path) -> None:
     )
     builder = ClawRuntimeBuilder(settings=settings)
 
-    resolved_tool_names = [getattr(tool, "name", tool.__name__) for tool in builder._resolve_tools(["core"])]
+    resolved_tool_names = [getattr(tool, "name", tool.__name__) for tool in builder._resolve_builtin_tools(["core"])]
 
     assert "view" in resolved_tool_names
     assert "shell_exec" in resolved_tool_names
+
+
+def test_runtime_builder_resolves_runtime_mcp_toolsets_with_profile_filters(tmp_path: Path) -> None:
+    settings = ClawSettings(
+        api_token="test-token",  # noqa: S106
+        data_dir=tmp_path / "runtime-data",
+        workspace_root=tmp_path / "workspace",
+    )
+    builder = ClawRuntimeBuilder(settings=settings)
+    host_path = tmp_path / "workspace" / "repo-a"
+    project_mcp_file = host_path / ".ya-claw" / "mcp.json"
+    project_mcp_file.parent.mkdir(parents=True, exist_ok=True)
+    project_mcp_file.write_text(
+        json.dumps({
+            "servers": {
+                "github": {
+                    "transport": "stdio",
+                    "command": "npx",
+                },
+                "context7": {
+                    "transport": "streamable_http",
+                    "url": "https://mcp.context7.com/mcp",
+                    "description": "Library docs",
+                    "required": False,
+                },
+            }
+        }),
+        encoding="utf-8",
+    )
+    binding = WorkspaceBinding(
+        project_id="repo-a",
+        host_path=host_path,
+        virtual_path=Path("/workspace/repo-a"),
+        cwd=Path("/workspace/repo-a"),
+        readable_paths=[Path("/workspace/repo-a")],
+        writable_paths=[Path("/workspace/repo-a")],
+        metadata={},
+        backend_hint="local",
+    )
+    profile = ResolvedProfile(
+        name="default",
+        model="test",
+        model_settings=None,
+        model_config=None,
+        enabled_mcps=["context7", "github"],
+        disabled_mcps=["github"],
+        need_user_approve_mcps=["context7"],
+    )
+
+    toolsets = builder._resolve_runtime_toolsets(profile=profile, binding=binding)
+
+    assert len(toolsets) == 1
+    assert isinstance(toolsets[0], ToolProxyToolset)
+    assert [toolset.tool_prefix for toolset in toolsets[0]._toolsets] == ["context7"]
+    assert toolsets[0]._optional_namespaces == {"context7"}
 
 
 async def test_runtime_builder_runs_with_pydantic_ai_test_model(tmp_path: Path) -> None:
@@ -116,7 +173,7 @@ async def test_runtime_builder_runs_with_pydantic_ai_test_model(tmp_path: Path) 
         model="test",
         model_settings=None,
         model_config=None,
-        toolsets=[],
+        builtin_toolsets=[],
         workspace_backend_hint="local",
     )
 

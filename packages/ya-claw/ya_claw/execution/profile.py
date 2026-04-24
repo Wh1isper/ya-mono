@@ -14,7 +14,7 @@ from ya_agent_sdk.subagents.config import SubagentConfig
 from ya_claw.config import ClawSettings
 from ya_claw.orm.tables import ProfileRecord
 
-_DEFAULT_TOOLSETS = ["core"]
+_DEFAULT_BUILTIN_TOOLSETS = ["core"]
 _DEFAULT_PROFILE_NAME = "default"
 
 
@@ -36,12 +36,14 @@ class ResolvedProfile:
     model_settings: dict[str, Any] | None
     model_config: dict[str, Any] | None
     system_prompt: str | None = None
-    toolsets: list[str] = field(default_factory=lambda: list(_DEFAULT_TOOLSETS))
+    builtin_toolsets: list[str] = field(default_factory=lambda: list(_DEFAULT_BUILTIN_TOOLSETS))
     subagent_configs: list[SubagentConfig] = field(default_factory=list)
     include_builtin_subagents: bool = False
     unified_subagents: bool = False
     need_user_approve_tools: list[str] = field(default_factory=list)
     need_user_approve_mcps: list[str] = field(default_factory=list)
+    enabled_mcps: list[str] = field(default_factory=list)
+    disabled_mcps: list[str] = field(default_factory=list)
     workspace_backend_hint: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -112,12 +114,14 @@ class ProfileResolver:
                 record.model_config_override,
             ),
             system_prompt=record.system_prompt,
-            toolsets=list(record.toolsets or _DEFAULT_TOOLSETS),
+            builtin_toolsets=_resolve_builtin_toolsets(record.builtin_toolsets),
             subagent_configs=self._resolve_subagent_configs(record.subagents),
             include_builtin_subagents=bool(record.include_builtin_subagents),
             unified_subagents=bool(record.unified_subagents),
             need_user_approve_tools=list(record.need_user_approve_tools or []),
             need_user_approve_mcps=list(record.need_user_approve_mcps or []),
+            enabled_mcps=list(record.enabled_mcps or []),
+            disabled_mcps=list(record.disabled_mcps or []),
             workspace_backend_hint=record.workspace_backend_hint,
             metadata={
                 "source_type": record.source_type,
@@ -137,7 +141,7 @@ class ProfileResolver:
             model_settings=resolve_model_settings(self._settings.execution_model_settings_preset),
             model_config=resolve_model_cfg(self._settings.execution_model_config_preset),
             system_prompt=self._settings.execution_system_prompt,
-            toolsets=list(_DEFAULT_TOOLSETS),
+            builtin_toolsets=list(_DEFAULT_BUILTIN_TOOLSETS),
             subagent_configs=[],
             include_builtin_subagents=False,
             unified_subagents=False,
@@ -206,17 +210,33 @@ def _apply_seed_row(record: ProfileRecord, row: dict[str, Any], *, source_checks
     record.model_config_preset = _normalize_optional_str(row.get("model_config_preset"))
     record.model_config_override = _normalize_optional_dict(row.get("model_config_override"))
     record.system_prompt = _normalize_optional_str(row.get("system_prompt"))
-    record.toolsets = _normalize_optional_str_list(row.get("toolsets")) or list(_DEFAULT_TOOLSETS)
+    record.builtin_toolsets = _resolve_seed_builtin_toolsets(row)
     record.subagents = _normalize_optional_dict_list(row.get("subagents")) or []
     record.include_builtin_subagents = bool(row.get("include_builtin_subagents", False))
     record.unified_subagents = bool(row.get("unified_subagents", False))
     record.need_user_approve_tools = _normalize_optional_str_list(row.get("need_user_approve_tools")) or []
     record.need_user_approve_mcps = _normalize_optional_str_list(row.get("need_user_approve_mcps")) or []
+    record.enabled_mcps = _normalize_optional_str_list(row.get("enabled_mcps")) or []
+    record.disabled_mcps = _normalize_optional_str_list(row.get("disabled_mcps")) or []
     record.workspace_backend_hint = _normalize_optional_str(row.get("workspace_backend_hint"))
     record.enabled = bool(row.get("enabled", True))
     record.source_type = _normalize_optional_str(row.get("source_type")) or "seed"
     record.source_version = _normalize_optional_str(row.get("source_version"))
     record.source_checksum = _normalize_optional_str(row.get("source_checksum")) or source_checksum
+
+
+def _resolve_builtin_toolsets(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip() != ""]
+    return list(_DEFAULT_BUILTIN_TOOLSETS)
+
+
+def _resolve_seed_builtin_toolsets(row: dict[str, Any]) -> list[str]:
+    if "builtin_toolsets" in row:
+        return _normalize_optional_str_list(row.get("builtin_toolsets"), allow_empty=True) or []
+    if "toolsets" in row:
+        return _normalize_optional_str_list(row.get("toolsets"), allow_empty=True) or []
+    return list(_DEFAULT_BUILTIN_TOOLSETS)
 
 
 def _normalize_optional_str(value: Any) -> str | None:
@@ -232,11 +252,13 @@ def _normalize_optional_dict(value: Any) -> dict[str, Any] | None:
     return None
 
 
-def _normalize_optional_str_list(value: Any) -> list[str] | None:
+def _normalize_optional_str_list(value: Any, *, allow_empty: bool = False) -> list[str] | None:
     if not isinstance(value, list):
         return None
     values = [str(item).strip() for item in value if str(item).strip() != ""]
-    return values or None
+    if values or allow_empty:
+        return values
+    return None
 
 
 def _normalize_optional_dict_list(value: Any) -> list[dict[str, Any]] | None:

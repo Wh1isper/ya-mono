@@ -110,7 +110,7 @@ profiles:
     </response_format>
 
     </agent_behavior>
-  toolsets:
+  builtin_toolsets:
   - core
   subagents:
   - name: code-reviewer
