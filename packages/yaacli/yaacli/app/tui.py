@@ -1040,7 +1040,7 @@ class TUIApp:
             else:
                 input_mode_text = "Enter:Newline | Tab:Send"
 
-            scroll_hint = "Shift+Up/Down: Scroll" if sys.platform == "darwin" else "Ctrl+Up/Down: Scroll"
+            scroll_hint = "Fn+Up/Down: Scroll" if sys.platform == "darwin" else "Ctrl+Up/Down: Scroll"
 
             parts = [
                 (mode_style, f" {self._mode.value.upper()} "),
@@ -1997,14 +1997,20 @@ class TUIApp:
             if self._app:
                 self._app.invalidate()
 
+    def _add_prompt_history(self, text: str) -> None:
+        """Record submitted text for prompt history navigation."""
+        if not text:
+            return
+        self._history_index = -1
+        self._current_input_backup = ""
+        if not self._prompt_history or self._prompt_history[-1] != text:
+            self._prompt_history.append(text)
+
     def _submit_input(self, text: str, input_area: TextArea) -> None:
         """Submit the current input buffer content."""
         if self._state == TUIState.RUNNING:
             if text:
-                self._history_index = -1
-                self._current_input_backup = ""
-                if not self._prompt_history or self._prompt_history[-1] != text:
-                    self._prompt_history.append(text)
+                self._add_prompt_history(text)
                 self._add_steering_message(text)
                 input_area.buffer.reset()
                 return
@@ -2018,11 +2024,13 @@ class TUIApp:
             return
 
         if text.startswith("/"):
+            self._add_prompt_history(text)
             input_area.buffer.reset()
             self._track_managed_task(asyncio.create_task(self._handle_command(text)))
             return
 
         if text.startswith("!"):
+            self._add_prompt_history(text)
             input_area.buffer.reset()
             self._track_managed_task(asyncio.create_task(self._execute_shell_command(text[1:])))
             return
@@ -2032,10 +2040,7 @@ class TUIApp:
             input_area.buffer.reset()
             return
 
-        self._history_index = -1
-        self._current_input_backup = ""
-        if text and (not self._prompt_history or self._prompt_history[-1] != text):
-            self._prompt_history.append(text)
+        self._add_prompt_history(text)
 
         input_area.buffer.reset()
         self._append_user_input(text, attachments)
@@ -2062,8 +2067,89 @@ class TUIApp:
     # UI Setup
     # =========================================================================
 
+    def _setup_input_keybindings(self, input_area: TextArea) -> KeyBindings:
+        """Set up key bindings owned by the focused input control."""
+        kb = KeyBindings()
+
+        def previous_history() -> None:
+            if not self._prompt_history:
+                return
+            # First time pressing up: backup current input
+            if self._history_index == -1:
+                self._current_input_backup = input_area.buffer.text
+                self._history_index = len(self._prompt_history)
+            # Move to previous item
+            if self._history_index > 0:
+                self._history_index -= 1
+                input_area.buffer.text = self._prompt_history[self._history_index]
+                input_area.buffer.cursor_position = len(input_area.buffer.text)
+
+        def next_history() -> None:
+            if self._history_index == -1:
+                return
+            # Move to next item
+            self._history_index += 1
+            if self._history_index >= len(self._prompt_history):
+                # Reached end, restore original input
+                self._history_index = -1
+                input_area.buffer.text = self._current_input_backup
+            else:
+                input_area.buffer.text = self._prompt_history[self._history_index]
+            input_area.buffer.cursor_position = len(input_area.buffer.text)
+
+        @kb.add("up", eager=True)
+        def handle_up(event: KeyPressEvent) -> None:
+            """Navigate to previous prompt in history."""
+            previous_history()
+
+        @kb.add("c-p", eager=True)
+        def handle_ctrl_p(event: KeyPressEvent) -> None:
+            """Navigate to previous prompt in history using a TTY-stable key."""
+            previous_history()
+
+        @kb.add("down", eager=True)
+        def handle_down(event: KeyPressEvent) -> None:
+            """Navigate to next prompt in history."""
+            next_history()
+
+        @kb.add("c-n", eager=True)
+        def handle_ctrl_n(event: KeyPressEvent) -> None:
+            """Navigate to next prompt in history using a TTY-stable key."""
+            next_history()
+
+        def submit_or_newline() -> None:
+            if self._input_mode == "send":
+                text = input_area.buffer.text.strip()
+
+                if self._hitl_pending and self._approval_event and not self._approval_event.is_set():
+                    input_area.buffer.reset()
+                    if text.lower() in ("", "y", "yes"):
+                        self._approval_result = True
+                        self._approval_reason = None
+                    else:
+                        self._approval_result = False
+                        self._approval_reason = text if text else None
+                    self._approval_event.set()
+                    return
+
+                self._submit_input(text, input_area)
+            else:
+                input_area.buffer.insert_text("\n")
+
+        @kb.add("enter", eager=True)
+        def handle_enter(event: KeyPressEvent) -> None:
+            """Handle Enter based on current input mode."""
+            submit_or_newline()
+
+        @kb.add("c-j", eager=True)
+        def handle_ctrl_j(event: KeyPressEvent) -> None:
+            """Handle terminals that emit Ctrl+J for Enter."""
+            submit_or_newline()
+
+        return kb
+
     def _setup_keybindings(self, input_area: TextArea) -> KeyBindings:
-        """Set up keyboard bindings."""
+        """Set up application-wide keyboard bindings."""
         kb = KeyBindings()
 
         @kb.add("c-c")
@@ -2130,36 +2216,6 @@ class TUIApp:
             input_area.buffer.reset()
             self._history_index = -1
 
-        @kb.add("up")
-        def handle_up(event: KeyPressEvent) -> None:
-            """Navigate to previous prompt in history."""
-            if not self._prompt_history:
-                return
-            # First time pressing up: backup current input
-            if self._history_index == -1:
-                self._current_input_backup = input_area.buffer.text
-                self._history_index = len(self._prompt_history)
-            # Move to previous item
-            if self._history_index > 0:
-                self._history_index -= 1
-                input_area.buffer.text = self._prompt_history[self._history_index]
-                input_area.buffer.cursor_position = len(input_area.buffer.text)
-
-        @kb.add("down")
-        def handle_down(event: KeyPressEvent) -> None:
-            """Navigate to next prompt in history."""
-            if self._history_index == -1:
-                return
-            # Move to next item
-            self._history_index += 1
-            if self._history_index >= len(self._prompt_history):
-                # Reached end, restore original input
-                self._history_index = -1
-                input_area.buffer.text = self._current_input_backup
-            else:
-                input_area.buffer.text = self._prompt_history[self._history_index]
-            input_area.buffer.cursor_position = len(input_area.buffer.text)
-
         @kb.add("escape")
         def handle_escape(event: KeyPressEvent) -> None:
             """Toggle mouse support mode."""
@@ -2169,27 +2225,6 @@ class TUIApp:
                     self._app.output.enable_mouse_support()
                 else:
                     self._app.output.disable_mouse_support()
-
-        @kb.add("enter")
-        def handle_enter(event: KeyPressEvent) -> None:
-            """Handle Enter based on current input mode."""
-            if self._input_mode == "send":
-                text = input_area.buffer.text.strip()
-
-                if self._hitl_pending and self._approval_event and not self._approval_event.is_set():
-                    input_area.buffer.reset()
-                    if text.lower() in ("", "y", "yes"):
-                        self._approval_result = True
-                        self._approval_reason = None
-                    else:
-                        self._approval_result = False
-                        self._approval_reason = text if text else None
-                    self._approval_event.set()
-                    return
-
-                self._submit_input(text, input_area)
-            else:
-                input_area.buffer.insert_text("\n")
 
         @kb.add(Keys.BracketedPaste, eager=True)
         def handle_bracketed_paste(event: KeyPressEvent) -> None:
@@ -2490,7 +2525,8 @@ class TUIApp:
         kb_table.add_row("Ctrl+V", "Attach image from clipboard")
         kb_table.add_row("Tab", "Toggle input mode")
         kb_table.add_row("Escape", "Toggle mouse mode")
-        kb_table.add_row("Up/Down", "Browse history")
+        kb_table.add_row("Up/Down, Ctrl+P/N", "Browse history")
+        kb_table.add_row("PageUp/PageDown", "Scroll output")
         lines.append(self._renderer.render(kb_table).rstrip())
 
         self._append_output("\n".join(lines))
@@ -3061,6 +3097,7 @@ class TUIApp:
             include_default_input_processors=False,
             lexer=original_control.lexer,
             focus_on_click=original_control.focus_on_click,
+            key_bindings=self._setup_input_keybindings(input_area),
         )
         input_area.window.content = scrollable_control
         input_area.control = scrollable_control
