@@ -14,7 +14,13 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
+from prompt_toolkit import Application
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.keys import Keys
+from prompt_toolkit.layout import HSplit, Layout, Window
+from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+from prompt_toolkit.output import DummyOutput
 from prompt_toolkit.widgets import TextArea
 from pydantic_ai import BinaryContent
 from y_agent_environment.shell import BackgroundProcess
@@ -23,6 +29,7 @@ from y_agent_environment.shell import BackgroundProcess
 from yaacli.app import TUIApp, TUIMode, TUIState
 from yaacli.app.tui import PendingAttachment, _is_benign_contextvar_cleanup_error
 from yaacli.clipboard import ClipboardImage, ClipboardImageReadResult
+from yaacli.config import CommandDefinition
 
 
 @dataclass
@@ -47,9 +54,10 @@ class MockConfig:
             url=None,
         )
     )
+    commands: dict[str, CommandDefinition] = field(default_factory=dict)
 
-    def get_commands(self) -> dict:
-        return {}
+    def get_commands(self) -> dict[str, CommandDefinition]:
+        return self.commands
 
 
 @dataclass
@@ -666,6 +674,200 @@ def test_tui_app_prompt_history():
     assert app._prompt_history[0] == "First prompt"
 
 
+@pytest.mark.asyncio
+async def test_tui_app_slash_commands_are_added_to_prompt_history():
+    """Slash commands should be available through prompt history navigation."""
+    config = MockConfig(
+        commands={
+            "commit": CommandDefinition(
+                prompt="Create a git commit for the current changes.",
+                mode="act",
+                description="Commit changes",
+            )
+        }
+    )
+    config_manager = MockConfigManager()
+    app = TUIApp(config=config, config_manager=config_manager)
+    input_area = TextArea(multiline=True)
+
+    async def fake_run_agent(prompt: str, attachments: Any = None) -> None:
+        return None
+
+    app._run_agent = fake_run_agent  # type: ignore[method-assign]
+    app._submit_input("/commit polish tests", input_area)
+
+    command_task = next(iter(app._managed_tasks))
+    await command_task
+    if app._agent_task is not None:
+        await app._agent_task
+
+    assert app._prompt_history == ["/commit polish tests"]
+
+    key_bindings = app._setup_input_keybindings(input_area)
+    handle_up = next(binding.handler for binding in key_bindings.bindings if binding.keys == (Keys.Up,))
+    handle_up(MagicMock())
+
+    assert input_area.buffer.text == "/commit polish tests"
+
+
+@pytest.mark.asyncio
+async def test_tui_app_shell_commands_are_added_to_prompt_history():
+    """Shell commands should be available through prompt history navigation."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+    app = TUIApp(config=config, config_manager=config_manager)
+    input_area = TextArea(multiline=True)
+
+    async def fake_execute_shell_command(command_str: str) -> None:
+        return None
+
+    app._execute_shell_command = fake_execute_shell_command  # type: ignore[method-assign]
+    app._submit_input("!git status", input_area)
+
+    command_task = next(iter(app._managed_tasks))
+    await command_task
+
+    assert app._prompt_history == ["!git status"]
+
+
+def test_tui_app_input_keybindings_are_eager():
+    """Ensure focused input keys win over TextArea defaults."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+    app = TUIApp(config=config, config_manager=config_manager)
+    input_area = TextArea(multiline=True)
+
+    key_bindings = app._setup_input_keybindings(input_area)
+    eager_handlers = {
+        tuple(key.value for key in binding.keys): binding.handler.__name__
+        for binding in key_bindings.bindings
+        if bool(binding.eager())
+    }
+
+    assert eager_handlers[("up",)] == "handle_up"
+    assert eager_handlers[("c-p",)] == "handle_ctrl_p"
+    assert eager_handlers[("down",)] == "handle_down"
+    assert eager_handlers[("c-n",)] == "handle_ctrl_n"
+    assert eager_handlers[("c-m",)] == "handle_enter"
+    assert eager_handlers[("c-j",)] == "handle_ctrl_j"
+
+
+def test_tui_app_focused_input_keybindings_win_in_application_registry():
+    """Ensure prompt_toolkit resolves focused input bindings as active matches."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+    app = TUIApp(config=config, config_manager=config_manager)
+    input_area = TextArea(multiline=True)
+
+    class TestBufferControl(BufferControl):
+        pass
+
+    original_control = input_area.control
+    input_area.control = TestBufferControl(
+        buffer=original_control.buffer,
+        input_processors=original_control.input_processors,
+        include_default_input_processors=False,
+        lexer=original_control.lexer,
+        focus_on_click=original_control.focus_on_click,
+        key_bindings=app._setup_input_keybindings(input_area),
+    )
+    input_area.window.content = input_area.control
+
+    layout = Layout(
+        HSplit([
+            Window(content=FormattedTextControl("output")),
+            input_area,
+        ]),
+        focused_element=input_area,
+    )
+    pt_app: Application[None] = Application(
+        layout=layout,
+        key_bindings=app._setup_keybindings(input_area),
+        output=DummyOutput(),
+    )
+    registry = pt_app.key_processor._bindings
+
+    active_handlers = {}
+    for key in (Keys.Up, Keys.ControlP, Keys.Down, Keys.ControlN, Keys.ControlM, Keys.ControlJ):
+        active = [binding for binding in registry.get_bindings_for_keys((key,)) if binding.filter()]
+        active_handlers[key.value] = active[-1].handler.__name__
+
+    assert active_handlers == {
+        "up": "handle_up",
+        "c-p": "handle_ctrl_p",
+        "down": "handle_down",
+        "c-n": "handle_ctrl_n",
+        "c-m": "handle_enter",
+        "c-j": "handle_ctrl_j",
+    }
+
+
+@pytest.mark.asyncio
+async def test_tui_app_submit_custom_slash_command():
+    """Submitting a custom slash command expands and runs its configured prompt."""
+    config = MockConfig(
+        commands={
+            "commit": CommandDefinition(
+                prompt="Create a git commit for the current changes.",
+                mode="act",
+                description="Commit changes",
+            )
+        }
+    )
+    config_manager = MockConfigManager()
+    app = TUIApp(config=config, config_manager=config_manager)
+    input_area = TextArea(multiline=True)
+    captured_prompts: list[str] = []
+
+    async def fake_run_agent(prompt: str, attachments: Any = None) -> None:
+        captured_prompts.append(prompt)
+
+    app._run_agent = fake_run_agent  # type: ignore[method-assign]
+
+    app._submit_input("/commit polish tests", input_area)
+    assert input_area.buffer.text == ""
+
+    command_task = next(iter(app._managed_tasks))
+    await command_task
+    assert app._agent_task is not None
+    await app._agent_task
+
+    assert captured_prompts == ["Create a git commit for the current changes.\n\nUser instruction: polish tests"]
+
+
+@pytest.mark.asyncio
+async def test_tui_app_run_async_accepts_custom_slash_command_enter() -> None:
+    """Ensure prompt_toolkit run_async submits slash commands from terminal input."""
+    config = MockConfig(
+        commands={
+            "commit": CommandDefinition(
+                prompt="Create a git commit for the current changes.",
+                mode="act",
+                description="Commit changes",
+            )
+        }
+    )
+    config_manager = MockConfigManager()
+    app = TUIApp(config=config, config_manager=config_manager)
+    captured_prompts: list[str] = []
+
+    async def fake_run_agent(prompt: str, attachments: Any = None) -> None:
+        captured_prompts.append(prompt)
+        if app._app:
+            app._app.exit()
+
+    app._run_agent = fake_run_agent  # type: ignore[method-assign]
+
+    with create_pipe_input() as pipe_input:
+        with create_app_session(input=pipe_input, output=DummyOutput()):
+            run_task = asyncio.create_task(app.run())
+            await asyncio.sleep(0.1)
+            pipe_input.send_text("/commit polish tests\r")
+            await asyncio.wait_for(run_task, timeout=2)
+
+    assert captured_prompts == ["Create a git commit for the current changes.\n\nUser instruction: polish tests"]
+
+
 # =============================================================================
 # Session Usage Tests
 # =============================================================================
@@ -944,20 +1146,26 @@ async def test_tui_app_submit_input_allows_attachment_only_message() -> None:
     config_manager = MockConfigManager()
     app = TUIApp(config=config, config_manager=config_manager)
     input_area = TextArea(multiline=True)
-    app._pending_attachments.append(PendingAttachment(data=b"img", media_type="image/png", size_bytes=3))
+    attachment = PendingAttachment(data=b"img", media_type="image/png", size_bytes=3)
+    app._pending_attachments.append(attachment)
+    captured_runs: list[tuple[str, list[PendingAttachment] | None]] = []
 
-    fake_task = MagicMock()
-    with (
-        patch.object(app, "_append_user_input") as mock_append_user_input,
-        patch("asyncio.create_task") as mock_create_task,
-    ):
-        mock_create_task.return_value = fake_task
+    async def fake_run_agent(
+        prompt: str,
+        attachments: list[PendingAttachment] | None = None,
+    ) -> None:
+        captured_runs.append((prompt, attachments))
+
+    app._run_agent = fake_run_agent  # type: ignore[method-assign]
+
+    with patch.object(app, "_append_user_input") as mock_append_user_input:
         app._submit_input("", input_area)
 
-    mock_append_user_input.assert_called_once()
-    mock_create_task.assert_called_once()
+    mock_append_user_input.assert_called_once_with("", [attachment])
     assert app._pending_attachments == []
-    fake_task.add_done_callback.assert_called_once()
+    assert app._agent_task is not None
+    await app._agent_task
+    assert captured_runs == [("", [attachment])]
 
 
 def test_tui_app_clear_session_clears_pending_attachments() -> None:
