@@ -1085,8 +1085,9 @@ class ModelConfigPreset(StrEnum):
     CLAUDE_400K = "claude_400k"
     CLAUDE_1M = "claude_1m"
 
-    # OpenAI models (GPT-5 series with 270k context)
+    # OpenAI models (GPT-5 series)
     GPT5_270K = "gpt5_270k"
+    GPT5_1M = "gpt5_1m"
 
     # Gemini models
     GEMINI_200K = "gemini_200k"
@@ -1129,6 +1130,16 @@ _MODEL_CFG_REGISTRY: dict[str, dict[str, Any]] = {
     # OpenAI GPT-5 series (vision, no video support)
     ModelConfigPreset.GPT5_270K.value: {
         "context_window": 270_000,
+        "max_images": 20,
+        "max_videos": 0,  # GPT doesn't support video
+        "support_gif": False,
+        "split_large_images": True,
+        "image_split_max_height": 4096,
+        "image_split_overlap": 50,
+        "capabilities": {ModelCapability.vision},
+    },
+    ModelConfigPreset.GPT5_1M.value: {
+        "context_window": 922_000,
         "max_images": 20,
         "max_videos": 0,  # GPT doesn't support video
         "support_gif": False,

@@ -49,7 +49,7 @@ class GeneralConfig(BaseModel):
     """Model settings: preset name (e.g., 'anthropic_high') or dict of actual values."""
 
     model_cfg: str | dict[str, Any] | None = None
-    """Model config for context management: preset name (e.g., 'claude_200k', 'gemini_1m') or dict."""
+    """Model config for context management: preset name (e.g., 'claude_200k', 'gpt5_1m', 'gemini_1m') or dict."""
 
     max_requests: int = 1000
     """Maximum requests per session."""

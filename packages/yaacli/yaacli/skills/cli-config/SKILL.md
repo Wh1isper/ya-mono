@@ -32,7 +32,7 @@ model = "anthropic:claude-sonnet-4-5"
 model_settings = "anthropic"
 
 # Model config for context management
-# Presets: claude_200k, claude_1m, gpt5_270k, gemini_1m
+# Presets: claude_200k, claude_1m, gpt5_270k, gpt5_1m, gemini_1m
 model_cfg = "claude_200k"
 
 # Maximum requests per session
