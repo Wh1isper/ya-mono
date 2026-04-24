@@ -124,6 +124,30 @@ def serve(host: str | None, port: int | None, reload: bool | None, migrate: bool
     cli_application.serve(host=host, port=port, reload=reload, migrate=migrate)
 
 
+@cli.command()
+@click.option("--host", default=None, help="Bind host for the HTTP server.")
+@click.option("--port", default=None, type=int, help="Bind port for the HTTP server.")
+def start(host: str | None, port: int | None) -> None:
+    """Production startup: migrate, seed, then serve."""
+    settings = cli_application.settings()
+
+    try:
+        settings.require_api_token()
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if settings.auto_migrate:
+        cli_application.upgrade_database()
+        click.echo("Database migrations applied.")
+
+    if settings.auto_seed_profiles:
+        seeded_names = cli_application.seed_profiles(prune_missing=False, migrate=False, seed_file=None)
+        if seeded_names:
+            click.echo(f"Seeded {len(seeded_names)} profile(s): {', '.join(seeded_names)}")
+
+    cli_application.serve(host=host, port=port, reload=False, migrate=False)
+
+
 @cli.group()
 def db() -> None:
     """Database migration and management commands."""

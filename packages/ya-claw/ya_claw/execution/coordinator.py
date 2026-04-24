@@ -20,6 +20,7 @@ from ya_claw.agui_adapter import AguiEventAdapter
 from ya_claw.config import ClawSettings
 from ya_claw.context import ClawAgentContext
 from ya_claw.controller.models import InputPart, extract_project_references, parse_input_parts
+from ya_claw.execution.background import BACKGROUND_MONITOR_KEY, BackgroundMonitor
 from ya_claw.execution.checkpoint import build_message_checkpoint, commit_run_artifacts, write_message_checkpoint
 from ya_claw.execution.input import InputMappingResult, map_input_parts
 from ya_claw.execution.profile import ProfileResolver, ResolvedProfile
@@ -293,6 +294,9 @@ class RunCoordinator:
         buffers: ExecutionBuffers,
     ) -> None:
         environment = self._environment_factory.build(workspace_binding)
+        background_monitor = BackgroundMonitor(run_id=run_id, runtime_state=self._runtime_state)
+        environment.resources.set(BACKGROUND_MONITOR_KEY, background_monitor)
+
         restored_state = self._extract_resumable_state(restore_point)
         runtime = self._runtime_builder.build(
             profile=profile,
@@ -315,6 +319,8 @@ class RunCoordinator:
         agui_adapter = AguiEventAdapter(session_id=session_id, run_id=run_id)
 
         async with runtime:
+            background_monitor.set_core_toolset(runtime.core_toolset)
+
             if isinstance(environment, Environment):
                 runtime.ctx.container_id = self._extract_environment_container_id(environment)
             await self._persist_session_sandbox(session_id, workspace_binding, environment)
@@ -358,6 +364,12 @@ class RunCoordinator:
                 finally:
                     steering_task.cancel()
                     await asyncio.gather(steering_task, return_exceptions=True)
+
+                drained_background = await background_monitor.drain_or_cancel(timeout=10.0)
+                if not drained_background:
+                    logger.warning(
+                        "YA Claw background subagents cancelled after drain timeout", extra={"run_id": run_id}
+                    )
 
                 if streamer.run is None:
                     if self._runtime_state.get_termination_requested(run_id) is not None:

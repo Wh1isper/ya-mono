@@ -127,6 +127,17 @@ Two image definitions exist in the repository:
 - `Dockerfile.ya-claw` for the active runtime
 - `Dockerfile.ya-agent-platform` for the WIP stateless agent service image
 
+### Docker Startup
+
+The `ya-claw` image uses `tini` as PID 1 and runs `ya-claw start` as the default command.
+The `start` command handles:
+
+1. database migration when `YA_CLAW_AUTO_MIGRATE` is enabled
+2. profile seeding when `YA_CLAW_AUTO_SEED_PROFILES` is enabled
+3. HTTP server startup
+
+This replaces the previous `start.sh` shell wrapper and keeps startup logic inside the Python CLI for consistent error handling and signal propagation.
+
 ## AGUI Web UI Model
 
 The Web UI should follow an AGUI-aligned split:

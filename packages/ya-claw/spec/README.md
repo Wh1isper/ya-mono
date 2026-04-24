@@ -34,6 +34,7 @@ This spec set defines one execution shape:
 | 04      | [04-api.md](04-api.md)                                                                   | HTTP API surface and queued-run API semantics                           |
 | 05      | [05-web-ui-and-operations.md](05-web-ui-and-operations.md)                               | web shell, runtime operations, schedules, and bridge usage              |
 | 06      | [06-runtime-assembly.md](06-runtime-assembly.md)                                         | `WorkspaceBinding -> Environment -> ClawAgentContext -> AgentRuntime`   |
+| 07      | [07-async-subagents.md](07-async-subagents.md)                                           | non-blocking background subagent dispatch, spawn_delegate, steer        |
 
 ## Out of Scope
 
