@@ -82,6 +82,8 @@ Profile, MCP, and coordinator settings:
 
 Profiles store model, prompt, builtin tool groups, subagents, approval policy, and MCP namespace filters. Runtime-wide MCP server definitions load from `~/.ya-claw/mcp.json` with per-workspace override at `.ya-claw/mcp.json`. Every YA Claw agent runtime receives the active MCP configuration through `ToolProxyToolset`, and each profile can narrow that surface with `enabled_mcps` and `disabled_mcps`.
 
+Session and run requests accept `project_id` for a single workspace and `projects` for multi-project workspaces. Each project entry carries `project_id` plus optional `description`; YA Claw maps every project to a host directory under `YA_CLAW_WORKSPACE_ROOT` and exposes it at `/workspace/{project_id}` for file operations and shell execution. Project skills are discovered from each mounted project's `.agents/skills/` directory.
+
 Profiles can be managed through:
 
 - REST API: `/api/v1/profiles`

@@ -112,7 +112,7 @@ Recommended behavior:
 - explicit prune mode removes seeded rows no longer present in YAML
 - manually created rows remain first-class records
 
-## Opaque Project ID
+## Project References
 
 `project_id` is application input.
 YA Claw treats it as an opaque selector.
@@ -123,16 +123,27 @@ Typical examples:
 - the web shell restores the last used `project_id` from application state
 - another application sends a one-off `project_id` with a direct API request
 
+YA Claw also accepts `projects` for multi-project sessions and runs. Each entry contains:
+
+- `project_id` — opaque selector mapped under the configured workspace root
+- `description` — operator or application supplied context for the agent
+
+The first normalized project is the primary project and default cwd. Every project maps to:
+
+- host path: `{YA_CLAW_WORKSPACE_ROOT}/{project_id}`
+- virtual path: `/workspace/{project_id}`
+- skill path: `/workspace/{project_id}/.agents/skills/`
+
 YA Claw does not need project CRUD or a runtime-managed project catalog.
 
 ## WorkspaceProvider
 
-`WorkspaceProvider` is the runtime boundary that turns `project_id` plus request metadata into one declarative `WorkspaceBinding`.
+`WorkspaceProvider` is the runtime boundary that turns project references plus request metadata into one declarative `WorkspaceBinding`.
 
 A provider should return:
 
-- one host workspace path
-- one virtual workspace path exposed to the agent
+- one or more host workspace paths
+- one or more virtual workspace paths exposed to the agent
 - one default cwd
 - readable and writable virtual paths
 - environment overrides
@@ -145,21 +156,23 @@ A provider should return:
 It describes execution boundaries and path policy.
 It does not own the concrete SDK `Environment` instance.
 
+`WorkspaceBinding.project_mounts` carries the normalized project map. `readable_paths` and `writable_paths` are derived from the mount virtual paths, and the primary mount defines `cwd`.
+
 ### LocalWorkspaceProvider
 
 Suggested shape:
 
-- host path under configured workspace root
-- virtual path under `/workspace/{project_id}`
-- path policy restricted to that project root
+- host paths under configured workspace root
+- virtual paths under `/workspace/{project_id}`
+- path policy restricted to mounted project roots
 - backend hint `local`
 
 ### DockerWorkspaceProvider
 
 Suggested shape:
 
-- host workspace path mounted into the container
-- virtual path shared by shell and file operations
+- host workspace paths mounted into the container
+- virtual paths shared by shell and file operations
 - backend hint `docker`
 - optional image hint from profile or service bootstrap config
 

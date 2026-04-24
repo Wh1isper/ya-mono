@@ -19,8 +19,11 @@ from ya_claw.controller.models import (
     SessionSummary,
     SteerRequest,
     TerminationReason,
+    extract_project_references,
+    normalize_project_references,
     run_detail_from_record,
     run_summary_from_record,
+    serialize_project_references,
     session_summary_from_record,
 )
 from ya_claw.controller.store import (
@@ -51,12 +54,18 @@ class RunController:
                     detail="session_id is required when restore_from_run_id is provided.",
                 )
             session_id = uuid4().hex
+            project_references = normalize_project_references(request.project_id, request.projects)
+            primary_project_id = project_references[0].project_id if project_references else request.project_id
+            session_metadata = {}
+            if project_references:
+                session_metadata["projects"] = serialize_project_references(project_references)
             session_record = SessionRecord(
                 id=session_id,
                 profile_name=request.profile_name,
-                project_id=request.project_id,
-                session_metadata={},
+                project_id=primary_project_id,
+                session_metadata=session_metadata,
             )
+            request.project_id = primary_project_id
             db_session.add(session_record)
         else:
             session_record = await db_session.get(SessionRecord, session_id)
@@ -80,6 +89,17 @@ class RunController:
         if restore_from_run_id is not None:
             await self._validate_restore_source(db_session, session_id, restore_from_run_id)
 
+        inherited_project_references = extract_project_references(
+            session_record.project_id, session_record.session_metadata
+        )
+        project_references = normalize_project_references(
+            request.project_id or session_record.project_id,
+            request.projects or inherited_project_references,
+        )
+        run_metadata = dict(request.metadata)
+        if project_references:
+            run_metadata["projects"] = serialize_project_references(project_references)
+
         sequence_no = await self._next_sequence_no(db_session, session_id)
         run_id = uuid4().hex
         run_record = RunRecord(
@@ -90,9 +110,13 @@ class RunController:
             status=RunStatus.QUEUED,
             trigger_type=request.trigger_type,
             profile_name=request.profile_name or session_record.profile_name,
-            project_id=request.project_id or session_record.project_id,
+            project_id=(
+                project_references[0].project_id
+                if project_references
+                else request.project_id or session_record.project_id
+            ),
             input_parts=[part.model_dump(mode="json") for part in request.input_parts],
-            run_metadata=dict(request.metadata),
+            run_metadata=run_metadata,
         )
         db_session.add(run_record)
         queue_run(session_record, run_record)

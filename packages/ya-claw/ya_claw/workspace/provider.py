@@ -18,6 +18,17 @@ _DOCKER_SANDBOX_NAME_PREFIX = "ya-claw-session"
 
 
 @dataclass(slots=True)
+class ProjectMount:
+    project_id: str
+    description: str | None
+    host_path: Path
+    virtual_path: Path
+    readable: bool = True
+    writable: bool = True
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class WorkspaceBinding:
     project_id: str
     host_path: Path
@@ -25,9 +36,21 @@ class WorkspaceBinding:
     cwd: Path
     readable_paths: list[Path]
     writable_paths: list[Path]
+    project_mounts: list[ProjectMount] = field(default_factory=list)
     environment_overrides: dict[str, str] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     backend_hint: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.project_mounts:
+            self.project_mounts = [
+                ProjectMount(
+                    project_id=self.project_id,
+                    description=None,
+                    host_path=self.host_path,
+                    virtual_path=self.virtual_path,
+                )
+            ]
 
 
 class WorkspaceProvider(ABC):
@@ -208,9 +231,11 @@ class LocalEnvironmentFactory(EnvironmentFactory):
         self._tmp_base_dir = tmp_base_dir
 
     def build(self, binding: WorkspaceBinding) -> Environment:
+        mounts = _virtual_mounts_from_binding(binding)
+        primary_mount = binding.project_mounts[0]
         return MappedLocalEnvironment(
-            mounts=[VirtualMount(host_path=binding.host_path, virtual_path=binding.virtual_path)],
-            host_cwd=binding.host_path,
+            mounts=mounts,
+            host_cwd=primary_mount.host_path,
             shell_timeout=self._shell_timeout,
             tmp_base_dir=self._tmp_base_dir,
         )
@@ -241,7 +266,7 @@ class DockerEnvironmentFactory(EnvironmentFactory):
             if session_id is not None:
                 container_ref = build_session_sandbox_container_ref(session_id)
 
-        mounts = [VirtualMount(host_path=binding.host_path, virtual_path=binding.virtual_path)]
+        mounts = _virtual_mounts_from_binding(binding)
         if container_ref is not None:
             return ReusableSandboxEnvironment(
                 mounts=mounts,
@@ -298,23 +323,18 @@ class LocalWorkspaceProvider(WorkspaceProvider):
     def resolve(self, project_id: str, metadata: dict[str, Any] | None = None) -> WorkspaceBinding:
         resolved_metadata = dict(metadata or {})
         host_path = (self._workspace_root / project_id).resolve()
-        host_path.mkdir(parents=True, exist_ok=True)
-        virtual_path = self._virtual_workspace_root / project_id
-        return WorkspaceBinding(
+        return _build_workspace_binding(
+            workspace_root=self._workspace_root,
+            virtual_workspace_root=self._virtual_workspace_root,
             project_id=project_id,
-            host_path=host_path,
-            virtual_path=virtual_path,
-            cwd=virtual_path,
-            readable_paths=[virtual_path],
-            writable_paths=[virtual_path],
-            metadata={
-                **resolved_metadata,
-                "provider": "local",
+            metadata=resolved_metadata,
+            provider="local",
+            backend_hint="local",
+            extra_metadata={
                 "shell_backend": "local",
                 "file_operator": "virtual-local",
                 "host_cwd": str(host_path),
             },
-            backend_hint="local",
         )
 
 
@@ -333,7 +353,6 @@ class DockerWorkspaceProvider(WorkspaceProvider):
     def resolve(self, project_id: str, metadata: dict[str, Any] | None = None) -> WorkspaceBinding:
         resolved_metadata = dict(metadata or {})
         host_path = (self._workspace_root / project_id).resolve()
-        host_path.mkdir(parents=True, exist_ok=True)
         virtual_path = self._virtual_workspace_root / project_id
         session_id = _normalize_optional_str(resolved_metadata.get("session_id"))
         sandbox_metadata = extract_session_sandbox_metadata(resolved_metadata) or {}
@@ -348,24 +367,120 @@ class DockerWorkspaceProvider(WorkspaceProvider):
             }
         if sandbox_metadata:
             resolved_metadata[_DOCKER_SANDBOX_METADATA_KEY] = sandbox_metadata
-        return WorkspaceBinding(
+        return _build_workspace_binding(
+            workspace_root=self._workspace_root,
+            virtual_workspace_root=self._virtual_workspace_root,
             project_id=project_id,
-            host_path=host_path,
-            virtual_path=virtual_path,
-            cwd=virtual_path,
-            readable_paths=[virtual_path],
-            writable_paths=[virtual_path],
-            metadata={
-                **resolved_metadata,
-                "provider": "docker",
+            metadata=resolved_metadata,
+            provider="docker",
+            backend_hint="docker",
+            extra_metadata={
                 "shell_backend": "docker",
                 "file_operator": "virtual-local",
                 "docker_image": self._image,
                 "host_mount": str(host_path),
                 "container_mount": str(virtual_path),
             },
-            backend_hint="docker",
         )
+
+
+def _extract_project_specs(
+    *,
+    project_id: str,
+    metadata: dict[str, Any],
+) -> list[dict[str, str | None]]:
+    specs: list[dict[str, str | None]] = []
+    indexes: dict[str, int] = {}
+
+    def add_spec(raw_project_id: Any, raw_description: Any = None) -> None:
+        if not isinstance(raw_project_id, str):
+            return
+        normalized_project_id = raw_project_id.strip()
+        if normalized_project_id == "":
+            return
+        description = raw_description.strip() if isinstance(raw_description, str) else None
+        existing_index = indexes.get(normalized_project_id)
+        if isinstance(existing_index, int):
+            if specs[existing_index].get("description") is None and description:
+                specs[existing_index]["description"] = description
+            return
+        indexes[normalized_project_id] = len(specs)
+        specs.append({
+            "project_id": normalized_project_id,
+            "description": description or None,
+        })
+
+    add_spec(project_id)
+    raw_projects = metadata.get("projects")
+    if isinstance(raw_projects, list):
+        for raw_project in raw_projects:
+            if isinstance(raw_project, dict):
+                add_spec(raw_project.get("project_id"), raw_project.get("description"))
+    return specs
+
+
+def _build_workspace_binding(
+    *,
+    workspace_root: Path,
+    virtual_workspace_root: Path,
+    project_id: str,
+    metadata: dict[str, Any],
+    provider: str,
+    backend_hint: str,
+    extra_metadata: dict[str, Any],
+) -> WorkspaceBinding:
+    project_specs = _extract_project_specs(project_id=project_id, metadata=metadata)
+    project_mounts: list[ProjectMount] = []
+    for spec in project_specs:
+        current_project_id = str(spec["project_id"])
+        host_path = (workspace_root / current_project_id).resolve()
+        host_path.mkdir(parents=True, exist_ok=True)
+        virtual_path = virtual_workspace_root / current_project_id
+        project_mounts.append(
+            ProjectMount(
+                project_id=current_project_id,
+                description=spec.get("description"),
+                host_path=host_path,
+                virtual_path=virtual_path,
+                metadata={"provider": provider},
+            )
+        )
+
+    primary_mount = project_mounts[0]
+    readable_paths = [mount.virtual_path for mount in project_mounts if mount.readable]
+    writable_paths = [mount.virtual_path for mount in project_mounts if mount.writable]
+    return WorkspaceBinding(
+        project_id=primary_mount.project_id,
+        host_path=primary_mount.host_path,
+        virtual_path=primary_mount.virtual_path,
+        cwd=primary_mount.virtual_path,
+        readable_paths=readable_paths,
+        writable_paths=writable_paths,
+        project_mounts=project_mounts,
+        metadata={
+            **metadata,
+            "provider": provider,
+            "projects": [
+                {
+                    "project_id": mount.project_id,
+                    "description": mount.description,
+                    "host_path": str(mount.host_path),
+                    "virtual_path": str(mount.virtual_path),
+                }
+                for mount in project_mounts
+            ],
+            **extra_metadata,
+        },
+        backend_hint=backend_hint,
+    )
+
+
+def _virtual_mounts_from_binding(binding: WorkspaceBinding) -> list[VirtualMount]:
+    return [
+        VirtualMount(host_path=mount.host_path, virtual_path=mount.virtual_path)
+        for mount in binding.project_mounts
+        if mount.readable or mount.writable
+    ]
 
 
 def build_session_sandbox_container_ref(session_id: str) -> str:
@@ -400,6 +515,15 @@ def build_session_sandbox_metadata(*, binding: WorkspaceBinding, environment: En
         "image": _normalize_optional_str(existing.get("image"))
         or _normalize_optional_str(binding.metadata.get("docker_image")),
         "project_id": binding.project_id,
+        "projects": [
+            {
+                "project_id": mount.project_id,
+                "description": mount.description,
+                "host_mount": str(mount.host_path),
+                "container_mount": str(mount.virtual_path),
+            }
+            for mount in binding.project_mounts
+        ],
         "host_mount": str(binding.host_path),
         "container_mount": str(binding.virtual_path),
         "cwd": str(binding.cwd),

@@ -19,7 +19,7 @@ from ya_agent_sdk.events import ModelRequestCompleteEvent, ModelRequestStartEven
 from ya_claw.agui_adapter import AguiEventAdapter
 from ya_claw.config import ClawSettings
 from ya_claw.context import ClawAgentContext
-from ya_claw.controller.models import InputPart, parse_input_parts
+from ya_claw.controller.models import InputPart, extract_project_references, parse_input_parts
 from ya_claw.execution.checkpoint import build_message_checkpoint, commit_run_artifacts, write_message_checkpoint
 from ya_claw.execution.input import InputMappingResult, map_input_parts
 from ya_claw.execution.profile import ProfileResolver, ResolvedProfile
@@ -420,11 +420,16 @@ class RunCoordinator:
         profile: ResolvedProfile,
     ) -> WorkspaceBinding:
         project_id = run_record.project_id or session_record.project_id or session_record.id
+        project_references = extract_project_references(
+            run_record.project_id or session_record.project_id,
+            run_record.run_metadata if isinstance(run_record.run_metadata, dict) else session_record.session_metadata,
+        )
         metadata: dict[str, Any] = {
             "run_id": run_record.id,
             "session_id": session_record.id,
             "profile_name": profile.name,
             "trigger_type": run_record.trigger_type,
+            "projects": [project.model_dump(mode="json", exclude_none=True) for project in project_references],
         }
         if isinstance(session_record.session_metadata, dict):
             sandbox = session_record.session_metadata.get("sandbox")
@@ -477,9 +482,16 @@ class RunCoordinator:
         workspace_binding: WorkspaceBinding,
     ) -> str | list[Any]:
         prompt_parts: list[Any] = []
+        project_lines = [
+            f"- {mount.project_id}: {mount.virtual_path}"
+            + (f" -- {mount.description}" if isinstance(mount.description, str) and mount.description else "")
+            for mount in workspace_binding.project_mounts
+        ]
         instruction_lines = [
             f"Workspace cwd: {workspace_binding.cwd}",
             f"Writable paths: {', '.join(str(path) for path in workspace_binding.writable_paths)}",
+            "Mounted projects:",
+            *project_lines,
         ]
         if mapping.mode_parts:
             instruction_lines.append("Modes: " + ", ".join(part.mode for part in mapping.mode_parts))
@@ -549,6 +561,16 @@ class RunCoordinator:
                 "project_id": workspace_binding.project_id,
                 "virtual_path": str(workspace_binding.virtual_path),
                 "cwd": str(workspace_binding.cwd),
+                "projects": [
+                    {
+                        "project_id": mount.project_id,
+                        "description": mount.description,
+                        "virtual_path": str(mount.virtual_path),
+                        "readable": mount.readable,
+                        "writable": mount.writable,
+                    }
+                    for mount in workspace_binding.project_mounts
+                ],
                 "metadata": self._serialize_value(workspace_binding.metadata),
             },
             "profile": {

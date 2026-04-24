@@ -48,6 +48,63 @@ async def test_local_environment_factory_uses_virtual_fs_and_local_shell(tmp_pat
     assert "notes.txt" in stdout
 
 
+def test_local_workspace_provider_resolves_multiple_project_mounts(tmp_path: Path) -> None:
+    provider = LocalWorkspaceProvider(tmp_path / "workspace-root")
+
+    binding = provider.resolve(
+        "repo-a",
+        metadata={
+            "projects": [
+                {"project_id": "repo-a", "description": "primary repo"},
+                {"project_id": "repo-b", "description": "reference repo"},
+            ]
+        },
+    )
+
+    assert binding.project_id == "repo-a"
+    assert [mount.project_id for mount in binding.project_mounts] == ["repo-a", "repo-b"]
+    assert [mount.virtual_path for mount in binding.project_mounts] == [
+        Path("/workspace") / "repo-a",
+        Path("/workspace") / "repo-b",
+    ]
+    assert binding.project_mounts[0].description == "primary repo"
+    assert binding.project_mounts[1].description == "reference repo"
+    assert binding.readable_paths == [Path("/workspace") / "repo-a", Path("/workspace") / "repo-b"]
+    assert binding.writable_paths == [Path("/workspace") / "repo-a", Path("/workspace") / "repo-b"]
+
+
+async def test_local_environment_factory_mounts_multiple_projects_for_fileops_and_shell(tmp_path: Path) -> None:
+    provider = LocalWorkspaceProvider(tmp_path / "workspace-root")
+    binding = provider.resolve(
+        "repo-a",
+        metadata={
+            "projects": [
+                {"project_id": "repo-a", "description": "primary repo"},
+                {"project_id": "repo-b", "description": "reference repo"},
+            ]
+        },
+    )
+    factory = LocalEnvironmentFactory()
+    environment = factory.build(binding)
+
+    async with environment as env:
+        assert isinstance(env.file_operator, VirtualLocalFileOperator)
+        assert env.shell is not None
+        await env.file_operator.write_file("notes.txt", "repo-a")
+        await env.file_operator.write_file("/workspace/repo-b/notes.txt", "repo-b")
+        repo_a_content = await env.file_operator.read_file("notes.txt")
+        repo_b_content = await env.file_operator.read_file("/workspace/repo-b/notes.txt")
+        exit_code, stdout, stderr = await env.shell.execute(
+            'printf \'%s|%s\' "$(cat notes.txt)" "$(cat ../repo-b/notes.txt)"'
+        )
+
+    assert repo_a_content == "repo-a"
+    assert repo_b_content == "repo-b"
+    assert exit_code == 0
+    assert stderr == ""
+    assert stdout == "repo-a|repo-b"
+
+
 def test_docker_workspace_provider_builds_declarative_binding(tmp_path: Path) -> None:
     provider = DockerWorkspaceProvider(tmp_path / "workspace-root", image="python:3.11")
 
