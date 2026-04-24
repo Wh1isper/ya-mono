@@ -750,6 +750,15 @@ def test_model_cfg_presets_structure() -> None:
     assert cfg_gpt_1m["image_split_max_height"] == 4096
     assert cfg_gpt_1m["image_split_overlap"] == 50
 
+    # DeepSeek V4 400K
+    cfg_deepseek_400k = get_model_cfg("deepseek_v4_400k")
+    assert cfg_deepseek_400k["context_window"] == 400_000
+    assert cfg_deepseek_400k["max_images"] == 0
+    assert cfg_deepseek_400k["max_videos"] == 0
+    assert cfg_deepseek_400k["split_large_images"] is False
+    assert cfg_deepseek_400k["image_split_max_height"] == 4096
+    assert cfg_deepseek_400k["image_split_overlap"] == 50
+
     cfg_deepseek_v4_1m = get_model_cfg("deepseek_v4_1m")
     assert cfg_deepseek_v4_1m["context_window"] == 1_000_000
     assert cfg_deepseek_v4_1m["max_images"] == 0
@@ -778,6 +787,11 @@ def test_model_cfg_capabilities() -> None:
     assert ModelCapability.vision in cfg_gpt_1m["capabilities"]
     assert ModelCapability.video_understanding not in cfg_gpt_1m["capabilities"]
 
+    # DeepSeek V4 400K capabilities
+    cfg_deepseek_400k = get_model_cfg("deepseek_v4_400k")
+    assert cfg_deepseek_400k["capabilities"] == set()
+
+    # DeepSeek V4 1M capabilities
     cfg_deepseek_v4 = get_model_cfg("deepseek_v4_1m")
     assert ModelCapability.vision not in cfg_deepseek_v4["capabilities"]
     assert ModelCapability.video_understanding not in cfg_deepseek_v4["capabilities"]
@@ -800,6 +814,11 @@ def test_get_model_cfg_by_enum() -> None:
     cfg_gpt = get_model_cfg(ModelConfigPreset.GPT5_1M)
     assert cfg_gpt["context_window"] == 922_000
     assert cfg_gpt["max_videos"] == 0  # GPT doesn't support video
+
+    # DeepSeek V4 400K by enum
+    cfg_deepseek_400k = get_model_cfg(ModelConfigPreset.DEEPSEEK_V4_400K)
+    assert cfg_deepseek_400k["context_window"] == 400_000
+    assert cfg_deepseek_400k["max_videos"] == 0
 
     cfg_deepseek_v4 = get_model_cfg(ModelConfigPreset.DEEPSEEK_V4_1M)
     assert cfg_deepseek_v4["context_window"] == 1_000_000
@@ -826,6 +845,11 @@ def test_get_model_cfg_by_string() -> None:
     assert cfg_gpt_1m["context_window"] == 922_000
     assert cfg_gpt_1m["max_videos"] == 0  # GPT doesn't support video
 
+    # DeepSeek V4 400K by string
+    cfg_deepseek_400k = get_model_cfg("deepseek_v4_400k")
+    assert cfg_deepseek_400k["context_window"] == 400_000
+    assert cfg_deepseek_400k["max_videos"] == 0
+
     cfg_deepseek_v4 = get_model_cfg("deepseek_v4_1m")
     assert cfg_deepseek_v4["context_window"] == 1_000_000
     assert cfg_deepseek_v4["max_videos"] == 0
@@ -847,6 +871,10 @@ def test_get_model_cfg_by_alias() -> None:
 
     cfg = get_model_cfg("gemini")
     assert cfg["context_window"] == 200_000  # Default to 200K (cheaper)
+
+    # DeepSeek 400k alias
+    cfg = get_model_cfg("deepseek_400k")
+    assert cfg["context_window"] == 400_000
 
     cfg = get_model_cfg("deepseek")
     assert cfg["context_window"] == 1_000_000
@@ -905,8 +933,10 @@ def test_list_model_cfg_presets() -> None:
         "claude_200k",
         "claude_400k",
         "deepseek",
+        "deepseek_400k",
         "deepseek_v4",
         "deepseek_v4_1m",
+        "deepseek_v4_400k",
         "gemini",
         "gemini_1m",
         "gemini_200k",
