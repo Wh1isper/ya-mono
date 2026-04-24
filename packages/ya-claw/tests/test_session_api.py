@@ -194,10 +194,7 @@ def test_session_create_accepts_project_references() -> None:
         {"project_id": "repo-a", "description": "primary repo"},
         {"project_id": "repo-b", "description": "reference repo"},
     ]
-    assert payload["session"]["metadata"]["projects"] == [
-        {"project_id": "repo-a", "description": "primary repo"},
-        {"project_id": "repo-b", "description": "reference repo"},
-    ]
+    assert payload["session"]["metadata"] == {}
     assert payload["run"]["project_id"] == "repo-a"
     assert payload["run"]["projects"] == [
         {"project_id": "repo-a", "description": "primary repo"},

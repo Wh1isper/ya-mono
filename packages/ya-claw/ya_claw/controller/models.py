@@ -383,6 +383,10 @@ def serialize_project_references(projects: list[ProjectReference]) -> list[dict[
     return [project.model_dump(mode="json", exclude_none=True) for project in projects]
 
 
+def public_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in metadata.items() if key != "projects"}
+
+
 def extract_project_references(project_id: str | None, metadata: dict[str, Any] | None) -> list[ProjectReference]:
     raw_projects = metadata.get("projects") if isinstance(metadata, dict) else None
     parsed_projects: list[ProjectReference] = []
@@ -432,7 +436,7 @@ def run_summary_from_record(record: RunRecord, *, message: list[dict[str, Any]] 
 def run_detail_from_record(record: RunRecord, *, has_state: bool = False, has_message: bool = False) -> RunDetail:
     return RunDetail(
         **run_summary_from_record(record).model_dump(),
-        metadata=dict(record.run_metadata),
+        metadata=public_metadata(dict(record.run_metadata)),
         input_parts=parse_input_parts(list(record.input_parts)),
         has_state=has_state,
         has_message=has_message,
@@ -457,7 +461,7 @@ def session_summary_from_record(
         profile_name=record.profile_name,
         project_id=record.project_id,
         projects=extract_project_references(record.project_id, record.session_metadata),
-        metadata=dict(record.session_metadata),
+        metadata=public_metadata(dict(record.session_metadata)),
         created_at=record.created_at,
         updated_at=record.updated_at,
         status=resolve_session_status(latest_run),
