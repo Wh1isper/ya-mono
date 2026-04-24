@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -23,6 +25,66 @@ def _request_hook(api_key: str) -> Callable[[httpx.Request], Awaitable[httpx.Req
         return request
 
     return _hook
+
+
+# DeepSeek V4 thinking models return reasoning tokens through the OpenAI-compatible
+# `reasoning_content` field. The chat alias routes to the current DeepSeek chat
+# model family, so it receives the same profile patch. R1/deepseek-reasoner use a
+# different strict input contract and are intentionally handled by pydantic-ai's
+# built-in DeepSeek profile.
+_DEEPSEEK_V4_MODEL_KEYWORDS: tuple[str, ...] = (
+    "deepseek-v4",
+    "deepseek_v4",
+    "deepseek-chat",
+)
+_DEEPSEEK_EXCLUDED_MODEL_KEYWORDS: tuple[str, ...] = (
+    "deepseek-reasoner",
+    "deepseek_reasoner",
+    "deepseek-r1",
+    "deepseek_r1",
+)
+
+
+def _is_deepseek_model(model_name: str) -> bool:
+    """Return whether ``model_name`` should use the DeepSeek V4 profile patch."""
+    lower = model_name.lower()
+    if any(keyword in lower for keyword in _DEEPSEEK_EXCLUDED_MODEL_KEYWORDS):
+        return False
+    return any(keyword in lower for keyword in _DEEPSEEK_V4_MODEL_KEYWORDS)
+
+
+def _build_deepseek_profile():
+    """Build the OpenAI profile required by DeepSeek V4 thinking mode.
+
+    pydantic-ai's bundled ``deepseek_model_profile`` currently models R1 and
+    returns a plain ``ModelProfile``. DeepSeek V4 thinking mode emits reasoning
+    through the OpenAI-compatible ``reasoning_content`` field, and assistant
+    messages that performed tool calls must send that field back in subsequent
+    requests.
+
+    Setting ``openai_chat_thinking_field`` lets ``OpenAIChatModel`` read incoming
+    reasoning from ``reasoning_content``. Setting
+    ``openai_chat_send_back_thinking_parts='field'`` sends historical
+    ``ThinkingPart`` values back through the same field instead of embedding them
+    in ``content`` as ``<think>`` tags.
+    """
+    from pydantic_ai.profiles.openai import OpenAIModelProfile
+
+    return OpenAIModelProfile(
+        supports_thinking=True,
+        thinking_always_enabled=True,
+        ignore_streamed_leading_whitespace=True,
+        openai_chat_thinking_field="reasoning_content",
+        openai_chat_send_back_thinking_parts="field",
+    )
+
+
+def _build_openai_chat_model(model_name: str, provider: Provider[Any]) -> Model:
+    """Construct an OpenAIChatModel with the DeepSeek profile patch when needed."""
+    from pydantic_ai.models.openai import OpenAIChatModel
+
+    profile = _build_deepseek_profile() if _is_deepseek_model(model_name) else None
+    return OpenAIChatModel(model_name=model_name, provider=provider, profile=profile)
 
 
 def make_gateway_provider(
@@ -107,16 +169,37 @@ def make_gateway_provider(
     return gateway_provider
 
 
+def _split_provider_and_model(model: str) -> tuple[str | None, str]:
+    """Split a ``provider:model_name`` string into ``(provider, model_name)``."""
+    if ":" not in model:
+        return None, model
+    provider, _, model_name = model.partition(":")
+    return provider, model_name
+
+
 def infer_model(gateway_name: str, model: str, extra_headers: dict[str, str] | None = None) -> Model:
     """Infer model from string, optionally with extra HTTP headers.
 
     Args:
-        model: Model string in format "provider:model_name"
+        gateway_name: Gateway name used for env var lookup.
+        model: Model string in format "provider:model_name".
         extra_headers: Optional dict of extra headers to send with each request.
             Useful for sticky routing via x-session-id header.
 
     Returns:
         The inferred Model instance.
+
+    DeepSeek V4:
+        When ``model`` looks like a DeepSeek V4 thinking model and uses an
+        OpenAI-compatible chat provider, the gateway constructs the
+        ``OpenAIChatModel`` directly with a corrected ``OpenAIModelProfile``.
+        This preserves ``reasoning_content`` round-tripping for tool-call turns.
     """
     provider_factory = make_gateway_provider(gateway_name, extra_headers)
+
+    provider_prefix, model_name = _split_provider_and_model(model)
+    if provider_prefix in ("openai", "openai-chat", "chat") and _is_deepseek_model(model_name):
+        provider = provider_factory(provider_prefix)
+        return _build_openai_chat_model(model_name, provider)
+
     return legacy_infer_model(model, provider_factory)

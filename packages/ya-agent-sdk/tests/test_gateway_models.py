@@ -1,0 +1,48 @@
+"""Tests for gateway model inference helpers."""
+
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.profiles.openai import OpenAIModelProfile
+from ya_agent_sdk.agents.models.gateway import _is_deepseek_model, infer_model
+
+
+def test_deepseek_v4_model_detection() -> None:
+    """Should patch DeepSeek V4 models and chat aliases."""
+    assert _is_deepseek_model("deepseek-v4-pro")
+    assert _is_deepseek_model("deepseek_v4_lite")
+    assert _is_deepseek_model("deepseek-chat")
+
+
+def test_deepseek_r1_model_detection_excluded() -> None:
+    """Should keep R1 on pydantic-ai's built-in DeepSeek profile path."""
+    assert not _is_deepseek_model("deepseek-reasoner")
+    assert not _is_deepseek_model("deepseek-r1")
+
+
+def test_infer_gateway_deepseek_v4_uses_reasoning_content_profile(monkeypatch) -> None:
+    """Should build OpenAIChatModel with field-mode reasoning_content for DeepSeek V4."""
+    monkeypatch.setenv("COLORIST_API_KEY", "test-key")
+    monkeypatch.setenv("COLORIST_BASE_URL", "https://example.com/v1")
+
+    model = infer_model("colorist", "openai:deepseek-v4-pro")
+
+    assert isinstance(model, OpenAIChatModel)
+    profile = OpenAIModelProfile.from_profile(model.profile)
+    assert model.model_name == "deepseek-v4-pro"
+    assert profile.supports_thinking is True
+    assert profile.thinking_always_enabled is True
+    assert profile.openai_chat_thinking_field == "reasoning_content"
+    assert profile.openai_chat_send_back_thinking_parts == "field"
+
+
+def test_infer_gateway_deepseek_r1_uses_legacy_profile(monkeypatch) -> None:
+    """Should leave deepseek-reasoner inference to pydantic-ai."""
+    monkeypatch.setenv("COLORIST_API_KEY", "test-key")
+    monkeypatch.setenv("COLORIST_BASE_URL", "https://example.com/v1")
+
+    model = infer_model("colorist", "openai:deepseek-reasoner")
+
+    assert isinstance(model, OpenAIChatModel)
+    profile = OpenAIModelProfile.from_profile(model.profile)
+    assert model.model_name == "deepseek-reasoner"
+    assert profile.openai_chat_thinking_field is None
+    assert profile.openai_chat_send_back_thinking_parts == "auto"

@@ -36,8 +36,8 @@ def test_no_op_for_non_reasoning_model() -> None:
     assert history[0].parts == [TextPart(content="Hello")]  # type: ignore[union-attr]
 
 
-def test_synthesize_thinking_part_when_required() -> None:
-    """Should synthesize ThinkingPart for every response missing reasoning content."""
+def test_synthesize_thinking_part_for_tool_call_when_required() -> None:
+    """Should synthesize ThinkingPart only for tool-call responses missing reasoning content."""
     history: list[ModelMessage] = [
         ModelRequest(parts=[UserPromptPart(content="Hi")]),
         ModelResponse(parts=[TextPart(content="Hello")]),
@@ -46,16 +46,36 @@ def test_synthesize_thinking_part_when_required() -> None:
 
     normalize_reasoning_for_model(_ctx(ModelCapability.reasoning_required), history)
 
-    for msg in history:
-        if isinstance(msg, ModelResponse):
-            assert isinstance(msg.parts[0], ThinkingPart)
-            assert msg.parts[0].content == ""
-            assert msg.parts[0].provider_name == "deepseek"
+    plain_response = history[1]
+    tool_response = history[2]
+    assert isinstance(plain_response, ModelResponse)
+    assert isinstance(tool_response, ModelResponse)
+    assert plain_response.parts == [TextPart(content="Hello")]
+    assert isinstance(tool_response.parts[0], ThinkingPart)
+    assert tool_response.parts[0].content == ""
+    assert tool_response.parts[0].id == "reasoning_content"
+    assert tool_response.parts[0].provider_name == "deepseek"
 
 
-def test_keep_existing_thinking_part() -> None:
-    """Should keep existing ThinkingPart without inserting another one."""
-    existing = ThinkingPart(content="existing reasoning", provider_name="deepseek")
+def test_keep_existing_thinking_part_on_tool_call_response() -> None:
+    """Should keep existing ThinkingPart on tool-call responses without inserting another one."""
+    existing = ThinkingPart(content="existing reasoning", id="reasoning_content", provider_name="deepseek")
+    tool_call = ToolCallPart(tool_name="view", args={"file_path": "a.py"}, tool_call_id="call_1")
+    history: list[ModelMessage] = [
+        ModelResponse(parts=[existing, tool_call]),
+    ]
+
+    normalize_reasoning_for_model(_ctx(ModelCapability.reasoning_required), history)
+
+    response = history[0]
+    assert isinstance(response, ModelResponse)
+    assert response.parts == [existing, tool_call]
+    assert sum(isinstance(part, ThinkingPart) for part in response.parts) == 1
+
+
+def test_drop_thinking_part_on_plain_response_when_required() -> None:
+    """Should remove ThinkingPart from plain assistant responses for DeepSeek V4 history."""
+    existing = ThinkingPart(content="existing reasoning", id="reasoning_content", provider_name="deepseek")
     history: list[ModelMessage] = [
         ModelResponse(parts=[existing, TextPart(content="Hello")]),
     ]
@@ -64,8 +84,7 @@ def test_keep_existing_thinking_part() -> None:
 
     response = history[0]
     assert isinstance(response, ModelResponse)
-    assert response.parts == [existing, TextPart(content="Hello")]
-    assert sum(isinstance(part, ThinkingPart) for part in response.parts) == 1
+    assert response.parts == [TextPart(content="Hello")]
 
 
 def test_drop_foreign_thinking_when_strict() -> None:
@@ -87,7 +106,7 @@ def test_drop_foreign_thinking_when_strict() -> None:
 
 
 def test_preserves_order_of_other_parts() -> None:
-    """Should insert synthesized ThinkingPart before existing response parts."""
+    """Should insert synthesized ThinkingPart before existing tool-call response parts."""
     text = TextPart(content="I will call a tool.")
     tool_call = ToolCallPart(tool_name="view", args={"file_path": "a.py"}, tool_call_id="call_1")
     history: list[ModelMessage] = [
@@ -99,13 +118,14 @@ def test_preserves_order_of_other_parts() -> None:
     response = history[0]
     assert isinstance(response, ModelResponse)
     assert isinstance(response.parts[0], ThinkingPart)
+    assert response.parts[0].id == "reasoning_content"
     assert response.parts[1:] == [text, tool_call]
 
 
-def test_compact_filter_does_not_re_strip() -> None:
-    """Should preserve synthesized ThinkingPart during compact pre-trimming."""
+def test_compact_filter_preserves_tool_call_reasoning_placeholder() -> None:
+    """Should preserve synthesized tool-call ThinkingPart during compact pre-trimming."""
     history: list[ModelMessage] = [
-        ModelResponse(parts=[TextPart(content="Hello")]),
+        ModelResponse(parts=[ToolCallPart(tool_name="view", args={"file_path": "a.py"}, tool_call_id="call_1")]),
     ]
     normalize_reasoning_for_model(_ctx(ModelCapability.reasoning_required), history)
 
@@ -115,5 +135,6 @@ def test_compact_filter_does_not_re_strip() -> None:
     assert isinstance(response, ModelResponse)
     assert isinstance(response.parts[0], ThinkingPart)
     assert response.parts[0].content == ""
+    assert response.parts[0].id == "reasoning_content"
     assert response.parts[0].provider_name == "deepseek"
-    assert response.parts[1] == TextPart(content="Hello")
+    assert isinstance(response.parts[1], ToolCallPart)
