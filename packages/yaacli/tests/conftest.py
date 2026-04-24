@@ -41,6 +41,14 @@ def config_manager(temp_config_dir: Path, temp_project_dir: Path) -> ConfigManag
 
 
 @pytest.fixture(autouse=True)
+def isolate_global_config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Use an isolated global config directory for tests."""
+    config_dir = tmp_path / "global-config"
+    config_dir.mkdir()
+    monkeypatch.setattr(ConfigManager, "DEFAULT_CONFIG_DIR", config_dir)
+
+
+@pytest.fixture(autouse=True)
 def mock_openai_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """Mock OPENAI_API_KEY for all tests that might need it."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-fake-key-for-testing")

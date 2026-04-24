@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from pydantic_ai import ThinkingPart
+from pydantic_ai import PromptedOutput, ThinkingPart
 from pydantic_ai.messages import (
     BinaryContent,
     ImageUrl,
@@ -32,6 +32,7 @@ from ya_agent_sdk.agents.compact import (
     _trim_history_for_compact,
     _truncate_str,
     create_compact_filter,
+    get_compact_agent,
 )
 from ya_agent_sdk.agents.main import create_agent
 from ya_agent_sdk.context import AgentContext, ModelConfig
@@ -480,12 +481,12 @@ def test_strip_injected_context_both_contexts_in_string() -> None:
 
 
 # =============================================================================
-# _trim_history_for_compact: thinking part stripping tests
+# _trim_history_for_compact: thinking part preservation tests
 # =============================================================================
 
 
-def test_trim_strips_thinking_parts_from_response() -> None:
-    """ThinkingPart should be stripped from ModelResponse."""
+def test_trim_preserves_thinking_parts_from_response() -> None:
+    """ThinkingPart should be preserved for provider reasoning round-trips."""
     history: list[ModelMessage] = [
         ModelResponse(
             parts=[
@@ -500,13 +501,15 @@ def test_trim_strips_thinking_parts_from_response() -> None:
     assert len(trimmed) == 1
     response = trimmed[0]
     assert isinstance(response, ModelResponse)
-    assert len(response.parts) == 1
-    assert isinstance(response.parts[0], TextPart)
-    assert response.parts[0].content == "Here is my answer."
+    assert len(response.parts) == 2
+    assert isinstance(response.parts[0], ThinkingPart)
+    assert response.parts[0].content == "Let me think about this..."
+    assert isinstance(response.parts[1], TextPart)
+    assert response.parts[1].content == "Here is my answer."
 
 
-def test_trim_strips_thinking_preserves_tool_calls() -> None:
-    """ThinkingPart should be stripped but ToolCallPart preserved."""
+def test_trim_preserves_thinking_and_tool_calls() -> None:
+    """ThinkingPart and ToolCallPart should both be preserved."""
     history: list[ModelMessage] = [
         ModelResponse(
             parts=[
@@ -520,8 +523,9 @@ def test_trim_strips_thinking_preserves_tool_calls() -> None:
 
     response = trimmed[0]
     assert isinstance(response, ModelResponse)
-    assert len(response.parts) == 1
-    assert isinstance(response.parts[0], ToolCallPart)
+    assert len(response.parts) == 2
+    assert isinstance(response.parts[0], ThinkingPart)
+    assert isinstance(response.parts[1], ToolCallPart)
 
 
 def test_trim_preserves_response_without_thinking() -> None:
@@ -657,12 +661,13 @@ def test_trim_combined_all_stripping() -> None:
     assert len(part0.content) == 1
     assert part0.content[0] == "Help me refactor"
 
-    # Response: thinking stripped, text and tool call preserved
+    # Response: thinking, text, and tool call preserved
     resp = trimmed[1]
     assert isinstance(resp, ModelResponse)
-    assert len(resp.parts) == 2
-    assert isinstance(resp.parts[0], TextPart)
-    assert isinstance(resp.parts[1], ToolCallPart)
+    assert len(resp.parts) == 3
+    assert isinstance(resp.parts[0], ThinkingPart)
+    assert isinstance(resp.parts[1], TextPart)
+    assert isinstance(resp.parts[2], ToolCallPart)
 
     # Tool return request: tool return truncated, runtime context removed
     req2 = trimmed[2]
@@ -828,7 +833,7 @@ def test_strip_incompatible_settings_removes_cache_keys() -> None:
 
 
 def test_strip_incompatible_settings_removes_thinking_keys() -> None:
-    """Thinking-related keys should be stripped (incompatible with ToolOutput)."""
+    """Thinking-related keys should be stripped for compact structured output."""
     settings = {
         "max_tokens": 4096,
         "thinking": "high",
@@ -974,6 +979,14 @@ def test_strip_incompatible_settings_known_keys() -> None:
 def test_strip_incompatible_settings_known_betas() -> None:
     """All expected betas should be in _INCOMPATIBLE_BETAS."""
     assert "interleaved-thinking-2025-05-14" in _INCOMPATIBLE_BETAS
+
+
+def test_get_compact_agent_uses_prompted_output() -> None:
+    """Compact should use prompted structured output to avoid output tool_choice issues."""
+    agent = get_compact_agent(model="test")
+
+    assert isinstance(agent.output_type, PromptedOutput)
+    assert agent.output_type.outputs is CondenseResult
 
 
 # =============================================================================
