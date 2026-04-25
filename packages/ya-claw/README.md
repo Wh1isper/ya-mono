@@ -77,12 +77,14 @@ Profile, MCP, and coordinator settings:
 - `YA_CLAW_MCP_CONFIG_FILE=~/.ya-claw/mcp.json`
 - `YA_CLAW_PROJECT_MCP_CONFIG_PATH=.ya-claw/mcp.json`
 - `YA_CLAW_WORKSPACE_PROVIDER_BACKEND=local|docker`
-- `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE=python:3.11`
+- `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE=ghcr.io/wh1isper/ya-claw-workspace:latest`
 - `YA_CLAW_EXECUTION_CONTEXT_WINDOW=200000`
 
 Profiles store model, prompt, builtin tool groups, subagents, approval policy, and MCP namespace filters. Runtime-wide MCP server definitions load from `~/.ya-claw/mcp.json` with per-workspace override at `.ya-claw/mcp.json`. Every YA Claw agent runtime receives the active MCP configuration through `ToolProxyToolset`, and each profile can narrow that surface with `enabled_mcps` and `disabled_mcps`.
 
 Session and run requests accept `project_id` for a single workspace and `projects` for multi-project workspaces. Each project entry carries `project_id` plus optional `description`; YA Claw maps every project to a host directory under `YA_CLAW_WORKSPACE_ROOT` and exposes it at `/workspace/{project_id}` for file operations and shell execution. Project skills are discovered from each mounted project's `.agents/skills/` directory.
+
+The default Docker workspace image is `ghcr.io/wh1isper/ya-claw-workspace:latest`. It is based on Debian stable and includes Python, Node.js, Debian Chromium, the `agent-browser` CLI, and an `agent-browser` discovery skill copied into mounted workspaces at container start. Use `agent-browser skills get core` inside a workspace session for the version-matched browser automation workflow.
 
 Profiles can be managed through:
 
@@ -135,10 +137,16 @@ make web-dev
 
 ## Docker
 
-Build from the repository root:
+Build the YA Claw service image from the repository root:
 
 ```bash
 docker build -f Dockerfile.ya-claw -t ya-claw:dev .
+```
+
+Build the official workspace image locally:
+
+```bash
+docker build -f Dockerfile.ya-claw-workspace -t ya-claw-workspace:dev .
 ```
 
 ## Initial API Surface
@@ -146,14 +154,17 @@ docker build -f Dockerfile.ya-claw -t ya-claw:dev .
 Every HTTP route except `/healthz` expects `Authorization: Bearer <YA_CLAW_API_TOKEN>`.
 
 - `GET /healthz` — service health probe with storage and runtime component status
-- `POST /api/v1/sessions` — create a session with optional first run
+- `POST /api/v1/sessions` — create a session with optional first queued run and return JSON
+- `POST /api/v1/sessions:stream` — create a session with a first run and stream foreground SSE events
 - `GET /api/v1/sessions` — list sessions
-- `GET /api/v1/sessions/{session_id}` — inspect a session plus paginated runs and optional compacted message replay lists
-- `POST /api/v1/sessions/{session_id}/runs` — create a run under a session
+- `GET /api/v1/sessions/{session_id}` — inspect a session plus paginated runs, top-level committed state, and optional compacted message replay lists
+- `POST /api/v1/sessions/{session_id}/runs` — create a run under a session and return JSON
+- `POST /api/v1/sessions/{session_id}/runs:stream` — create a run under a session and stream foreground SSE events
 - `POST /api/v1/sessions/{session_id}/steer` — steer the active run through the session surface
 - `POST /api/v1/sessions/{session_id}/interrupt` — interrupt the active run through the session surface
 - `POST /api/v1/sessions/{session_id}/cancel` — cancel the active run through the session surface
-- `POST /api/v1/runs` — create a run directly through the low-level surface
+- `POST /api/v1/runs` — create a run directly through the low-level surface and return JSON
+- `POST /api/v1/runs:stream` — create a run directly and stream foreground SSE events
 - `GET /api/v1/runs/{run_id}` — inspect a run plus session summary, committed state, and optional compacted message replay list
 - `POST /api/v1/runs/{run_id}/steer` — steer a specific active run
 - `POST /api/v1/runs/{run_id}/interrupt` — interrupt a specific active run

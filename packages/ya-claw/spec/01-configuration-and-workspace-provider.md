@@ -28,6 +28,7 @@ flowchart TB
 | `YA_CLAW_HOST`                            | bind host                                                          |
 | `YA_CLAW_PORT`                            | bind port                                                          |
 | `YA_CLAW_PUBLIC_BASE_URL`                 | public base URL                                                    |
+| `YA_CLAW_INSTANCE_ID`                     | runtime instance identity used for run ownership and heartbeat     |
 | `YA_CLAW_API_TOKEN`                       | shared bearer token required for HTTP access                       |
 | `YA_CLAW_ENVIRONMENT`                     | runtime environment label                                          |
 | `YA_CLAW_DATABASE_URL`                    | SQLite or PostgreSQL connection string                             |
@@ -43,7 +44,7 @@ flowchart TB
 | `YA_CLAW_PROFILE_SEED_FILE`               | optional YAML seed file for profiles                               |
 | `YA_CLAW_AUTO_SEED_PROFILES`              | load or refresh seeded profiles on startup                         |
 | `YA_CLAW_WORKSPACE_PROVIDER_BACKEND`      | bootstrap workspace backend hint for local development or fallback |
-| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE` | default Docker image for Docker-backed environment construction    |
+| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE` | Docker image for Docker-backed environment construction            |
 | `YA_CLAW_MCP_CONFIG_FILE`                 | global MCP JSON file injected into every runtime                   |
 | `YA_CLAW_PROJECT_MCP_CONFIG_PATH`         | per-workspace MCP JSON path with project-level priority            |
 
@@ -135,6 +136,21 @@ The first normalized project is the primary project and default cwd. Every proje
 - skill path: `/workspace/{project_id}/.agents/skills/`
 
 YA Claw does not need project CRUD or a runtime-managed project catalog.
+
+## Official Docker Workspace Image
+
+The default Docker workspace image is `ghcr.io/wh1isper/ya-claw-workspace:latest`.
+
+The image provides a ready-to-use agent workspace on Debian stable with:
+
+- Python and `pip`/`venv`
+- Node.js and Corepack
+- Git, OpenSSH, curl, wget, jq, unzip, zip, and common shell utilities
+- Debian Chromium and browser system dependencies
+- `agent-browser` installed through npm and configured to use `/usr/bin/chromium`
+- an `agent-browser` discovery skill copied into mounted workspace `.agents/skills/` directories at container start
+
+The workspace provider still treats the image as an implementation detail carried by `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE`. Deployments can override the image while keeping the same binding and environment factory contracts.
 
 ## WorkspaceProvider
 

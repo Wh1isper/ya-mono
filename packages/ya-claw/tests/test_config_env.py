@@ -83,6 +83,13 @@ def test_load_runtime_environment_preserves_existing_process_environment(
     config_module.get_settings.cache_clear()
 
 
+def test_settings_use_official_workspace_image_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE", raising=False)
+    settings = ClawSettings(api_token="test-token", _env_file=None)  # noqa: S106
+
+    assert settings.workspace_provider_docker_image == "ghcr.io/wh1isper/ya-claw-workspace:latest"
+
+
 def test_settings_resolve_global_and_project_mcp_paths(tmp_path: Path) -> None:
     settings = ClawSettings(
         api_token="test-token",  # noqa: S106

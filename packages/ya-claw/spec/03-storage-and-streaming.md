@@ -41,7 +41,8 @@ It should store:
 - session metadata
 - session continuation pointers
 - run indexes and restore relationships
-- queued, running, and terminal run state
+- queued, running, terminal run state, and run claim ownership
+- runtime instance heartbeat records
 - profile records and seed provenance
 - `project_id`, `profile_name`, and request metadata needed for routing
 

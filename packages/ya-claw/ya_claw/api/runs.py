@@ -5,7 +5,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sse_starlette.sse import EventSourceResponse
 
 from ya_claw.config import ClawSettings
-from ya_claw.controller.models import ControlResponse, RunCreateRequest, RunDetail, RunGetResponse, SteerRequest
+from ya_claw.controller.models import (
+    ControlResponse,
+    DispatchMode,
+    RunCreateRequest,
+    RunDetail,
+    RunGetResponse,
+    SteerRequest,
+)
 from ya_claw.controller.run import RunController
 from ya_claw.execution.coordinator import ExecutionSupervisor
 from ya_claw.runtime_state import InMemoryRuntimeState
@@ -15,19 +22,29 @@ controller = RunController()
 
 
 @router.post("", response_model=RunDetail, status_code=201)
-async def create_run(request: Request, payload: RunCreateRequest) -> RunDetail | EventSourceResponse:
+async def create_run(request: Request, payload: RunCreateRequest) -> RunDetail:
     settings = _get_settings(request)
     runtime_state = _get_runtime_state(request)
     session_factory = _get_session_factory(request)
+    payload.dispatch_mode = DispatchMode.ASYNC
     async with session_factory() as db_session:
         run = await controller.create(db_session, settings, runtime_state, payload)
-    if payload.dispatch_mode == "stream":
-        if not _submit_run(request, run.id):
-            raise HTTPException(status_code=503, detail="Execution supervisor is unavailable.")
-        return EventSourceResponse(runtime_state.stream_run_events(run.id))
     if _auto_dispatch_enabled(settings):
         _submit_run(request, run.id)
     return run
+
+
+@router.post(":stream")
+async def create_run_stream(request: Request, payload: RunCreateRequest) -> EventSourceResponse:
+    settings = _get_settings(request)
+    runtime_state = _get_runtime_state(request)
+    session_factory = _get_session_factory(request)
+    payload.dispatch_mode = DispatchMode.STREAM
+    async with session_factory() as db_session:
+        run = await controller.create(db_session, settings, runtime_state, payload)
+    if not _submit_run(request, run.id):
+        raise HTTPException(status_code=503, detail="Execution supervisor is unavailable.")
+    return EventSourceResponse(runtime_state.stream_run_events(run.id))
 
 
 @router.get("/{run_id}", response_model=RunGetResponse)

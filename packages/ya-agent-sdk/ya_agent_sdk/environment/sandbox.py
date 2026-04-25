@@ -17,8 +17,9 @@ import asyncio
 import contextlib
 import os
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from y_agent_environment import (
     Environment,
@@ -39,6 +40,19 @@ if TYPE_CHECKING:
 
 import docker
 import docker.errors
+
+
+def _coerce_docker_exec_output(output: Any) -> tuple[bytes, bytes]:
+    if isinstance(output, tuple) and len(output) == 2:
+        out, err = output
+        stdout_bytes = out if isinstance(out, bytes) else b""
+        stderr_bytes = err if isinstance(err, bytes) else b""
+        return stdout_bytes, stderr_bytes
+    if isinstance(output, bytes):
+        return output, b""
+    if isinstance(output, Iterator):
+        return b"".join(output), b""
+    return b"", b""
 
 
 class DockerShell(Shell):
@@ -121,16 +135,8 @@ class DockerShell(Shell):
                     environment=env,
                 )
 
-                exit_code: int = result.exit_code
-                stdout_stderr = result.output
-
-                if isinstance(stdout_stderr, tuple) and len(stdout_stderr) == 2:
-                    out, err = stdout_stderr
-                    stdout_bytes = out if out is not None else b""
-                    stderr_bytes = err if err is not None else b""
-                else:
-                    stdout_bytes = bytes(stdout_stderr) if stdout_stderr is not None else b""
-                    stderr_bytes = b""
+                exit_code = result.exit_code if isinstance(result.exit_code, int) else 0
+                stdout_bytes, stderr_bytes = _coerce_docker_exec_output(result.output)
 
                 stdout = stdout_bytes.decode("utf-8", errors="replace")
                 stderr = stderr_bytes.decode("utf-8", errors="replace")

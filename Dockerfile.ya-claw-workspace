@@ -1,0 +1,65 @@
+FROM debian:stable-slim
+
+ARG NODE_MAJOR=22
+ARG AGENT_BROWSER_VERSION=latest
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    AGENT_BROWSER_CONFIG=/etc/agent-browser/config.json \
+    AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium \
+    AGENT_BROWSER_ARGS=--no-sandbox,--disable-gpu,--disable-dev-shm-usage \
+    AGENT_BROWSER_IDLE_TIMEOUT_MS=300000
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        apt-transport-https \
+        bash \
+        ca-certificates \
+        chromium \
+        curl \
+        file \
+        fonts-freefont-ttf \
+        fonts-noto-cjk \
+        fonts-noto-color-emoji \
+        git \
+        gnupg \
+        jq \
+        less \
+        openssh-client \
+        python-is-python3 \
+        python3 \
+        python3-pip \
+        python3-venv \
+        tini \
+        unzip \
+        wget \
+        xz-utils \
+        zip \
+    && install -d -m 0755 /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && chmod a+r /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends nodejs \
+    && corepack enable \
+    && npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
+    && mkdir -p /etc/agent-browser /opt/ya-claw/skills/agent-browser /workspace \
+    && printf '%s\n' \
+        '{' \
+        '  "executablePath": "/usr/bin/chromium",' \
+        '  "args": "--no-sandbox,--disable-gpu,--disable-dev-shm-usage",' \
+        '  "ignoreHttpsErrors": true' \
+        '}' > /etc/agent-browser/config.json \
+    && agent-browser skills get agent-browser > /opt/ya-claw/skills/agent-browser/SKILL.md \
+    && test -s /opt/ya-claw/skills/agent-browser/SKILL.md \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+COPY packages/ya-claw/workspace-image/entrypoint.sh /usr/local/bin/ya-claw-workspace-entrypoint
+RUN chmod +x /usr/local/bin/ya-claw-workspace-entrypoint
+
+WORKDIR /workspace
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/ya-claw-workspace-entrypoint"]
+CMD ["sleep", "infinity"]

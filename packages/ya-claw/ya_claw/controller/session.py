@@ -27,6 +27,7 @@ from ya_claw.controller.models import (
     session_summary_from_record,
 )
 from ya_claw.controller.run import RunController
+from ya_claw.controller.store import read_run_message_blob_if_exists, read_run_state_blob_if_exists
 from ya_claw.orm.tables import RunRecord, SessionRecord
 from ya_claw.runtime_state import InMemoryRuntimeState
 from ya_claw.workspace import cleanup_session_sandbox, remove_session_sandbox_metadata
@@ -172,6 +173,13 @@ class SessionController:
             before_sequence_no=before_sequence_no,
             include_message=include_message,
         )
+        state_payload = None
+        message_payload = None
+        if isinstance(record.head_success_run_id, str):
+            state_payload = read_run_state_blob_if_exists(settings, record.head_success_run_id)
+            if include_message:
+                message_payload = read_run_message_blob_if_exists(settings, record.head_success_run_id)
+
         return SessionGetResponse(
             session=SessionDetail(
                 **summary.model_dump(),
@@ -179,7 +187,9 @@ class SessionController:
                 runs_limit=run_list.limit,
                 runs_has_more=run_list.has_more,
                 runs_next_before_sequence_no=run_list.next_before_sequence_no,
-            )
+            ),
+            state=state_payload,
+            message=message_payload,
         )
 
     async def _list_runs(

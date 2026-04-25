@@ -7,6 +7,7 @@ from sse_starlette.sse import EventSourceResponse
 from ya_claw.config import ClawSettings
 from ya_claw.controller.models import (
     ControlResponse,
+    DispatchMode,
     RunDetail,
     SessionCreateRequest,
     SessionCreateResponse,
@@ -27,23 +28,33 @@ run_controller = RunController()
 
 
 @router.post("", response_model=SessionCreateResponse, status_code=201)
-async def create_session(
-    request: Request, payload: SessionCreateRequest
-) -> SessionCreateResponse | EventSourceResponse:
+async def create_session(request: Request, payload: SessionCreateRequest) -> SessionCreateResponse:
     settings = _get_settings(request)
     runtime_state = _get_runtime_state(request)
     session_factory = _get_session_factory(request)
+    payload.dispatch_mode = DispatchMode.ASYNC
     async with session_factory() as db_session:
         response = await session_controller.create(db_session, settings, runtime_state, payload)
-
-    if payload.dispatch_mode == "stream" and response.run is not None:
-        if not _submit_run(request, response.run.id):
-            raise HTTPException(status_code=503, detail="Execution supervisor is unavailable.")
-        return EventSourceResponse(runtime_state.stream_run_events(response.run.id))
 
     if _auto_dispatch_enabled(settings):
         _submit_run(request, response.run.id if response.run is not None else None)
     return response
+
+
+@router.post(":stream")
+async def create_session_stream(request: Request, payload: SessionCreateRequest) -> EventSourceResponse:
+    runtime_state = _get_runtime_state(request)
+    settings = _get_settings(request)
+    session_factory = _get_session_factory(request)
+    payload.dispatch_mode = DispatchMode.STREAM
+    async with session_factory() as db_session:
+        response = await session_controller.create(db_session, settings, runtime_state, payload)
+
+    if response.run is None:
+        raise HTTPException(status_code=422, detail="input_parts are required for streamed session creation.")
+    if not _submit_run(request, response.run.id):
+        raise HTTPException(status_code=503, detail="Execution supervisor is unavailable.")
+    return EventSourceResponse(runtime_state.stream_run_events(response.run.id))
 
 
 @router.get("", response_model=list[SessionSummary])
@@ -75,23 +86,33 @@ async def get_session(
 
 
 @router.post("/{session_id}/runs", response_model=RunDetail, status_code=201)
-async def create_session_run(
-    request: Request, session_id: str, payload: SessionRunCreateRequest
-) -> RunDetail | EventSourceResponse:
+async def create_session_run(request: Request, session_id: str, payload: SessionRunCreateRequest) -> RunDetail:
     settings = _get_settings(request)
     runtime_state = _get_runtime_state(request)
     session_factory = _get_session_factory(request)
+    payload.dispatch_mode = DispatchMode.ASYNC
     async with session_factory() as db_session:
         run = await session_controller.create_run(db_session, settings, runtime_state, session_id, payload)
-
-    if payload.dispatch_mode == "stream":
-        if not _submit_run(request, run.id):
-            raise HTTPException(status_code=503, detail="Execution supervisor is unavailable.")
-        return EventSourceResponse(runtime_state.stream_run_events(run.id))
 
     if _auto_dispatch_enabled(settings):
         _submit_run(request, run.id)
     return run
+
+
+@router.post("/{session_id}/runs:stream")
+async def create_session_run_stream(
+    request: Request, session_id: str, payload: SessionRunCreateRequest
+) -> EventSourceResponse:
+    settings = _get_settings(request)
+    runtime_state = _get_runtime_state(request)
+    session_factory = _get_session_factory(request)
+    payload.dispatch_mode = DispatchMode.STREAM
+    async with session_factory() as db_session:
+        run = await session_controller.create_run(db_session, settings, runtime_state, session_id, payload)
+
+    if not _submit_run(request, run.id):
+        raise HTTPException(status_code=503, detail="Execution supervisor is unavailable.")
+    return EventSourceResponse(runtime_state.stream_run_events(run.id))
 
 
 @router.post("/{session_id}/steer", response_model=ControlResponse)

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
+import socket
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from uuid import uuid4
 
 from dotenv import dotenv_values, load_dotenv
 from pydantic import Field, SecretStr
@@ -13,6 +16,12 @@ _DEFAULT_DATABASE_FILENAME = "ya_claw.sqlite3"
 _DEFAULT_DATA_DIR = Path("~/.ya-claw/data")
 _DEFAULT_WORKSPACE_ROOT = Path("~/.ya-claw/workspace")
 _DEFAULT_RUN_STORE_DIRNAME = "run-store"
+_DEFAULT_WORKSPACE_DOCKER_IMAGE = "ghcr.io/wh1isper/ya-claw-workspace:latest"
+
+
+def _default_instance_id() -> str:
+    hostname = socket.gethostname().split(".", 1)[0] or "host"
+    return f"{hostname}-{os.getpid()}-{uuid4().hex[:8]}"
 
 
 def load_runtime_environment() -> dict[str, str]:
@@ -49,6 +58,7 @@ class ClawSettings(BaseSettings):
     port: int = 9042
     reload: bool = False
     public_base_url: str = "http://127.0.0.1:9042"
+    instance_id: str = Field(default_factory=_default_instance_id)
     web_dist_dir: Path | None = None
     api_token: SecretStr | None = None
     data_dir: Path = Field(default_factory=lambda: _DEFAULT_DATA_DIR)
@@ -62,7 +72,7 @@ class ClawSettings(BaseSettings):
     database_pool_recycle_seconds: int = 3600
 
     workspace_provider_backend: Literal["local", "docker"] = "docker"
-    workspace_provider_docker_image: str = "python:3.11"
+    workspace_provider_docker_image: str = _DEFAULT_WORKSPACE_DOCKER_IMAGE
     default_profile: str = "default"
     profile_seed_file: Path | None = None
     auto_seed_profiles: bool = False

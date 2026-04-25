@@ -84,6 +84,11 @@ docker-build-claw: ## Build the YA Claw Docker image
 	@echo "Building ya-claw Docker image"
 	@docker build -f Dockerfile.ya-claw -t ya-claw:dev .
 
+.PHONY: docker-build-claw-workspace
+docker-build-claw-workspace: ## Build the YA Claw workspace Docker image
+	@echo "Building ya-claw workspace Docker image"
+	@docker build -f Dockerfile.ya-claw-workspace -t ya-claw-workspace:dev .
+
 .PHONY: docker-run-claw
 docker-run-claw: ## Run the YA Claw Docker image
 	@echo "Running ya-claw Docker image"

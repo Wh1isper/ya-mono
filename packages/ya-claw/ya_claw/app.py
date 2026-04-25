@@ -16,7 +16,7 @@ from ya_claw.api.runs import router as runs_router
 from ya_claw.api.sessions import router as sessions_router
 from ya_claw.config import ClawSettings, get_settings
 from ya_claw.db.engine import create_engine, create_session_factory
-from ya_claw.execution import ClawRuntimeBuilder, ExecutionSupervisor, ProfileResolver
+from ya_claw.execution import ClawRuntimeBuilder, ExecutionSupervisor, ProfileResolver, RuntimeInstanceManager
 from ya_claw.mcp import ClawMCPConfigResolver
 from ya_claw.runtime_state import InMemoryRuntimeState, create_runtime_state
 from ya_claw.workspace import (
@@ -53,6 +53,7 @@ class ClawApplication:
         app.state.mcp_config_resolver = None
         app.state.runtime_builder = None
         app.state.execution_supervisor = None
+        app.state.runtime_instance_manager = None
 
         self.register_api_token_middleware(app)
         app.add_middleware(
@@ -120,6 +121,13 @@ class ClawApplication:
                 runtime_builder=app.state.runtime_builder,
             )
             app.state.execution_supervisor = supervisor
+            app.state.runtime_instance_manager = RuntimeInstanceManager(
+                settings=self.settings,
+                session_factory=app.state.db_session_factory,
+            )
+            await app.state.runtime_instance_manager.register(metadata={"environment": self.settings.environment})
+            if isinstance(self.settings.execution_model, str) and self.settings.execution_model.strip() != "":
+                await supervisor.startup_recover()
 
         try:
             yield
@@ -133,7 +141,12 @@ class ClawApplication:
             app.state.profile_resolver = None
             app.state.mcp_config_resolver = None
             app.state.runtime_builder = None
+            runtime_instance_manager = app.state.runtime_instance_manager
             app.state.execution_supervisor = None
+            app.state.runtime_instance_manager = None
+
+            if isinstance(runtime_instance_manager, RuntimeInstanceManager):
+                await runtime_instance_manager.mark_stopped()
 
             if isinstance(runtime_state, InMemoryRuntimeState):
                 await runtime_state.aclose()

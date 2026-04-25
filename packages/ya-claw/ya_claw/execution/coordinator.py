@@ -9,6 +9,7 @@ from typing import Any, cast
 
 from pydantic import BaseModel
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from y_agent_environment import Environment
 from ya_agent_sdk.agents.main import AgentInterrupted, AgentRuntime, stream_agent
@@ -26,7 +27,7 @@ from ya_claw.execution.input import InputMappingResult, map_input_parts
 from ya_claw.execution.profile import ProfileResolver, ResolvedProfile
 from ya_claw.execution.restore import ResolvedRestorePoint, load_restore_point
 from ya_claw.execution.runtime import ClawRuntimeBuilder
-from ya_claw.execution.state_machine import complete_run, fail_run, mark_run_running
+from ya_claw.execution.state_machine import complete_run, fail_run, interrupt_run, mark_run_running
 from ya_claw.execution.store import RunStore
 from ya_claw.orm.tables import RunRecord, SessionRecord
 from ya_claw.runtime_state import InMemoryRuntimeState
@@ -78,6 +79,39 @@ class ExecutionSupervisor:
     def schedule_run(self, run_id: str) -> bool:
         return self.submit_run(run_id)
 
+    async def recover_queued_runs(self) -> list[str]:
+        async with self._session_factory() as db_session:
+            statement = select(RunRecord).where(RunRecord.status == "queued").order_by(RunRecord.created_at.asc())
+            result = await db_session.execute(statement)
+            run_ids = [record.id for record in result.scalars().all()]
+        for run_id in run_ids:
+            self.submit_run(run_id)
+        return run_ids
+
+    async def cancel_orphaned_running_runs(self) -> list[str]:
+        async with self._session_factory() as db_session:
+            statement = select(RunRecord).where(RunRecord.status == "running")
+            result = await db_session.execute(statement)
+            records = list(result.scalars().all())
+            cancelled_ids: list[str] = []
+            for run_record in records:
+                session_record = await db_session.get(SessionRecord, run_record.session_id)
+                if not isinstance(session_record, SessionRecord):
+                    continue
+                run_record.error_message = "Run was marked interrupted during YA Claw startup recovery."
+                interrupt_run(session_record, run_record)
+                cancelled_ids.append(run_record.id)
+            await db_session.commit()
+            return cancelled_ids
+
+    async def startup_recover(self) -> dict[str, list[str]]:
+        cancelled_running = await self.cancel_orphaned_running_runs()
+        submitted_queued = await self.recover_queued_runs()
+        return {
+            "cancelled_running": cancelled_running,
+            "submitted_queued": submitted_queued,
+        }
+
     async def _claim_and_execute(self, run_id: str) -> None:
         try:
             claimed = await self._claim_run(run_id)
@@ -107,7 +141,7 @@ class ExecutionSupervisor:
             if self._runtime_state.get_run_handle(run_id) is None:
                 self._runtime_state.register_run(session_record.id, run_id, dispatch_mode=dispatch_mode)
 
-            mark_run_running(session_record, run_record)
+            mark_run_running(session_record, run_record, claimed_by=self._settings.instance_id)
             await db_session.commit()
             await db_session.refresh(run_record)
 

@@ -1,0 +1,62 @@
+name: ya-claw-workspace-image
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile.ya-claw-workspace
+      - packages/ya-claw/workspace-image/**
+      - .github/workflows/ya-claw-workspace-image.yml
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ya-claw-workspace-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/ya-claw-workspace
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=schedule,pattern=daily
+            type=sha,prefix=sha-
+
+      - name: Build and publish image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.ya-claw-workspace
+          platforms: linux/amd64,linux/arm64
+          push: true
+          pull: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Intentionally no Buildx cache: this daily image should resolve the
+          # current Debian stable packages, Chromium, Node.js, agent-browser, and
+          # bundled skill content on every scheduled rebuild.

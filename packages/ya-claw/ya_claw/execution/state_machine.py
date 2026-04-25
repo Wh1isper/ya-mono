@@ -14,13 +14,21 @@ def queue_run(session: SessionRecord, run: RunRecord, *, queued_at: datetime | N
     run.status = "queued"
 
 
-def mark_run_running(session: SessionRecord, run: RunRecord, *, started_at: datetime | None = None) -> None:
+def mark_run_running(
+    session: SessionRecord,
+    run: RunRecord,
+    *,
+    started_at: datetime | None = None,
+    claimed_by: str | None = None,
+) -> None:
     effective_time = started_at or datetime.now(UTC)
     session.active_run_id = run.id
     session.head_run_id = run.id
     session.updated_at = effective_time
     run.status = "running"
     run.started_at = effective_time
+    run.claimed_by = claimed_by
+    run.claimed_at = effective_time
 
 
 def complete_run(
