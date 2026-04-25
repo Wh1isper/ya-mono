@@ -7,6 +7,7 @@ from sse_starlette.sse import EventSourceResponse
 from ya_claw.config import ClawSettings
 from ya_claw.controller.models import (
     ControlResponse,
+    DispatchMode,
     RunDetail,
     SessionCreateRequest,
     SessionCreateResponse,
@@ -31,7 +32,7 @@ async def create_session(request: Request, payload: SessionCreateRequest) -> Ses
     settings = _get_settings(request)
     runtime_state = _get_runtime_state(request)
     session_factory = _get_session_factory(request)
-    payload.dispatch_mode = "async"
+    payload.dispatch_mode = DispatchMode.ASYNC
     async with session_factory() as db_session:
         response = await session_controller.create(db_session, settings, runtime_state, payload)
 
@@ -45,7 +46,7 @@ async def create_session_stream(request: Request, payload: SessionCreateRequest)
     runtime_state = _get_runtime_state(request)
     settings = _get_settings(request)
     session_factory = _get_session_factory(request)
-    payload.dispatch_mode = "stream"
+    payload.dispatch_mode = DispatchMode.STREAM
     async with session_factory() as db_session:
         response = await session_controller.create(db_session, settings, runtime_state, payload)
 
@@ -89,7 +90,7 @@ async def create_session_run(request: Request, session_id: str, payload: Session
     settings = _get_settings(request)
     runtime_state = _get_runtime_state(request)
     session_factory = _get_session_factory(request)
-    payload.dispatch_mode = "async"
+    payload.dispatch_mode = DispatchMode.ASYNC
     async with session_factory() as db_session:
         run = await session_controller.create_run(db_session, settings, runtime_state, session_id, payload)
 
@@ -105,7 +106,7 @@ async def create_session_run_stream(
     settings = _get_settings(request)
     runtime_state = _get_runtime_state(request)
     session_factory = _get_session_factory(request)
-    payload.dispatch_mode = "stream"
+    payload.dispatch_mode = DispatchMode.STREAM
     async with session_factory() as db_session:
         run = await session_controller.create_run(db_session, settings, runtime_state, session_id, payload)
 

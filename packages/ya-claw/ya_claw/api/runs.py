@@ -5,7 +5,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sse_starlette.sse import EventSourceResponse
 
 from ya_claw.config import ClawSettings
-from ya_claw.controller.models import ControlResponse, RunCreateRequest, RunDetail, RunGetResponse, SteerRequest
+from ya_claw.controller.models import (
+    ControlResponse,
+    DispatchMode,
+    RunCreateRequest,
+    RunDetail,
+    RunGetResponse,
+    SteerRequest,
+)
 from ya_claw.controller.run import RunController
 from ya_claw.execution.coordinator import ExecutionSupervisor
 from ya_claw.runtime_state import InMemoryRuntimeState
@@ -19,7 +26,7 @@ async def create_run(request: Request, payload: RunCreateRequest) -> RunDetail:
     settings = _get_settings(request)
     runtime_state = _get_runtime_state(request)
     session_factory = _get_session_factory(request)
-    payload.dispatch_mode = "async"
+    payload.dispatch_mode = DispatchMode.ASYNC
     async with session_factory() as db_session:
         run = await controller.create(db_session, settings, runtime_state, payload)
     if _auto_dispatch_enabled(settings):
@@ -32,7 +39,7 @@ async def create_run_stream(request: Request, payload: RunCreateRequest) -> Even
     settings = _get_settings(request)
     runtime_state = _get_runtime_state(request)
     session_factory = _get_session_factory(request)
-    payload.dispatch_mode = "stream"
+    payload.dispatch_mode = DispatchMode.STREAM
     async with session_factory() as db_session:
         run = await controller.create(db_session, settings, runtime_state, payload)
     if not _submit_run(request, run.id):
