@@ -95,6 +95,8 @@ class ClawApplication:
         app.state.workspace_provider = self.create_workspace_provider()
         app.state.environment_factory = DefaultEnvironmentFactory(
             docker_image=self.settings.workspace_provider_docker_image,
+            workspace_uid=self.settings.resolved_workspace_provider_docker_uid,
+            workspace_gid=self.settings.resolved_workspace_provider_docker_gid,
         )
 
         if app.state.db_session_factory is not None:

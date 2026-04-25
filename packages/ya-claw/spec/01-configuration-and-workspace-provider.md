@@ -45,6 +45,8 @@ flowchart TB
 | `YA_CLAW_AUTO_SEED_PROFILES`              | load or refresh seeded profiles on startup                         |
 | `YA_CLAW_WORKSPACE_PROVIDER_BACKEND`      | bootstrap workspace backend hint for local development or fallback |
 | `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE` | Docker image for Docker-backed environment construction            |
+| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID`   | UID used inside auto-started Docker workspace containers           |
+| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID`   | GID used inside auto-started Docker workspace containers           |
 | `YA_CLAW_MCP_CONFIG_FILE`                 | global MCP JSON file injected into every runtime                   |
 | `YA_CLAW_PROJECT_MCP_CONFIG_PATH`         | per-workspace MCP JSON path with project-level priority            |
 
@@ -151,6 +153,8 @@ The image provides a ready-to-use agent workspace on Debian stable with:
 - an `agent-browser` discovery skill copied into mounted workspace `.agents/skills/` directories at container start
 
 The workspace provider still treats the image as an implementation detail carried by `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE`. Deployments can override the image while keeping the same binding and environment factory contracts.
+
+Auto-started Docker workspace containers receive `YA_CLAW_WORKSPACE_UID`, `YA_CLAW_WORKSPACE_GID`, `YA_CLAW_HOST_UID`, and `YA_CLAW_HOST_GID`. The default UID/GID comes from the YA Claw service process, and deployments can override them through `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID` and `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID`.
 
 ## WorkspaceProvider
 

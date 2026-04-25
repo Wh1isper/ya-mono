@@ -40,7 +40,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     YA_CLAW_WEB_DIST_DIR=/srv/ya-claw/web-dist
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates tini \
+    && apt-get install -y --no-install-recommends ca-certificates gosu tini \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /srv/ya-claw
@@ -53,12 +53,13 @@ RUN sdk_wheel=$(ls /tmp/dist/ya_agent_sdk-*.whl) \
 
 COPY --from=frontend-builder /workspace/apps/ya-claw-web/dist ./web-dist
 COPY packages/ya-claw/scripts ./scripts
-RUN chmod +x ./scripts/*.sh
+COPY packages/ya-claw/docker-entrypoint.sh /usr/local/bin/ya-claw-entrypoint
+RUN chmod +x ./scripts/*.sh /usr/local/bin/ya-claw-entrypoint
 
 EXPOSE 9042
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9042/healthz')"
 
-ENTRYPOINT ["/usr/bin/tini", "--"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/ya-claw-entrypoint"]
 CMD ["ya-claw", "start"]

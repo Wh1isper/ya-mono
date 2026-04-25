@@ -3,6 +3,8 @@ FROM debian:stable-slim
 ARG NODE_MAJOR=22
 ARG AGENT_BROWSER_VERSION=latest
 ARG TARGETARCH
+ARG WORKSPACE_UID=1000
+ARG WORKSPACE_GID=1000
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -27,6 +29,7 @@ RUN apt-get update \
         fonts-noto-color-emoji \
         git \
         gnupg \
+        gosu \
         jq \
         less \
         openssh-client \
@@ -47,7 +50,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends nodejs \
     && corepack enable \
     && npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
-    && mkdir -p /etc/agent-browser /opt/ya-claw/skills/agent-browser /workspace \
+    && mkdir -p /etc/agent-browser /opt/ya-claw/skills/agent-browser /workspace /home/claw \
+    && if ! getent group "${WORKSPACE_GID}" >/dev/null; then groupadd --gid "${WORKSPACE_GID}" "claw-g${WORKSPACE_GID}"; fi \
+    && if ! getent passwd "${WORKSPACE_UID}" >/dev/null; then useradd --uid "${WORKSPACE_UID}" --gid "${WORKSPACE_GID}" --home-dir /home/claw --create-home --shell /bin/bash "claw-u${WORKSPACE_UID}"; fi \
+    && chown "${WORKSPACE_UID}:${WORKSPACE_GID}" /workspace /home/claw \
     && printf '%s\n' \
         '{' \
         '  "executablePath": "/usr/bin/chromium",' \
