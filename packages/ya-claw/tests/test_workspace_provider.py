@@ -10,6 +10,7 @@ from ya_claw.workspace import (
     LocalWorkspaceProvider,
     MappedLocalEnvironment,
     ReusableSandboxEnvironment,
+    WorkspaceLocalShell,
     build_session_sandbox_container_ref,
     build_session_sandbox_metadata,
 )
@@ -106,6 +107,21 @@ async def test_local_environment_factory_mounts_multiple_projects_for_fileops_an
     assert stdout == "repo-a|repo-b"
 
 
+async def test_local_environment_factory_passes_workspace_environment(tmp_path: Path) -> None:
+    provider = LocalWorkspaceProvider(tmp_path / "workspace-root")
+    binding = provider.resolve("repo-a")
+    factory = LocalEnvironmentFactory(workspace_environment={"LARK_APP_ID": "cli_test"})
+    environment = factory.build(binding)
+
+    async with environment as env:
+        assert isinstance(env.shell, WorkspaceLocalShell)
+        exit_code, stdout, stderr = await env.shell.execute("printf '%s' \"$LARK_APP_ID\"")
+
+    assert exit_code == 0
+    assert stderr == ""
+    assert stdout == "cli_test"
+
+
 def test_docker_workspace_provider_builds_declarative_binding(tmp_path: Path) -> None:
     provider = DockerWorkspaceProvider(tmp_path / "workspace-root", image="python:3.11")
 
@@ -154,6 +170,7 @@ async def test_reusable_sandbox_environment_passes_workspace_identity_to_docker(
         container_ref="session-container",
         workspace_uid=1234,
         workspace_gid=2345,
+        workspace_environment={"LARK_APP_ID": "cli_test"},
     )
     environment._client = FakeDockerClient()
 
@@ -163,6 +180,7 @@ async def test_reusable_sandbox_environment_passes_workspace_identity_to_docker(
     assert captured_run_kwargs["name"] == "session-container"
     assert captured_run_kwargs["working_dir"] == "/workspace/repo-a"
     assert captured_run_kwargs["environment"] == {
+        "LARK_APP_ID": "cli_test",
         "YA_CLAW_WORKSPACE_STARTUP_DIR": "/workspace/repo-a",
         "YA_CLAW_WORKSPACE_UID": "1234",
         "YA_CLAW_HOST_UID": "1234",

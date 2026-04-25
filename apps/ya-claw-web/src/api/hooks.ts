@@ -1,0 +1,227 @@
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
+import { useMemo } from 'react'
+import { toast } from 'sonner'
+
+import { useConnectionStore } from '../stores/connectionStore'
+import type {
+  InputPart,
+  ProfileUpsertRequest,
+  SessionRunCreateRequest,
+} from '../types'
+import { ClawApiClient } from './client'
+import { queryKeys } from './queryKeys'
+
+export function useApiClient() {
+  const baseUrl = useConnectionStore((state) => state.baseUrl)
+  const apiToken = useConnectionStore((state) => state.apiToken)
+  return useMemo(
+    () => new ClawApiClient({ baseUrl, apiToken }),
+    [apiToken, baseUrl],
+  )
+}
+
+export function useHealthQuery() {
+  const api = useApiClient()
+  return useQuery({
+    queryKey: queryKeys.health,
+    queryFn: () => api.health(),
+    refetchInterval: 15_000,
+    retry: 1,
+  })
+}
+
+export function useClawInfoQuery() {
+  const api = useApiClient()
+  return useQuery({
+    queryKey: queryKeys.clawInfo,
+    queryFn: () => api.clawInfo(),
+    staleTime: 60_000,
+    retry: 1,
+  })
+}
+
+export function useSessionsQuery() {
+  const api = useApiClient()
+  return useQuery({
+    queryKey: queryKeys.sessions,
+    queryFn: () => api.listSessions(),
+    placeholderData: keepPreviousData,
+    staleTime: 10_000,
+  })
+}
+
+export function useSessionQuery(sessionId: string | null) {
+  const api = useApiClient()
+  return useQuery({
+    queryKey: sessionId ? queryKeys.session(sessionId) : ['session', 'none'],
+    queryFn: () => api.getSession(sessionId ?? ''),
+    enabled: Boolean(sessionId),
+    placeholderData: keepPreviousData,
+    staleTime: 5_000,
+  })
+}
+
+export function useRunQuery(runId: string | null) {
+  const api = useApiClient()
+  return useQuery({
+    queryKey: runId ? queryKeys.run(runId) : ['run', 'none'],
+    queryFn: () => api.getRun(runId ?? ''),
+    enabled: Boolean(runId),
+    placeholderData: keepPreviousData,
+    staleTime: 5_000,
+  })
+}
+
+export function useRunTraceQuery(runId: string | null) {
+  const api = useApiClient()
+  return useQuery({
+    queryKey: runId ? queryKeys.runTrace(runId) : ['run-trace', 'none'],
+    queryFn: () => api.getRunTrace(runId ?? ''),
+    enabled: Boolean(runId),
+    placeholderData: keepPreviousData,
+    staleTime: 10_000,
+  })
+}
+
+export function useProfilesQuery() {
+  const api = useApiClient()
+  return useQuery({
+    queryKey: queryKeys.profiles,
+    queryFn: () => api.listProfiles(),
+    placeholderData: keepPreviousData,
+    staleTime: 10_000,
+  })
+}
+
+export function useProfileQuery(profileName: string | null) {
+  const api = useApiClient()
+  return useQuery({
+    queryKey: profileName
+      ? queryKeys.profile(profileName)
+      : ['profile', 'none'],
+    queryFn: () => api.getProfile(profileName ?? ''),
+    enabled: Boolean(profileName),
+    placeholderData: keepPreviousData,
+    staleTime: 10_000,
+  })
+}
+
+export function useCreateSessionMutation() {
+  const api = useApiClient()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: {
+      profile_name?: string | null
+      project_id?: string | null
+      input_parts: InputPart[]
+    }) => api.createSession(payload),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
+    },
+  })
+}
+
+export function useCreateSessionRunMutation(sessionId: string | null) {
+  const api = useApiClient()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: SessionRunCreateRequest) =>
+      api.createSessionRun(sessionId ?? '', payload),
+    onSuccess: async (run) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+        sessionId
+          ? queryClient.invalidateQueries({
+              queryKey: queryKeys.session(sessionId),
+            })
+          : Promise.resolve(),
+        queryClient.invalidateQueries({ queryKey: queryKeys.run(run.id) }),
+      ])
+    },
+  })
+}
+
+export function useRunControlMutations(runId: string | null) {
+  const api = useApiClient()
+  const queryClient = useQueryClient()
+  const refresh = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+      runId
+        ? queryClient.invalidateQueries({ queryKey: queryKeys.run(runId) })
+        : Promise.resolve(),
+    ])
+  }
+  return {
+    steer: useMutation({
+      mutationFn: (inputParts: InputPart[]) =>
+        api.steerRun(runId ?? '', inputParts),
+      onSuccess: refresh,
+    }),
+    interrupt: useMutation({
+      mutationFn: () => api.interruptRun(runId ?? ''),
+      onSuccess: refresh,
+    }),
+    cancel: useMutation({
+      mutationFn: () => api.cancelRun(runId ?? ''),
+      onSuccess: refresh,
+    }),
+  }
+}
+
+export function useUpsertProfileMutation(profileName: string | null) {
+  const api = useApiClient()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      name,
+      payload,
+    }: {
+      name: string
+      payload: ProfileUpsertRequest
+    }) => api.upsertProfile(name, payload),
+    onSuccess: async (profile) => {
+      toast.success(`Saved profile ${profile.name}`)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.profiles }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.profile(profile.name),
+        }),
+        profileName && profileName !== profile.name
+          ? queryClient.invalidateQueries({
+              queryKey: queryKeys.profile(profileName),
+            })
+          : Promise.resolve(),
+      ])
+    },
+  })
+}
+
+export function useDeleteProfileMutation() {
+  const api = useApiClient()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (profileName: string) => api.deleteProfile(profileName),
+    onSuccess: async (_, profileName) => {
+      toast.success(`Deleted profile ${profileName}`)
+      await queryClient.invalidateQueries({ queryKey: queryKeys.profiles })
+    },
+  })
+}
+
+export function useSeedProfilesMutation() {
+  const api = useApiClient()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (pruneMissing: boolean) => api.seedProfiles(pruneMissing),
+    onSuccess: async (response) => {
+      toast.success(`Seeded ${response.seeded_names.length} profiles`)
+      await queryClient.invalidateQueries({ queryKey: queryKeys.profiles })
+    },
+  })
+}

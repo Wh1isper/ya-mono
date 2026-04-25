@@ -45,7 +45,7 @@ Shows next fire time, last run status, target session, delivery policy, and effe
 
 ### Bridges
 
-Shows bridge endpoints, relay mode, recent dispatches, and channel health.
+Shows bridge adapters, bridge dispatch mode, recent inbound events, conversation mapping, run dispatches, and channel health.
 
 ### Run View
 
@@ -129,12 +129,21 @@ Each shape should keep the same core baseline:
 
 ## Bridge Operations
 
-The bridge subsystem should live inside the `ya-claw` package as both:
+The bridge subsystem lives inside the `ya-claw` package as both:
 
 - a `ya_claw.bridge` subpackage for adapter implementations
 - a `ya-claw bridge` CLI group for operational commands
 
-A bridge adapter may target platforms such as:
+Bridge deployment dispatch and run execution dispatch are separate runtime concepts:
+
+- `embedded`: enabled adapters start inside the YA Claw HTTP server lifespan under `BridgeSupervisor`.
+- `manual`: the YA Claw HTTP server starts without `BridgeSupervisor`.
+
+With the default `embedded` dispatch, one YA Claw service process supervises both `ExecutionSupervisor` and `BridgeSupervisor`. Each enabled adapter runs as a long-lived async task under `BridgeSupervisor`. Bridge adapters submit inbound events through the same session/run controller path used by HTTP requests, so bridge ingress behaves as a self-request inside the service process before execution dispatch.
+
+The built-in Lark adapter receives the comma-separated event allowlist from `YA_CLAW_BRIDGE_LARK_EVENT_TYPES`. The default allowlist covers `im.chat.member.bot.added_v1`, `im.chat.member.user.added_v1`, `im.message.receive_v1`, and `drive.notice.comment_add_v1`. Message receive events map `(adapter, tenant_key, chat_id)` to one session. Other accepted events use `chat_id` when present and fall back to a stable event or Drive conversation key. YA Claw stores inbound event records for idempotency and creates one queued bridge-triggered run per accepted event. The agent replies or acts from the workspace with `lark-cli`; workspace environments receive `LARK_APP_ID` and `LARK_APP_SECRET` from process variables or the configured Lark bridge app settings.
+
+Bridge adapter types are enumerated so future adapters can be added with the same controller and supervisor foundation. A bridge adapter may target platforms such as:
 
 - Lark
 - Slack

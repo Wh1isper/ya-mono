@@ -28,6 +28,7 @@ class SessionStatus(StrEnum):
 
 class TriggerType(StrEnum):
     API = "api"
+    BRIDGE = "bridge"
 
 
 class TerminationReason(StrEnum):
@@ -95,6 +96,7 @@ ContentPart = Annotated[
 
 
 class DispatchMode(StrEnum):
+    QUEUE = "queue"
     ASYNC = "async"
     STREAM = "stream"
 

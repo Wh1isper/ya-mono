@@ -29,6 +29,7 @@ It provides a durable local execution shell around SDK agent construction and st
 - keep the runtime small enough to understand and evolve quickly
 - keep active execution management inside one process for the single-node target
 - support API, schedule, and bridge ingress through one queued-run execution model
+- run bridge adapters as supervised runtime components in the single-node service shape
 
 ### Non-Goals
 
@@ -62,7 +63,8 @@ flowchart TB
         BUILD[ClawRuntimeBuilder]
         COORD[RunCoordinator]
         SCHED[Schedule Dispatcher]
-        BRIDGE[Bridge Relay Manager]
+        BRIDGE[BridgeSupervisor]
+        BADAPT[Bridge Adapters]
     end
 
     subgraph SDK[ya-agent-sdk]
@@ -82,8 +84,10 @@ flowchart TB
     WEB --> API
     API_CLIENT --> API
     CLI --> API
-    IM --> BRIDGE
-    BRIDGE --> API
+    IM --> BADAPT
+    BADAPT --> BRIDGE
+    BRIDGE --> SESS
+    BRIDGE --> RUNS
 
     API --> SESS
     API --> RUNS

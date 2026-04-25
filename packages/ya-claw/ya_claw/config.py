@@ -11,6 +11,8 @@ from dotenv import dotenv_values, load_dotenv
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from ya_claw.bridge.models import BridgeAdapterType, BridgeDispatchMode
+
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_DATABASE_FILENAME = "ya_claw.sqlite3"
 _DEFAULT_DATA_DIR = Path("~/.ya-claw/data")
@@ -75,6 +77,18 @@ class ClawSettings(BaseSettings):
     workspace_provider_docker_image: str = _DEFAULT_WORKSPACE_DOCKER_IMAGE
     workspace_provider_docker_uid: int | None = None
     workspace_provider_docker_gid: int | None = None
+    bridge_dispatch_mode: BridgeDispatchMode = BridgeDispatchMode.EMBEDDED
+    bridge_enabled_adapters: str = ""
+    bridge_lark_enabled: bool = False
+    bridge_lark_app_id: str | None = None
+    bridge_lark_app_secret: SecretStr | None = None
+    bridge_lark_default_profile: str | None = None
+    bridge_lark_project_id_template: str = "lark/{tenant_key}/{chat_id}"
+    bridge_lark_event_types: str = (
+        "im.chat.member.bot.added_v1,im.chat.member.user.added_v1,im.message.receive_v1,drive.notice.comment_add_v1"
+    )
+    bridge_lark_reply_identity: Literal["bot", "user"] = "bot"
+    bridge_lark_domain: str = "https://open.feishu.cn"
     default_profile: str = "default"
     profile_seed_file: Path | None = None
     auto_seed_profiles: bool = False
@@ -137,6 +151,42 @@ class ClawSettings(BaseSettings):
         if isinstance(self.workspace_provider_docker_gid, int):
             return self.workspace_provider_docker_gid
         return os.getgid()
+
+    @property
+    def resolved_bridge_enabled_adapters(self) -> set[BridgeAdapterType]:
+        raw_adapters = [item.strip() for item in self.bridge_enabled_adapters.split(",") if item.strip()]
+        resolved_adapters = {BridgeAdapterType(adapter) for adapter in raw_adapters}
+        if self.bridge_lark_enabled:
+            resolved_adapters.add(BridgeAdapterType.LARK)
+        return resolved_adapters
+
+    @property
+    def resolved_bridge_lark_event_types(self) -> list[str]:
+        return [item.strip() for item in self.bridge_lark_event_types.split(",") if item.strip()]
+
+    @property
+    def resolved_bridge_lark_profile(self) -> str:
+        if isinstance(self.bridge_lark_default_profile, str) and self.bridge_lark_default_profile.strip() != "":
+            return self.bridge_lark_default_profile.strip()
+        return self.default_profile
+
+    @property
+    def bridge_lark_app_secret_value(self) -> str | None:
+        if self.bridge_lark_app_secret is None:
+            return None
+        normalized_value = self.bridge_lark_app_secret.get_secret_value().strip()
+        return normalized_value or None
+
+    @property
+    def resolved_lark_cli_environment(self) -> dict[str, str]:
+        environment: dict[str, str] = {}
+        app_id = os.environ.get("LARK_APP_ID") or self.bridge_lark_app_id
+        app_secret = os.environ.get("LARK_APP_SECRET") or self.bridge_lark_app_secret_value
+        if isinstance(app_id, str) and app_id.strip() != "":
+            environment["LARK_APP_ID"] = app_id.strip()
+        if isinstance(app_secret, str) and app_secret.strip() != "":
+            environment["LARK_APP_SECRET"] = app_secret.strip()
+        return environment
 
     @property
     def api_token_value(self) -> str | None:

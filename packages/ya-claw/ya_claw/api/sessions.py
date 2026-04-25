@@ -21,6 +21,7 @@ from ya_claw.controller.models import (
 from ya_claw.controller.run import RunController
 from ya_claw.controller.session import SessionController
 from ya_claw.execution.coordinator import ExecutionSupervisor
+from ya_claw.execution.dispatcher import RunDispatcher
 from ya_claw.notifications import NotificationHub
 from ya_claw.runtime_state import InMemoryRuntimeState
 
@@ -41,8 +42,7 @@ async def create_session(request: Request, payload: SessionCreateRequest) -> Ses
     await _publish_session_notification(request, "session.created", response.session)
     if response.run is not None:
         await _publish_run_notification(request, "run.created", response.run)
-    if _auto_dispatch_enabled(settings):
-        _submit_run(request, response.run.id if response.run is not None else None)
+        _dispatch_run(request, response.run.id, payload.dispatch_mode, require_submission=False)
     return response
 
 
@@ -59,8 +59,7 @@ async def create_session_stream(request: Request, payload: SessionCreateRequest)
     if response.run is None:
         raise HTTPException(status_code=422, detail="input_parts are required for streamed session creation.")
     await _publish_run_notification(request, "run.created", response.run)
-    if not _submit_run(request, response.run.id):
-        raise HTTPException(status_code=503, detail="Execution supervisor is unavailable.")
+    _dispatch_run(request, response.run.id, payload.dispatch_mode, require_submission=True)
     return EventSourceResponse(runtime_state.stream_run_events(response.run.id))
 
 
@@ -121,8 +120,7 @@ async def create_session_run(request: Request, session_id: str, payload: Session
         run = await session_controller.create_run(db_session, settings, runtime_state, session_id, payload)
 
     await _publish_run_notification(request, "run.created", run)
-    if _auto_dispatch_enabled(settings):
-        _submit_run(request, run.id)
+    _dispatch_run(request, run.id, payload.dispatch_mode, require_submission=False)
     return run
 
 
@@ -138,8 +136,7 @@ async def create_session_run_stream(
         run = await session_controller.create_run(db_session, settings, runtime_state, session_id, payload)
 
     await _publish_run_notification(request, "run.created", run)
-    if not _submit_run(request, run.id):
-        raise HTTPException(status_code=503, detail="Execution supervisor is unavailable.")
+    _dispatch_run(request, run.id, payload.dispatch_mode, require_submission=True)
     return EventSourceResponse(runtime_state.stream_run_events(run.id))
 
 
@@ -231,17 +228,11 @@ async def _publish_run_notification(request: Request, event_type: str, run: RunD
     )
 
 
-def _submit_run(request: Request, run_id: str | None) -> bool:
-    if run_id is None:
-        return False
-    supervisor = _get_execution_supervisor(request)
-    if not isinstance(supervisor, ExecutionSupervisor):
-        return False
-    return supervisor.submit_run(run_id)
-
-
-def _auto_dispatch_enabled(settings: ClawSettings) -> bool:
-    return isinstance(settings.execution_model, str) and settings.execution_model.strip() != ""
+def _dispatch_run(request: Request, run_id: str, mode: DispatchMode, *, require_submission: bool) -> None:
+    dispatcher = RunDispatcher(_get_execution_supervisor(request))
+    result = dispatcher.dispatch(run_id, mode)
+    if require_submission and not result.submitted:
+        raise HTTPException(status_code=503, detail="Execution supervisor is unavailable.")
 
 
 def _get_settings(request: Request) -> ClawSettings:

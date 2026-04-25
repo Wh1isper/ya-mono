@@ -74,6 +74,10 @@ class ExecutionSupervisor:
         self._notification_hub = notification_hub
         self._run_store = RunStore(settings)
 
+    @property
+    def execution_enabled(self) -> bool:
+        return isinstance(self._settings.execution_model, str) and self._settings.execution_model.strip() != ""
+
     def submit_run(self, run_id: str) -> bool:
         if self._runtime_state.get_background_task(run_id) is not None:
             return False

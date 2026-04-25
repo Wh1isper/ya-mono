@@ -81,6 +81,16 @@ Profile, MCP, and coordinator settings:
 - `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID=<service process UID>`
 - `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID=<service process GID>`
 - `YA_CLAW_EXECUTION_CONTEXT_WINDOW=200000`
+- `YA_CLAW_BRIDGE_DISPATCH_MODE=embedded|manual`
+- `YA_CLAW_BRIDGE_ENABLED_ADAPTERS=lark`
+- `YA_CLAW_BRIDGE_LARK_APP_ID=cli_xxx`
+- `YA_CLAW_BRIDGE_LARK_APP_SECRET=...`
+- `YA_CLAW_BRIDGE_LARK_DEFAULT_PROFILE=default`
+- `YA_CLAW_BRIDGE_LARK_PROJECT_ID_TEMPLATE=lark/{tenant_key}/{chat_id}`
+- `YA_CLAW_BRIDGE_LARK_EVENT_TYPES=im.chat.member.bot.added_v1,im.chat.member.user.added_v1,im.message.receive_v1,drive.notice.comment_add_v1`
+- `YA_CLAW_BRIDGE_LARK_REPLY_IDENTITY=bot`
+- `LARK_APP_ID=cli_xxx`
+- `LARK_APP_SECRET=...`
 
 Profiles store model, prompt, builtin tool groups, subagents, approval policy, and MCP namespace filters. Runtime-wide MCP server definitions load from `~/.ya-claw/mcp.json` with per-workspace override at `.ya-claw/mcp.json`. Every YA Claw agent runtime receives the active MCP configuration through `ToolProxyToolset`, and each profile can narrow that surface with `enabled_mcps` and `disabled_mcps`.
 
@@ -124,10 +134,14 @@ uv run --package ya-claw ya-claw bridge run lark
 uv run --package ya-claw ya-claw bridge serve lark
 ```
 
-### Bridge Relay Modes
+### Bridge Dispatch
 
-- `task relay` — a bridge submits work to YA Claw as an async session flow and delivers agent output back through the channel adapter or channel CLI
-- `stream relay` — a bridge opens a foreground run, consumes SSE from the YA Claw service, and streams channel-ready output directly
+Bridge dispatch controls whether the YA Claw HTTP server starts bridge adapters:
+
+- `embedded` starts enabled adapters inside the YA Claw server lifespan under `BridgeSupervisor`.
+- `manual` starts the YA Claw HTTP server without starting `BridgeSupervisor`.
+
+Bridge adapters submit inbound events through the same session/run controller path used by HTTP requests, so bridge ingress behaves as a self-request inside the service process. The Lark bridge reads `YA_CLAW_BRIDGE_LARK_EVENT_TYPES` as a comma-separated event allowlist. The default allowlist covers bot-added-to-chat, user-added-to-chat, message receive, and Drive comment notification events. Message receive events map each `tenant_key + chat_id` pair to one YA Claw session. Other Lark events use `chat_id` when present and fall back to a stable event or Drive conversation key. Every accepted inbound event creates a queued bridge-triggered run, and the agent replies or acts from the workspace with `lark-cli`.
 
 ## Web Shell
 
