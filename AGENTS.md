@@ -17,6 +17,7 @@ Shared repository areas:
 - `scripts/` — repository automation scripts
 - `.github/` — CI and release workflows
 - `Dockerfile.ya-claw` — YA Claw image build
+- `Dockerfile.ya-claw-workspace` — official YA Claw Docker workspace image build
 - `Dockerfile.ya-agent-platform` — YA Agent Platform image build
 - `.dockerignore` — Docker build context rules
 
@@ -52,7 +53,7 @@ Most architecture work in this repository targets `packages/ya-agent-sdk` and `p
 - PostgreSQL is an optional durable store for deployments that prefer an external database
 - local filesystem stores committed session continuity data
 - requires `YA_CLAW_API_TOKEN` before service startup
-- defaults: SQLite at `~/.ya-claw/ya_claw.sqlite3`, runtime data at `~/.ya-claw/data`, workspace root at `~/.ya-claw/workspace`
+- defaults: SQLite at `~/.ya-claw/ya_claw.sqlite3`, runtime data at `~/.ya-claw/data`, workspace root at `~/.ya-claw/workspace`, Docker workspace image `ghcr.io/wh1isper/ya-claw-workspace:latest`
 - implementation style: organize runtime code by `api/`, `controller/`, and `orm/`
 - internal data objects use Pydantic `BaseModel`
 - code prefers explicit typing and `isinstance` checks
@@ -60,9 +61,9 @@ Most architecture work in this repository targets `packages/ya-agent-sdk` and `p
 - session metadata lives in the database
 - committed continuity blobs live in `run-store/{run_id}/state.json` and `run-store/{run_id}/message.json`
 - `message.json` stores the compacted replay list of AGUI-aligned events as a top-level JSON array
-- session GET exposes paginated runs with optional compacted message replay lists and derives session status from the latest run
+- session GET exposes paginated runs with optional compacted message replay lists, returns optional top-level committed state/message from `head_success_run_id`, and derives session status from the latest run
 - run GET returns `session + run + optional state + optional message`
-- session GET reads committed state through `head_success_run_id`
+- runtime instance heartbeat lives in `runtime_instances`; run records carry claim ownership through `claimed_by` and `claimed_at`
 - rerun can explicitly target failed or interrupted runs through `restore_from_run_id`
 - input payloads use `input_parts` rather than a single `input_text`
 - foundational execution modules live under `ya_claw/execution/`
@@ -71,6 +72,7 @@ Most architecture work in this repository targets `packages/ya-agent-sdk` and `p
 - `DockerWorkspaceProvider` uses Docker mounts through `SandboxEnvironment`
 - built-in run orchestration lives in `ya_claw/execution/coordinator.py`
 - built-in coordinator auto-dispatches only when `YA_CLAW_EXECUTION_MODEL` is configured
+- JSON run/session create routes return JSON consistently; foreground SSE creation uses `POST /api/v1/runs:stream`, `POST /api/v1/sessions:stream`, and `POST /api/v1/sessions/{session_id}/runs:stream`
 
 ### `packages/ya-agent-platform`
 
@@ -86,14 +88,15 @@ After changing code, run:
 
 Useful commands:
 
-| Command                      | Description                               |
-| ---------------------------- | ----------------------------------------- |
-| `make run-claw`              | Run the YA Claw backend                   |
-| `make web-dev`               | Run the YA Claw web app                   |
-| `make build-claw`            | Build the `ya-claw` package               |
-| `make build-platform`        | Build the WIP `ya-agent-platform` package |
-| `make docker-build-claw`     | Build the YA Claw Docker image            |
-| `make docker-build-platform` | Build the YA Agent Platform Docker image  |
+| Command                            | Description                               |
+| ---------------------------------- | ----------------------------------------- |
+| `make run-claw`                    | Run the YA Claw backend                   |
+| `make web-dev`                     | Run the YA Claw web app                   |
+| `make build-claw`                  | Build the `ya-claw` package               |
+| `make build-platform`              | Build the WIP `ya-agent-platform` package |
+| `make docker-build-claw`           | Build the YA Claw Docker image            |
+| `make docker-build-claw-workspace` | Build the YA Claw workspace Docker image  |
+| `make docker-build-platform`       | Build the YA Agent Platform Docker image  |
 
 ## Environment Configuration
 
@@ -122,6 +125,7 @@ When editing workspace metadata, keep these files aligned:
 - `Makefile`
 - `.github/workflows/*.yml`
 - `Dockerfile.ya-claw`
+- `Dockerfile.ya-claw-workspace`
 - `Dockerfile.ya-agent-platform`
 - `.dockerignore`
 - `README.md` and package READMEs

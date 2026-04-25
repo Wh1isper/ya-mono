@@ -111,12 +111,18 @@ Suggested fields:
 
 ## Creation Semantics
 
-Run-creating endpoints should:
+JSON run-creating endpoints should:
 
 1. write the durable run record with `status=queued`
 2. update session pointers such as `head_run_id`
 3. notify the in-process supervisor when execution is available
 4. return the queued run record immediately
+
+Foreground streaming creation uses dedicated SSE endpoints:
+
+- `POST /api/v1/sessions:stream`
+- `POST /api/v1/sessions/{session_id}/runs:stream`
+- `POST /api/v1/runs:stream`
 
 ## Run Summary Shape
 
@@ -163,7 +169,7 @@ Session and run GET endpoints should return the structured record plus committed
     "recent_runs": []
   },
   "state": {},
-  "message": {}
+  "message": []
 }
 ```
 
@@ -182,7 +188,7 @@ Session and run GET endpoints should return the structured record plus committed
     "has_message": true
   },
   "state": {},
-  "message": {}
+  "message": []
 }
 ```
 

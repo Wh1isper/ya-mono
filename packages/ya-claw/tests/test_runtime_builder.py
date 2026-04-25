@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from ya_agent_sdk.agents.main import stream_agent
 from ya_agent_sdk.environment import SandboxEnvironment, VirtualMount
 from ya_agent_sdk.toolsets.skills.toolset import SkillToolset
 from ya_agent_sdk.toolsets.tool_proxy.toolset import ToolProxyToolset
@@ -147,7 +148,7 @@ def test_runtime_builder_resolves_runtime_mcp_toolsets_with_profile_filters(tmp_
     assert toolsets[1]._optional_namespaces == {"context7"}
 
 
-async def test_runtime_builder_runs_with_pydantic_ai_test_model(tmp_path: Path) -> None:
+async def test_runtime_builder_streams_with_pydantic_ai_test_model_and_exports_state(tmp_path: Path) -> None:
     settings = ClawSettings(
         api_token="test-token",  # noqa: S106
         data_dir=tmp_path / "runtime-data",
@@ -194,7 +195,20 @@ async def test_runtime_builder_runs_with_pydantic_ai_test_model(tmp_path: Path) 
         claw_metadata={},
     )
 
+    seen_events: list[object] = []
     async with runtime:
-        result = await runtime.agent.run("say hello", deps=runtime.ctx)
+        async with stream_agent(runtime, "say hello") as streamer:
+            async for event in streamer:
+                seen_events.append(event)
+        assert streamer.run is not None
+        assert streamer.run.result is not None
+        result_output = streamer.run.result.output
+        exported_state = runtime.ctx.export_state()
 
-    assert result.output == "success (no tool calls)"
+    assert result_output == "success (no tool calls)"
+    assert seen_events
+    assert runtime.ctx.session_id == "session-1"
+    assert runtime.ctx.claw_run_id == "run-1"
+    assert runtime.ctx.workspace_binding is not None
+    assert runtime.ctx.workspace_binding.cwd == "/workspace/repo-a"
+    assert exported_state is not None

@@ -134,8 +134,10 @@ Recommended shape:
 
 1. load candidate queued run
 2. update `status` from `queued` to `running` with a conditional write
-3. update `started_at` and session `active_run_id`
-4. only the successful claimant starts the coordinator
+3. set run claim ownership through `claimed_by` and `claimed_at`
+4. update `started_at` and session `active_run_id`
+5. record runtime instance liveness in the `runtime_instances` heartbeat table
+6. only the successful claimant starts the coordinator
 
 ## RunCoordinator
 

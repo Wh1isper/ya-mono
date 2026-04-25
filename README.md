@@ -108,6 +108,7 @@ make docker-build-platform
 ## Dockerfiles
 
 - `Dockerfile.ya-claw` — YA Claw image build
+- `Dockerfile.ya-claw-workspace` — official YA Claw Docker workspace image build
 - `Dockerfile.ya-agent-platform` — YA Agent Platform image build
 
 ## Development
@@ -131,20 +132,21 @@ make test
 
 ## Workspace Commands
 
-| Command                      | Description                                                         |
-| ---------------------------- | ------------------------------------------------------------------- |
-| `make install`               | Install Python dependencies, web dependencies, and pre-commit hooks |
-| `make install-skills`        | Install the `agent-builder` skill bundle into `~/.agents/skills`    |
-| `make lint`                  | Check lock consistency and run pre-commit hooks                     |
-| `make check`                 | Run lock validation, lint, pyright, deptry, and web checks          |
-| `make test`                  | Run SDK, CLI, and YA Claw tests                                     |
-| `make run-claw`              | Run the YA Claw backend                                             |
-| `make web-dev`               | Run the YA Claw web app                                             |
-| `make build-claw`            | Build the `ya-claw` distribution                                    |
-| `make build-platform`        | Build the WIP `ya-agent-platform` package                           |
-| `make build-all`             | Build distributions for all workspace packages                      |
-| `make docker-build-claw`     | Build the YA Claw Docker image                                      |
-| `make docker-build-platform` | Build the YA Agent Platform Docker image                            |
+| Command                            | Description                                                         |
+| ---------------------------------- | ------------------------------------------------------------------- |
+| `make install`                     | Install Python dependencies, web dependencies, and pre-commit hooks |
+| `make install-skills`              | Install the `agent-builder` skill bundle into `~/.agents/skills`    |
+| `make lint`                        | Check lock consistency and run pre-commit hooks                     |
+| `make check`                       | Run lock validation, lint, pyright, deptry, and web checks          |
+| `make test`                        | Run SDK, CLI, and YA Claw tests                                     |
+| `make run-claw`                    | Run the YA Claw backend                                             |
+| `make web-dev`                     | Run the YA Claw web app                                             |
+| `make build-claw`                  | Build the `ya-claw` distribution                                    |
+| `make build-platform`              | Build the WIP `ya-agent-platform` package                           |
+| `make build-all`                   | Build distributions for all workspace packages                      |
+| `make docker-build-claw`           | Build the YA Claw Docker image                                      |
+| `make docker-build-claw-workspace` | Build the YA Claw workspace Docker image                            |
+| `make docker-build-platform`       | Build the YA Agent Platform Docker image                            |
 
 ## License
 

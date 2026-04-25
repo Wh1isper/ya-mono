@@ -31,12 +31,21 @@ class FakeDelegateTool(BaseTool):
     description = "fake delegate"
 
     async def call(self, ctx: RunContext[AgentContext], /, *args: Any, **kwargs: Any) -> str:
+        await asyncio.sleep(0)
         return "delegate result"
 
 
+class FailingDelegateTool(BaseTool):
+    name = "delegate"
+    description = "failing delegate"
+
+    async def call(self, ctx: RunContext[AgentContext], /, *args: Any, **kwargs: Any) -> str:
+        raise RuntimeError("delegate boom")
+
+
 class FakeToolset:
-    def __init__(self) -> None:
-        self.delegate = FakeDelegateTool()
+    def __init__(self, delegate: BaseTool | None = None) -> None:
+        self.delegate = delegate or FakeDelegateTool()
 
     def _get_tool_instance(self, name: str) -> BaseTool:
         if name != "delegate":
@@ -191,3 +200,62 @@ async def test_steer_subagent_sends_targeted_bus_message() -> None:
                 release.set()
                 await asyncio.gather(task, return_exceptions=True)
                 await monitor.close()
+
+
+async def test_spawn_delegate_delivers_result_to_main_message_bus() -> None:
+    env = EmptyEnvironment()
+    async with env:
+        ctx = AgentContext(env=env, agent_id="main")
+        async with ctx:
+            runtime_state = create_runtime_state()
+            runtime_state.register_run("session-1", "run-1", dispatch_mode="stream")
+            monitor = BackgroundMonitor(run_id="run-1", runtime_state=runtime_state)
+            monitor.set_core_toolset(FakeToolset())  # type: ignore[arg-type]
+            env.resources.set("background_monitor", monitor)
+            ctx.message_bus.subscribe("main")
+
+            tool = SpawnDelegateTool()
+            result = await tool.call(
+                FakeRunContext(ctx),  # type: ignore[arg-type]
+                subagent_name="worker",
+                prompt="do work",
+                agent_id="worker-bg-test",
+            )
+            drained = await monitor.drain_or_cancel(timeout=1.0)
+
+            assert "Spawned delegate" in result
+            assert drained is True
+            messages = ctx.message_bus.consume("main")
+            assert [message.content for message in messages] == ["delegate result"]
+            event_types = [event["type"] for event in runtime_state.get_replay_events("run-1")]
+            assert "ya_claw.subagent_spawned" in event_types
+            assert "ya_claw.subagent_completed" in event_types
+
+
+async def test_spawn_delegate_failure_delivers_error_to_main_message_bus() -> None:
+    env = EmptyEnvironment()
+    async with env:
+        ctx = AgentContext(env=env, agent_id="main")
+        async with ctx:
+            runtime_state = create_runtime_state()
+            runtime_state.register_run("session-1", "run-1", dispatch_mode="stream")
+            monitor = BackgroundMonitor(run_id="run-1", runtime_state=runtime_state)
+            monitor.set_core_toolset(FakeToolset(delegate=FailingDelegateTool()))  # type: ignore[arg-type]
+            env.resources.set("background_monitor", monitor)
+            ctx.message_bus.subscribe("main")
+
+            tool = SpawnDelegateTool()
+            result = await tool.call(
+                FakeRunContext(ctx),  # type: ignore[arg-type]
+                subagent_name="worker",
+                prompt="do work",
+                agent_id="worker-bg-fail",
+            )
+            drained = await monitor.drain_or_cancel(timeout=1.0)
+
+            assert "Spawned delegate" in result
+            assert drained is True
+            messages = ctx.message_bus.consume("main")
+            assert len(messages) == 1
+            assert "failed" in str(messages[0].content)
+            assert runtime_state.get_replay_events("run-1")[-1]["type"] == "ya_claw.subagent_failed"

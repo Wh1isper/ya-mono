@@ -268,6 +268,8 @@ def test_session_detail_can_include_message_and_paginate_runs() -> None:
     assert session_response.status_code == 200
     assert session_response.json()["session"]["runs"][0]["id"] == second_run_id
     assert session_response.json()["session"]["runs"][0]["message"] == [{"type": "message", "content": "second"}]
+    assert session_response.json()["message"] == [{"type": "message", "content": "second"}]
+    assert session_response.json()["state"] is None
     assert session_response.json()["session"]["runs_has_more"] is True
     assert session_response.json()["session"]["runs_next_before_sequence_no"] == 2
 
@@ -352,3 +354,13 @@ def test_run_get_exposes_session_state_and_message() -> None:
     assert run_response.json()["message"] == []
     assert run_response.json()["run"]["has_state"] is True
     assert run_response.json()["run"]["has_message"] is True
+
+    with TestClient(create_app()) as client:
+        session_response = client.get(
+            f"/api/v1/sessions/{session_id}?include_message=true",
+            headers=_auth_headers(),
+        )
+
+    assert session_response.status_code == 200
+    assert session_response.json()["state"] == {"state": "ready"}
+    assert session_response.json()["message"] == []

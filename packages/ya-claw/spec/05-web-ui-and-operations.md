@@ -122,9 +122,10 @@ A bridge adapter may target platforms such as:
 
 ## Docker Alignment
 
-Two image definitions exist in the repository:
+Three image definitions exist in the repository:
 
 - `Dockerfile.ya-claw` for the active runtime
+- `Dockerfile.ya-claw-workspace` for the default Docker workspace provider image
 - `Dockerfile.ya-agent-platform` for the WIP stateless agent service image
 
 ### Docker Startup

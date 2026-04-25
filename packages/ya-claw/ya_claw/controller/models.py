@@ -222,6 +222,8 @@ class SessionCreateResponse(BaseModel):
 
 class SessionGetResponse(BaseModel):
     session: SessionDetail
+    state: dict[str, object] | None = None
+    message: list[dict[str, Any]] | None = None
 
 
 class RunGetResponse(BaseModel):

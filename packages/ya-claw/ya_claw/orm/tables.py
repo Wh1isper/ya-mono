@@ -91,5 +91,20 @@ class RunRecord(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    claimed_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     session: Mapped[SessionRecord] = relationship(back_populates="runs")
+
+
+class RuntimeInstanceRecord(Base):
+    __tablename__ = "runtime_instances"
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    hostname: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    process_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    instance_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
