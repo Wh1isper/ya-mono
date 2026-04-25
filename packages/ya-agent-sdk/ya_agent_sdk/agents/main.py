@@ -57,6 +57,7 @@ from ya_agent_sdk.events import (
 from ya_agent_sdk.filters.auto_load_files import process_auto_load_files
 from ya_agent_sdk.filters.cold_start import cold_start_trim
 from ya_agent_sdk.filters.environment_instructions import create_environment_instructions_filter
+from ya_agent_sdk.filters.runtime_instructions import inject_runtime_instructions
 from ya_agent_sdk.filters.system_prompt import create_system_prompt_filter
 from ya_agent_sdk.toolsets.core.base import BaseTool, GlobalHooks, Toolset
 from ya_agent_sdk.utils import AgentDepsT, EnvT, add_toolset_instructions
@@ -477,13 +478,17 @@ def create_agent(
     logger.debug("Context created: %s (run_id=%s)", type(ctx).__name__, ctx.run_id)
 
     # --- History Processors ---
-    # Combine pre-processors, context's processors, built-in, and user-provided ones
-    # Order: pre_history_processors -> ctx processors -> compact -> env instructions -> auto_load -> history_processors
+    # Combine pre-processors, context processors, built-ins, and user-provided processors.
+    # Runtime instructions run after compact so restored histories receive fresh runtime context.
+    # Manual users of AgentContext.get_history_processors() still receive runtime instructions there.
+    context_processors = [
+        processor for processor in ctx.get_history_processors() if processor is not inject_runtime_instructions
+    ]
     all_processors: list[HistoryProcessor[AgentDepsT]] = []
     if pre_history_processors:
         all_processors.extend(pre_history_processors)
     all_processors.extend([
-        *ctx.get_history_processors(),
+        *context_processors,
         create_compact_filter(
             model=compact_model,
             model_settings=compact_model_settings,
@@ -494,6 +499,7 @@ def create_agent(
         cold_start_trim,
         create_environment_instructions_filter(actual_env),
         process_auto_load_files,
+        inject_runtime_instructions,
     ])
     if history_processors:
         all_processors.extend(history_processors)
