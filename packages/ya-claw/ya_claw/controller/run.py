@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import suppress
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -16,6 +17,8 @@ from ya_claw.controller.models import (
     RunGetResponse,
     RunStatus,
     RunSummary,
+    RunTraceItem,
+    RunTraceResponse,
     SessionSummary,
     SteerRequest,
     TerminationReason,
@@ -175,9 +178,45 @@ class RunController:
         run_record: RunRecord,
         *,
         include_message: bool,
+        include_input_parts: bool = False,
     ) -> RunSummary:
         message_payload = read_run_message_blob_if_exists(settings, run_record.id) if include_message else None
-        return run_summary_from_record(run_record, message=message_payload)
+        return run_summary_from_record(
+            run_record,
+            message=message_payload,
+            include_input_parts=include_input_parts,
+        )
+
+    async def get_trace(
+        self,
+        db_session: AsyncSession,
+        settings: ClawSettings,
+        run_id: str,
+        *,
+        max_item_chars: int = 4000,
+        max_total_chars: int = 12000,
+    ) -> RunTraceResponse:
+        run_record = await db_session.get(RunRecord, run_id)
+        if not isinstance(run_record, RunRecord):
+            raise HTTPException(status_code=404, detail=f"Run '{run_id}' was not found.")
+
+        normalized_item_chars = min(max(max_item_chars, 256), 20000)
+        normalized_total_chars = min(max(max_total_chars, normalized_item_chars), 100000)
+        message_payload = read_run_message_blob_if_exists(settings, run_id) or []
+        trace, truncated = _project_run_trace(
+            message_payload,
+            max_item_chars=normalized_item_chars,
+            max_total_chars=normalized_total_chars,
+        )
+        return RunTraceResponse(
+            run_id=run_record.id,
+            session_id=run_record.session_id,
+            item_count=len(trace),
+            max_item_chars=normalized_item_chars,
+            max_total_chars=normalized_total_chars,
+            truncated=truncated,
+            trace=trace,
+        )
 
     async def cancel(
         self,
@@ -359,3 +398,83 @@ class RunController:
         if isinstance(max_value, int):
             return max_value + 1
         return 1
+
+
+def _project_run_trace(
+    events: list[dict[str, Any]],
+    *,
+    max_item_chars: int,
+    max_total_chars: int,
+) -> tuple[list[RunTraceItem], bool]:
+    trace: list[RunTraceItem] = []
+    consumed_chars = 0
+    truncated = False
+
+    for event in events:
+        event_type = str(event.get("type", "")).strip()
+        item_type = _trace_item_type(event_type)
+        if item_type is None:
+            continue
+
+        raw_content = _trace_content(event, item_type)
+        remaining_chars = max_total_chars - consumed_chars
+        if remaining_chars <= 0:
+            truncated = True
+            break
+
+        item_limit = min(max_item_chars, remaining_chars)
+        content, item_truncated = _truncate_text(raw_content, item_limit)
+        consumed_chars += len(content or "")
+        truncated = truncated or item_truncated
+        trace.append(
+            RunTraceItem(
+                sequence_no=len(trace) + 1,
+                type=item_type,
+                tool_call_id=_string_field(event, "toolCallId", "tool_call_id"),
+                tool_name=_string_field(event, "toolCallName", "tool_call_name"),
+                message_id=_string_field(event, "messageId", "message_id"),
+                role=_string_field(event, "role"),
+                content=content,
+                truncated=item_truncated,
+            )
+        )
+        if item_truncated and consumed_chars >= max_total_chars:
+            truncated = True
+            break
+
+    return trace, truncated
+
+
+def _trace_item_type(event_type: str) -> Literal["tool_call", "tool_response"] | None:
+    if event_type == "TOOL_CALL_CHUNK":
+        return "tool_call"
+    if event_type == "TOOL_CALL_RESULT":
+        return "tool_response"
+    return None
+
+
+def _trace_content(event: dict[str, Any], item_type: str) -> str | None:
+    value = event.get("delta") if item_type == "tool_call" else event.get("content")
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _truncate_text(value: str | None, limit: int) -> tuple[str | None, bool]:
+    if value is None:
+        return None, False
+    if len(value) <= limit:
+        return value, False
+    if limit <= 0:
+        return "", True
+    return value[:limit], True
+
+
+def _string_field(event: dict[str, Any], *names: str) -> str | None:
+    for name in names:
+        value = event.get(name)
+        if isinstance(value, str) and value.strip() != "":
+            return value
+    return None

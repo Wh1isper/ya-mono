@@ -20,11 +20,13 @@ from ya_claw.controller.models import (
     SessionGetResponse,
     SessionRunCreateRequest,
     SessionSummary,
+    SessionTurnsResponse,
     extract_project_references,
     normalize_project_references,
     run_summary_from_record,
     serialize_project_references,
     session_summary_from_record,
+    session_turn_from_record,
 )
 from ya_claw.controller.run import RunController
 from ya_claw.controller.store import read_run_message_blob_if_exists, read_run_state_blob_if_exists
@@ -159,6 +161,7 @@ class SessionController:
         runs_limit: int = _DEFAULT_SESSION_RUNS_LIMIT,
         before_sequence_no: int | None = None,
         include_message: bool = False,
+        include_input_parts: bool = False,
     ) -> SessionGetResponse:
         record = await db_session.get(SessionRecord, session_id)
         if not isinstance(record, SessionRecord):
@@ -172,6 +175,7 @@ class SessionController:
             limit=runs_limit,
             before_sequence_no=before_sequence_no,
             include_message=include_message,
+            include_input_parts=include_input_parts,
         )
         state_payload = None
         message_payload = None
@@ -201,6 +205,7 @@ class SessionController:
         limit: int = _DEFAULT_SESSION_RUNS_LIMIT,
         before_sequence_no: int | None = None,
         include_message: bool = False,
+        include_input_parts: bool = False,
     ) -> _SessionRunPage:
         record = await db_session.get(SessionRecord, session_id)
         if not isinstance(record, SessionRecord):
@@ -221,6 +226,7 @@ class SessionController:
                 settings,
                 run_record,
                 include_message=include_message,
+                include_input_parts=include_input_parts,
             )
             for run_record in page_records
         ]
@@ -230,6 +236,40 @@ class SessionController:
             limit=normalized_limit,
             has_more=has_more,
             next_before_sequence_no=next_before_sequence_no,
+        )
+
+    async def list_turns(
+        self,
+        db_session: AsyncSession,
+        session_id: str,
+        *,
+        limit: int = _DEFAULT_SESSION_RUNS_LIMIT,
+        before_sequence_no: int | None = None,
+    ) -> SessionTurnsResponse:
+        record = await db_session.get(SessionRecord, session_id)
+        if not isinstance(record, SessionRecord):
+            raise HTTPException(status_code=404, detail=f"Session '{session_id}' was not found.")
+
+        normalized_limit = min(max(limit, 1), _MAX_SESSION_RUNS_LIMIT)
+        statement = select(RunRecord).where(
+            RunRecord.session_id == session_id,
+            RunRecord.status == RunStatus.COMPLETED,
+        )
+        if isinstance(before_sequence_no, int):
+            statement = statement.where(RunRecord.sequence_no < before_sequence_no)
+        statement = statement.order_by(RunRecord.sequence_no.desc(), RunRecord.id.desc()).limit(normalized_limit + 1)
+
+        result = await db_session.execute(statement)
+        run_records = list(result.scalars().all())
+        has_more = len(run_records) > normalized_limit
+        page_records = run_records[:normalized_limit]
+        next_before_sequence_no = page_records[-1].sequence_no if has_more and page_records else None
+        return SessionTurnsResponse(
+            session_id=session_id,
+            limit=normalized_limit,
+            has_more=has_more,
+            next_before_sequence_no=next_before_sequence_no,
+            turns=[session_turn_from_record(run_record) for run_record in page_records],
         )
 
     async def fork(self, db_session: AsyncSession, session_id: str, request: SessionForkRequest) -> SessionSummary:

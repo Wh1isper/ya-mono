@@ -2,6 +2,7 @@ FROM debian:stable-slim
 
 ARG NODE_MAJOR=22
 ARG AGENT_BROWSER_VERSION=latest
+ARG TARGETARCH
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -10,7 +11,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     AGENT_BROWSER_CONFIG=/etc/agent-browser/config.json \
     AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium \
     AGENT_BROWSER_ARGS=--no-sandbox,--disable-gpu,--disable-dev-shm-usage \
-    AGENT_BROWSER_IDLE_TIMEOUT_MS=300000
+    AGENT_BROWSER_IDLE_TIMEOUT_MS=300000 \
+    YA_CLAW_WORKSPACE_STARTUP_DIR=/workspace
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -55,6 +57,28 @@ RUN apt-get update \
     && agent-browser skills get agent-browser > /opt/ya-claw/skills/agent-browser/SKILL.md \
     && test -s /opt/ya-claw/skills/agent-browser/SKILL.md \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+RUN set -eu; \
+    arch="${TARGETARCH:-}"; \
+    if [ -z "${arch}" ]; then arch="$(dpkg --print-architecture)"; fi; \
+    case "${arch}" in \
+        amd64|x86_64) lark_arch="amd64" ;; \
+        arm64|aarch64) lark_arch="arm64" ;; \
+        *) echo "Unsupported TARGETARCH for lark-cli: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    release_json="$(curl -fsSL https://api.github.com/repos/larksuite/cli/releases/latest)"; \
+    lark_version="$(printf '%s' "${release_json}" | jq -r '.tag_name | sub("^v"; "")')"; \
+    asset_url="$(printf '%s' "${release_json}" | jq -r --arg asset "lark-cli-${lark_version}-linux-${lark_arch}.tar.gz" '.assets[] | select(.name == $asset) | .browser_download_url')"; \
+    if [ -z "${asset_url}" ] || [ "${asset_url}" = "null" ]; then echo "lark-cli asset not found for linux-${lark_arch}" >&2; exit 1; fi; \
+    tmp_dir="$(mktemp -d)"; \
+    curl -fsSL "${asset_url}" -o "${tmp_dir}/lark-cli.tar.gz"; \
+    tar -xzf "${tmp_dir}/lark-cli.tar.gz" -C "${tmp_dir}" lark-cli; \
+    install -m 0755 "${tmp_dir}/lark-cli" /usr/local/bin/lark-cli; \
+    lark-cli --version; \
+    git clone --depth=1 https://github.com/larksuite/cli.git "${tmp_dir}/larksuite-cli"; \
+    cp -R "${tmp_dir}/larksuite-cli/skills/." /opt/ya-claw/skills/; \
+    test -s /opt/ya-claw/skills/lark-shared/SKILL.md; \
+    rm -rf "${tmp_dir}"
 
 COPY packages/ya-claw/workspace-image/entrypoint.sh /usr/local/bin/ya-claw-workspace-entrypoint
 RUN chmod +x /usr/local/bin/ya-claw-workspace-entrypoint

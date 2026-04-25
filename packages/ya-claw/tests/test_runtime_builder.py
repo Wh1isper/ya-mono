@@ -90,6 +90,9 @@ def test_runtime_builder_resolves_core_builtin_toolset(tmp_path: Path) -> None:
 
     assert "view" in resolved_tool_names
     assert "shell_exec" in resolved_tool_names
+    assert "spawn_delegate" in resolved_tool_names
+    assert "list_session_turns" in resolved_tool_names
+    assert "get_run_trace" in resolved_tool_names
 
 
 def test_runtime_builder_resolves_runtime_mcp_toolsets_with_profile_filters(tmp_path: Path) -> None:

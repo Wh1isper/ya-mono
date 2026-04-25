@@ -17,6 +17,10 @@ from ya_claw.orm.tables import ProfileRecord
 
 
 class ProfileController:
+    async def exists(self, db_session: AsyncSession, profile_name: str) -> bool:
+        record = await db_session.get(ProfileRecord, profile_name)
+        return isinstance(record, ProfileRecord)
+
     async def list(self, db_session: AsyncSession) -> list[ProfileSummary]:
         statement: Select[tuple[ProfileRecord]] = select(ProfileRecord).order_by(ProfileRecord.name.asc())
         result = await db_session.execute(statement)

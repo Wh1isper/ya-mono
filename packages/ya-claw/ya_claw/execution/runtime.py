@@ -21,6 +21,7 @@ from ya_claw.context import ClawAgentContext, ClawWorkspaceBindingSnapshot
 from ya_claw.execution.profile import ResolvedProfile
 from ya_claw.mcp import ClawMCPConfigResolver
 from ya_claw.toolsets.background import SpawnDelegateTool, SteerSubagentTool
+from ya_claw.toolsets.session import GetRunTraceTool, ListSessionTurnsTool
 from ya_claw.workspace import WorkspaceBinding, extract_session_sandbox_metadata
 
 if TYPE_CHECKING:
@@ -40,9 +41,10 @@ _BUILTIN_TOOL_REGISTRY: dict[str, list[type[BaseTool]]] = {
     "multimodal": list(multimodal_tools),
     "document": list(document_tools),
     "background": [SpawnDelegateTool, SteerSubagentTool],
+    "session": [ListSessionTurnsTool, GetRunTraceTool],
 }
 _BUILTIN_TOOLSET_ALIASES: dict[str, list[str]] = {
-    "core": ["filesystem", "shell", "background"],
+    "core": ["filesystem", "shell", "background", "session"],
 }
 
 

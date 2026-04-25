@@ -84,6 +84,7 @@ class RunRecord(Base):
     project_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     input_parts: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     run_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    output_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     output_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     termination_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)

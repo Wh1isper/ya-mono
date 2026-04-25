@@ -198,6 +198,7 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
                     image=image,
                     volumes=volumes,
                     working_dir=work_dir,
+                    environment={"YA_CLAW_WORKSPACE_STARTUP_DIR": work_dir},
                     detach=True,
                     stdin_open=True,
                     tty=True,

@@ -15,11 +15,13 @@ from ya_claw.controller.models import (
     SessionGetResponse,
     SessionRunCreateRequest,
     SessionSummary,
+    SessionTurnsResponse,
     SteerRequest,
 )
 from ya_claw.controller.run import RunController
 from ya_claw.controller.session import SessionController
 from ya_claw.execution.coordinator import ExecutionSupervisor
+from ya_claw.notifications import NotificationHub
 from ya_claw.runtime_state import InMemoryRuntimeState
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -36,6 +38,9 @@ async def create_session(request: Request, payload: SessionCreateRequest) -> Ses
     async with session_factory() as db_session:
         response = await session_controller.create(db_session, settings, runtime_state, payload)
 
+    await _publish_session_notification(request, "session.created", response.session)
+    if response.run is not None:
+        await _publish_run_notification(request, "run.created", response.run)
     if _auto_dispatch_enabled(settings):
         _submit_run(request, response.run.id if response.run is not None else None)
     return response
@@ -50,8 +55,10 @@ async def create_session_stream(request: Request, payload: SessionCreateRequest)
     async with session_factory() as db_session:
         response = await session_controller.create(db_session, settings, runtime_state, payload)
 
+    await _publish_session_notification(request, "session.created", response.session)
     if response.run is None:
         raise HTTPException(status_code=422, detail="input_parts are required for streamed session creation.")
+    await _publish_run_notification(request, "run.created", response.run)
     if not _submit_run(request, response.run.id):
         raise HTTPException(status_code=503, detail="Execution supervisor is unavailable.")
     return EventSourceResponse(runtime_state.stream_run_events(response.run.id))
@@ -71,6 +78,7 @@ async def get_session(
     runs_limit: int = 20,
     before_sequence_no: int | None = None,
     include_message: bool = False,
+    include_input_parts: bool = False,
 ) -> SessionGetResponse:
     settings = _get_settings(request)
     session_factory = _get_session_factory(request)
@@ -82,6 +90,24 @@ async def get_session(
             runs_limit=runs_limit,
             before_sequence_no=before_sequence_no,
             include_message=include_message,
+            include_input_parts=include_input_parts,
+        )
+
+
+@router.get("/{session_id}/turns", response_model=SessionTurnsResponse)
+async def list_session_turns(
+    request: Request,
+    session_id: str,
+    limit: int = 20,
+    before_sequence_no: int | None = None,
+) -> SessionTurnsResponse:
+    session_factory = _get_session_factory(request)
+    async with session_factory() as db_session:
+        return await session_controller.list_turns(
+            db_session,
+            session_id,
+            limit=limit,
+            before_sequence_no=before_sequence_no,
         )
 
 
@@ -94,6 +120,7 @@ async def create_session_run(request: Request, session_id: str, payload: Session
     async with session_factory() as db_session:
         run = await session_controller.create_run(db_session, settings, runtime_state, session_id, payload)
 
+    await _publish_run_notification(request, "run.created", run)
     if _auto_dispatch_enabled(settings):
         _submit_run(request, run.id)
     return run
@@ -110,6 +137,7 @@ async def create_session_run_stream(
     async with session_factory() as db_session:
         run = await session_controller.create_run(db_session, settings, runtime_state, session_id, payload)
 
+    await _publish_run_notification(request, "run.created", run)
     if not _submit_run(request, run.id):
         raise HTTPException(status_code=503, detail="Execution supervisor is unavailable.")
     return EventSourceResponse(runtime_state.stream_run_events(run.id))
@@ -131,7 +159,9 @@ async def interrupt_session(request: Request, session_id: str) -> RunDetail:
     session_factory = _get_session_factory(request)
     async with session_factory() as db_session:
         run_id = await session_controller.resolve_active_run_id(db_session, session_id)
-        return await run_controller.interrupt(db_session, settings, runtime_state, run_id)
+        run = await run_controller.interrupt(db_session, settings, runtime_state, run_id)
+    await _publish_run_notification(request, "run.updated", run)
+    return run
 
 
 @router.post("/{session_id}/cancel", response_model=RunDetail)
@@ -141,14 +171,18 @@ async def cancel_session(request: Request, session_id: str) -> RunDetail:
     session_factory = _get_session_factory(request)
     async with session_factory() as db_session:
         run_id = await session_controller.resolve_active_run_id(db_session, session_id)
-        return await run_controller.cancel(db_session, settings, runtime_state, run_id)
+        run = await run_controller.cancel(db_session, settings, runtime_state, run_id)
+    await _publish_run_notification(request, "run.updated", run)
+    return run
 
 
 @router.post("/{session_id}/fork", response_model=SessionSummary, status_code=201)
 async def fork_session(request: Request, session_id: str, payload: SessionForkRequest) -> SessionSummary:
     session_factory = _get_session_factory(request)
     async with session_factory() as db_session:
-        return await session_controller.fork(db_session, session_id, payload)
+        forked_session = await session_controller.fork(db_session, session_id, payload)
+    await _publish_session_notification(request, "session.created", forked_session)
+    return forked_session
 
 
 @router.get("/{session_id}/events")
@@ -161,6 +195,40 @@ async def stream_session_events(
     if runtime_state.get_session_run_handle(session_id) is None:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' does not have an active event buffer.")
     return EventSourceResponse(runtime_state.stream_session_events(session_id, last_event_id=last_event_id))
+
+
+async def _publish_session_notification(request: Request, event_type: str, session: SessionSummary) -> None:
+    notification_hub = _get_notification_hub(request)
+    await notification_hub.publish(
+        event_type,
+        {
+            "session_id": session.id,
+            "status": session.status,
+            "profile_name": session.profile_name,
+            "project_id": session.project_id,
+            "run_count": session.run_count,
+            "head_run_id": session.head_run_id,
+            "head_success_run_id": session.head_success_run_id,
+            "active_run_id": session.active_run_id,
+        },
+    )
+
+
+async def _publish_run_notification(request: Request, event_type: str, run: RunDetail) -> None:
+    notification_hub = _get_notification_hub(request)
+    await notification_hub.publish(
+        event_type,
+        {
+            "session_id": run.session_id,
+            "run_id": run.id,
+            "status": run.status,
+            "sequence_no": run.sequence_no,
+            "profile_name": run.profile_name,
+            "project_id": run.project_id,
+            "termination_reason": run.termination_reason,
+            "error_message": run.error_message,
+        },
+    )
 
 
 def _submit_run(request: Request, run_id: str | None) -> bool:
@@ -188,6 +256,13 @@ def _get_runtime_state(request: Request) -> InMemoryRuntimeState:
     if not isinstance(runtime_state, InMemoryRuntimeState):
         raise TypeError("Runtime state is unavailable.")
     return runtime_state
+
+
+def _get_notification_hub(request: Request) -> NotificationHub:
+    notification_hub = request.app.state.notification_hub
+    if not isinstance(notification_hub, NotificationHub):
+        raise TypeError("Notification hub is unavailable.")
+    return notification_hub
 
 
 def _get_execution_supervisor(request: Request) -> ExecutionSupervisor | None:

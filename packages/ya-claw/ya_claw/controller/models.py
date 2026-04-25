@@ -174,6 +174,8 @@ class RunSummary(BaseModel):
     project_id: str | None = None
     projects: list[ProjectReference] = Field(default_factory=list)
     input_preview: str | None = None
+    input_parts: list[InputPart] | None = None
+    output_text: str | None = None
     output_summary: str | None = None
     error_message: str | None = None
     termination_reason: TerminationReason | None = None
@@ -186,9 +188,53 @@ class RunSummary(BaseModel):
 
 class RunDetail(RunSummary):
     metadata: dict[str, Any] = Field(default_factory=dict)
-    input_parts: list[InputPart] = Field(default_factory=list)
     has_state: bool = False
     has_message: bool = False
+
+
+class SessionTurn(BaseModel):
+    run_id: str
+    session_id: str
+    sequence_no: int
+    restore_from_run_id: str | None = None
+    profile_name: str | None = None
+    project_id: str | None = None
+    projects: list[ProjectReference] = Field(default_factory=list)
+    input_preview: str | None = None
+    input_parts: list[InputPart] = Field(default_factory=list)
+    output_text: str | None = None
+    output_summary: str | None = None
+    created_at: datetime
+    committed_at: datetime | None = None
+
+
+class SessionTurnsResponse(BaseModel):
+    session_id: str
+    limit: int
+    has_more: bool = False
+    next_before_sequence_no: int | None = None
+    turns: list[SessionTurn] = Field(default_factory=list)
+
+
+class RunTraceItem(BaseModel):
+    sequence_no: int
+    type: Literal["tool_call", "tool_response"]
+    tool_call_id: str | None = None
+    tool_name: str | None = None
+    message_id: str | None = None
+    role: str | None = None
+    content: str | None = None
+    truncated: bool = False
+
+
+class RunTraceResponse(BaseModel):
+    run_id: str
+    session_id: str
+    item_count: int
+    max_item_chars: int
+    max_total_chars: int
+    truncated: bool = False
+    trace: list[RunTraceItem] = Field(default_factory=list)
 
 
 class SessionSummary(BaseModel):
@@ -410,7 +456,12 @@ def parse_message_events(raw_message_payload: Any) -> list[dict[str, Any]] | Non
     return parsed_events
 
 
-def run_summary_from_record(record: RunRecord, *, message: list[dict[str, Any]] | None = None) -> RunSummary:
+def run_summary_from_record(
+    record: RunRecord,
+    *,
+    message: list[dict[str, Any]] | None = None,
+    include_input_parts: bool = False,
+) -> RunSummary:
     input_parts = parse_input_parts(list(record.input_parts))
     termination_reason = TerminationReason(record.termination_reason) if record.termination_reason else None
     return RunSummary(
@@ -424,6 +475,8 @@ def run_summary_from_record(record: RunRecord, *, message: list[dict[str, Any]] 
         project_id=record.project_id,
         projects=extract_project_references(record.project_id, record.run_metadata),
         input_preview=extract_input_preview(input_parts),
+        input_parts=input_parts if include_input_parts else None,
+        output_text=record.output_text,
         output_summary=record.output_summary,
         error_message=record.error_message,
         termination_reason=termination_reason,
@@ -437,11 +490,29 @@ def run_summary_from_record(record: RunRecord, *, message: list[dict[str, Any]] 
 
 def run_detail_from_record(record: RunRecord, *, has_state: bool = False, has_message: bool = False) -> RunDetail:
     return RunDetail(
-        **run_summary_from_record(record).model_dump(),
+        **run_summary_from_record(record, include_input_parts=True).model_dump(),
         metadata=public_metadata(dict(record.run_metadata)),
-        input_parts=parse_input_parts(list(record.input_parts)),
         has_state=has_state,
         has_message=has_message,
+    )
+
+
+def session_turn_from_record(record: RunRecord) -> SessionTurn:
+    input_parts = parse_input_parts(list(record.input_parts))
+    return SessionTurn(
+        run_id=record.id,
+        session_id=record.session_id,
+        sequence_no=record.sequence_no,
+        restore_from_run_id=record.restore_from_run_id,
+        profile_name=record.profile_name,
+        project_id=record.project_id,
+        projects=extract_project_references(record.project_id, record.run_metadata),
+        input_preview=extract_input_preview(input_parts),
+        input_parts=input_parts,
+        output_text=record.output_text,
+        output_summary=record.output_summary,
+        created_at=record.created_at,
+        committed_at=record.committed_at,
     )
 
 
