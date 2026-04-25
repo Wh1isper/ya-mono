@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -14,6 +13,23 @@ from ya_claw.execution.runtime import ClawRuntimeBuilder
 from ya_claw.workspace import MappedLocalEnvironment, WorkspaceBinding
 
 
+def _build_workspace_binding(
+    host_path: Path,
+    *,
+    backend_hint: str = "local",
+    metadata: dict[str, object] | None = None,
+) -> WorkspaceBinding:
+    return WorkspaceBinding(
+        host_path=host_path,
+        virtual_path=Path("/workspace"),
+        cwd=Path("/workspace"),
+        readable_paths=[Path("/workspace")],
+        writable_paths=[Path("/workspace")],
+        metadata=dict(metadata or {}),
+        backend_hint=backend_hint,
+    )
+
+
 def test_runtime_builder_propagates_container_id_from_workspace_metadata(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -23,31 +39,27 @@ def test_runtime_builder_propagates_container_id_from_workspace_metadata(
     settings = ClawSettings(
         api_token="test-token",  # noqa: S106
         data_dir=tmp_path / "runtime-data",
-        workspace_root=tmp_path / "workspace",
+        workspace_dir=tmp_path / "workspace",
         execution_model="gateway@openai-responses:gpt-5.4",
+        _env_file=None,
     )
     builder = ClawRuntimeBuilder(settings=settings)
-    host_path = tmp_path / "workspace" / "repo-a"
+    host_path = tmp_path / "workspace"
     host_path.mkdir(parents=True, exist_ok=True)
-    binding = WorkspaceBinding(
-        project_id="repo-a",
-        host_path=host_path,
-        virtual_path=Path("/workspace/repo-a"),
-        cwd=Path("/workspace/repo-a"),
-        readable_paths=[Path("/workspace/repo-a")],
-        writable_paths=[Path("/workspace/repo-a")],
+    binding = _build_workspace_binding(
+        host_path,
+        backend_hint="docker",
         metadata={
             "provider": "docker",
             "sandbox": {
                 "container_id": "container-xyz",
-                "container_ref": "ya-claw-session-session-1",
+                "container_ref": "ya-claw-workspace-ref",
             },
         },
-        backend_hint="docker",
     )
     environment = SandboxEnvironment(
-        mounts=[VirtualMount(host_path=host_path, virtual_path=Path("/workspace/repo-a"))],
-        work_dir="/workspace/repo-a",
+        mounts=[VirtualMount(host_path=host_path, virtual_path=Path("/workspace"))],
+        work_dir="/workspace",
         container_id="container-xyz",
     )
     profile = ResolvedProfile(
@@ -65,7 +77,6 @@ def test_runtime_builder_propagates_container_id_from_workspace_metadata(
         restore_state=None,
         session_id="session-1",
         run_id="run-1",
-        project_id="repo-a",
         restore_from_run_id=None,
         dispatch_mode="async",
         source_kind="api",
@@ -82,7 +93,8 @@ def test_runtime_builder_resolves_core_builtin_toolset(tmp_path: Path) -> None:
     settings = ClawSettings(
         api_token="test-token",  # noqa: S106
         data_dir=tmp_path / "runtime-data",
-        workspace_root=tmp_path / "workspace",
+        workspace_dir=tmp_path / "workspace",
+        _env_file=None,
     )
     builder = ClawRuntimeBuilder(settings=settings)
 
@@ -95,48 +107,32 @@ def test_runtime_builder_resolves_core_builtin_toolset(tmp_path: Path) -> None:
     assert "get_run_trace" in resolved_tool_names
 
 
-def test_runtime_builder_resolves_runtime_mcp_toolsets_with_profile_filters(tmp_path: Path) -> None:
+def test_runtime_builder_resolves_runtime_mcp_toolsets_from_profile(tmp_path: Path) -> None:
     settings = ClawSettings(
         api_token="test-token",  # noqa: S106
         data_dir=tmp_path / "runtime-data",
-        workspace_root=tmp_path / "workspace",
+        workspace_dir=tmp_path / "workspace",
+        _env_file=None,
     )
     builder = ClawRuntimeBuilder(settings=settings)
-    host_path = tmp_path / "workspace" / "repo-a"
-    project_mcp_file = host_path / ".ya-claw" / "mcp.json"
-    project_mcp_file.parent.mkdir(parents=True, exist_ok=True)
-    project_mcp_file.write_text(
-        json.dumps({
-            "servers": {
-                "github": {
-                    "transport": "stdio",
-                    "command": "npx",
-                },
-                "context7": {
-                    "transport": "streamable_http",
-                    "url": "https://mcp.context7.com/mcp",
-                    "description": "Library docs",
-                    "required": False,
-                },
-            }
-        }),
-        encoding="utf-8",
-    )
-    binding = WorkspaceBinding(
-        project_id="repo-a",
-        host_path=host_path,
-        virtual_path=Path("/workspace/repo-a"),
-        cwd=Path("/workspace/repo-a"),
-        readable_paths=[Path("/workspace/repo-a")],
-        writable_paths=[Path("/workspace/repo-a")],
-        metadata={},
-        backend_hint="local",
-    )
+    binding = _build_workspace_binding(tmp_path / "workspace")
     profile = ResolvedProfile(
         name="default",
         model="test",
         model_settings=None,
         model_config=None,
+        mcp_servers={
+            "github": {
+                "transport": "streamable_http",
+                "url": "https://mcp.github.example/mcp",
+            },
+            "context7": {
+                "transport": "streamable_http",
+                "url": "https://mcp.context7.com/mcp",
+                "description": "Library docs",
+                "required": False,
+            },
+        },
         enabled_mcps=["context7", "github"],
         disabled_mcps=["github"],
         need_user_approve_mcps=["context7"],
@@ -151,27 +147,40 @@ def test_runtime_builder_resolves_runtime_mcp_toolsets_with_profile_filters(tmp_
     assert toolsets[1]._optional_namespaces == {"context7"}
 
 
+def test_runtime_builder_rejects_profile_stdio_mcp(tmp_path: Path) -> None:
+    settings = ClawSettings(
+        api_token="test-token",  # noqa: S106
+        data_dir=tmp_path / "runtime-data",
+        workspace_dir=tmp_path / "workspace",
+        _env_file=None,
+    )
+    builder = ClawRuntimeBuilder(settings=settings)
+    binding = _build_workspace_binding(tmp_path / "workspace")
+    profile = ResolvedProfile(
+        name="default",
+        model="test",
+        model_settings=None,
+        model_config=None,
+        mcp_servers={"github": {"transport": "stdio", "command": "npx"}},
+    )
+
+    with pytest.raises(ValueError, match="unsupported transport"):
+        builder._resolve_runtime_toolsets(profile=profile, binding=binding)
+
+
 async def test_runtime_builder_streams_with_pydantic_ai_test_model_and_exports_state(tmp_path: Path) -> None:
     settings = ClawSettings(
         api_token="test-token",  # noqa: S106
         data_dir=tmp_path / "runtime-data",
-        workspace_root=tmp_path / "workspace",
+        workspace_dir=tmp_path / "workspace",
+        _env_file=None,
     )
     builder = ClawRuntimeBuilder(settings=settings)
-    host_path = tmp_path / "workspace" / "repo-a"
+    host_path = tmp_path / "workspace"
     host_path.mkdir(parents=True, exist_ok=True)
-    binding = WorkspaceBinding(
-        project_id="repo-a",
-        host_path=host_path,
-        virtual_path=Path("/workspace/repo-a"),
-        cwd=Path("/workspace/repo-a"),
-        readable_paths=[Path("/workspace/repo-a")],
-        writable_paths=[Path("/workspace/repo-a")],
-        metadata={},
-        backend_hint="local",
-    )
+    binding = _build_workspace_binding(host_path)
     environment = MappedLocalEnvironment(
-        mounts=[VirtualMount(host_path=host_path, virtual_path=Path("/workspace/repo-a"))],
+        mounts=[VirtualMount(host_path=host_path, virtual_path=Path("/workspace"))],
         host_cwd=host_path,
     )
     profile = ResolvedProfile(
@@ -190,7 +199,6 @@ async def test_runtime_builder_streams_with_pydantic_ai_test_model_and_exports_s
         restore_state=None,
         session_id="session-1",
         run_id="run-1",
-        project_id="repo-a",
         restore_from_run_id=None,
         dispatch_mode="async",
         source_kind="api",
@@ -213,5 +221,33 @@ async def test_runtime_builder_streams_with_pydantic_ai_test_model_and_exports_s
     assert runtime.ctx.session_id == "session-1"
     assert runtime.ctx.claw_run_id == "run-1"
     assert runtime.ctx.workspace_binding is not None
-    assert runtime.ctx.workspace_binding.cwd == "/workspace/repo-a"
+    assert runtime.ctx.workspace_binding.cwd == "/workspace"
     assert exported_state is not None
+
+
+def test_runtime_builder_system_prompt_loads_workspace_guidance(tmp_path: Path) -> None:
+    settings = ClawSettings(
+        api_token="test-token",  # noqa: S106
+        data_dir=tmp_path / "runtime-data",
+        workspace_dir=tmp_path / "workspace",
+        _env_file=None,
+    )
+    builder = ClawRuntimeBuilder(settings=settings)
+    host_path = tmp_path / "workspace"
+    host_path.mkdir(parents=True, exist_ok=True)
+    (host_path / "AGENTS.md").write_text("# Workspace\nUse pytest.\n", encoding="utf-8")
+    binding = _build_workspace_binding(host_path)
+    profile = ResolvedProfile(
+        name="default",
+        model="test",
+        model_settings=None,
+        model_config=None,
+    )
+
+    system_prompt = builder._build_system_prompt(profile=profile, binding=binding)
+
+    assert '<workspace-guidance path="/workspace/AGENTS.md">' in system_prompt
+    assert "# Workspace\nUse pytest." in system_prompt
+    assert "Workspace virtual root: /workspace" in system_prompt
+    assert "Default working directory: /workspace" in system_prompt
+    assert "Workspace skills are discovered from /workspace/.agents/skills/." in system_prompt

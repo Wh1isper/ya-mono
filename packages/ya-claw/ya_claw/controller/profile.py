@@ -13,6 +13,7 @@ from ya_claw.controller.models import (
     ProfileUpsertRequest,
 )
 from ya_claw.execution.profile import ProfileResolver
+from ya_claw.mcp import normalize_profile_mcp_servers
 from ya_claw.orm.tables import ProfileRecord
 
 
@@ -58,6 +59,9 @@ class ProfileController:
         record.need_user_approve_mcps = _normalize_name_list(request.need_user_approve_mcps)
         record.enabled_mcps = _normalize_name_list(request.enabled_mcps)
         record.disabled_mcps = _normalize_name_list(request.disabled_mcps)
+        record.mcp_servers = normalize_profile_mcp_servers({
+            name: config.model_dump(mode="json") for name, config in request.mcp_servers.items()
+        })
         record.workspace_backend_hint = request.workspace_backend_hint
         record.enabled = request.enabled
         record.source_type = request.source_type or "api"
@@ -125,6 +129,7 @@ def profile_detail_from_record(record: ProfileRecord) -> ProfileDetail:
         need_user_approve_mcps=list(record.need_user_approve_mcps or []),
         enabled_mcps=list(record.enabled_mcps or []),
         disabled_mcps=list(record.disabled_mcps or []),
+        mcp_servers=normalize_profile_mcp_servers(record.mcp_servers),
         source_checksum=record.source_checksum,
         created_at=record.created_at,
     )

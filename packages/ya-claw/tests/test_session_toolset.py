@@ -54,7 +54,6 @@ class FakeSelfClient:
                     "sequence_no": 2,
                     "restore_from_run_id": "run-0",
                     "profile_name": "default",
-                    "project_id": "repo-a",
                     "input_preview": "hello",
                     "input_parts": [
                         {"type": "text", "text": "hello"},

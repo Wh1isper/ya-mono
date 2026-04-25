@@ -19,10 +19,15 @@ from ya_agent_sdk.toolsets.tool_search import create_best_strategy
 from ya_claw.config import ClawSettings
 from ya_claw.context import ClawAgentContext, ClawWorkspaceBindingSnapshot
 from ya_claw.execution.profile import ResolvedProfile
-from ya_claw.mcp import ClawMCPConfigResolver
+from ya_claw.mcp import build_profile_mcp_config
 from ya_claw.toolsets.background import SpawnDelegateTool, SteerSubagentTool
 from ya_claw.toolsets.session import GetRunTraceTool, ListSessionTurnsTool
-from ya_claw.workspace import WorkspaceBinding, extract_session_sandbox_metadata
+from ya_claw.workspace import (
+    WorkspaceBinding,
+    extract_workspace_sandbox_metadata,
+    format_workspace_guidance,
+    load_workspace_guidance,
+)
 
 if TYPE_CHECKING:
     from pydantic_ai.toolsets import AbstractToolset
@@ -53,10 +58,8 @@ class ClawRuntimeBuilder:
         self,
         *,
         settings: ClawSettings,
-        mcp_config_resolver: ClawMCPConfigResolver | None = None,
     ) -> None:
         self._settings = settings
-        self._mcp_config_resolver = mcp_config_resolver or ClawMCPConfigResolver(settings=settings)
 
     def build(
         self,
@@ -67,19 +70,17 @@ class ClawRuntimeBuilder:
         restore_state: ResumableState | None,
         session_id: str,
         run_id: str,
-        project_id: str | None,
         restore_from_run_id: str | None,
         dispatch_mode: str,
         source_kind: str | None,
         source_metadata: dict[str, Any] | None,
         claw_metadata: dict[str, Any] | None,
     ) -> AgentRuntime[ClawAgentContext, Any, Environment]:
-        sandbox_metadata = extract_session_sandbox_metadata(binding.metadata) or {}
+        sandbox_metadata = extract_workspace_sandbox_metadata(binding.metadata) or {}
         extra_context_kwargs = {
             "session_id": session_id,
             "claw_run_id": run_id,
             "profile_name": profile.name,
-            "project_id": project_id,
             "restore_from_run_id": restore_from_run_id,
             "dispatch_mode": dispatch_mode,
             "container_id": sandbox_metadata.get("container_id") if isinstance(sandbox_metadata, dict) else None,
@@ -103,14 +104,11 @@ class ClawRuntimeBuilder:
             subagent_configs=profile.subagent_configs,
             include_builtin_subagents=profile.include_builtin_subagents,
             unified_subagents=profile.unified_subagents,
-            system_prompt=self._build_system_prompt(profile=profile, binding=binding, project_id=project_id),
+            system_prompt=self._build_system_prompt(profile=profile, binding=binding),
         )
 
     def _build_model_config(self, profile: ResolvedProfile) -> ModelConfig:
-        payload = dict(profile.model_config or {})
-        if payload.get("context_window") is None and self._settings.execution_context_window > 0:
-            payload["context_window"] = self._settings.execution_context_window
-        return ModelConfig.model_validate(payload)
+        return ModelConfig.model_validate(dict(profile.model_config or {}))
 
     def _resolve_builtin_tools(self, toolset_names: list[str]) -> list[type[BaseTool]]:
         resolved: list[type[BaseTool]] = []
@@ -135,12 +133,12 @@ class ClawRuntimeBuilder:
         toolsets: list[AbstractToolset[Any]] = [
             SkillToolset(toolset_id="skills", extra_dir_names=[SHARED_SKILLS_DIR_NAME]),
         ]
-        loaded_config = self._mcp_config_resolver.load_for_workspace(binding.host_path)
-        if loaded_config is None:
+        profile_mcp_config = build_profile_mcp_config(profile.mcp_servers)
+        if profile_mcp_config is None:
             return toolsets
 
         filtered_config = filter_mcp_config(
-            loaded_config.config,
+            profile_mcp_config,
             enabled_mcps=profile.enabled_mcps,
             disabled_mcps=profile.disabled_mcps,
         )
@@ -168,19 +166,15 @@ class ClawRuntimeBuilder:
         *,
         profile: ResolvedProfile,
         binding: WorkspaceBinding,
-        project_id: str | None,
     ) -> str:
         prompt_lines = [profile.system_prompt or _DEFAULT_SYSTEM_PROMPT]
         prompt_lines.append(f"Workspace virtual root: {binding.virtual_path}")
         prompt_lines.append(f"Default working directory: {binding.cwd}")
         prompt_lines.append(f"Readable paths: {', '.join(str(path) for path in binding.readable_paths)}")
         prompt_lines.append(f"Writable paths: {', '.join(str(path) for path in binding.writable_paths)}")
-        prompt_lines.append("Mounted projects:")
-        for mount in binding.project_mounts:
-            description = f" -- {mount.description}" if isinstance(mount.description, str) and mount.description else ""
-            prompt_lines.append(f"- {mount.project_id}: {mount.virtual_path}{description}")
-        prompt_lines.append("Project skills are discovered from each mounted project's .agents/skills/ directory.")
+        prompt_lines.append("Workspace skills are discovered from /workspace/.agents/skills/.")
+        guidance = load_workspace_guidance(binding)
+        if guidance is not None:
+            prompt_lines.append(format_workspace_guidance(guidance))
         prompt_lines.append(f"Profile: {profile.name}")
-        if isinstance(project_id, str) and project_id.strip() != "":
-            prompt_lines.append(f"Project ID: {project_id}")
         return "\n".join(prompt_lines)

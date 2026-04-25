@@ -253,7 +253,6 @@ def _compact_turn(
         "sequence_no": turn.get("sequence_no"),
         "restore_from_run_id": turn.get("restore_from_run_id"),
         "profile_name": turn.get("profile_name"),
-        "project_id": turn.get("project_id"),
         "input_preview": turn.get("input_preview"),
         "input_parts": input_parts,
         "input_truncated": input_truncated,

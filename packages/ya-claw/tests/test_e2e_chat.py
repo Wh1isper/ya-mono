@@ -53,7 +53,7 @@ def _create_schema() -> None:
 def _clear_settings(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("YA_CLAW_API_TOKEN", "test-token")
     monkeypatch.setenv("YA_CLAW_DATA_DIR", str(tmp_path / "runtime-data"))
-    monkeypatch.setenv("YA_CLAW_WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    monkeypatch.setenv("YA_CLAW_WORKSPACE_DIR", str(tmp_path / "workspace"))
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -81,7 +81,6 @@ def test_full_chat_pipeline_creates_run_streams_events_and_commits_artifacts() -
             headers=_auth_headers(),
             json={
                 "profile_name": "general",
-                "project_id": "e2e-chat",
                 "metadata": {"source": "e2e-test"},
                 "input_parts": [{"type": "text", "text": "Say exactly: e2e-test-complete"}],
                 "dispatch_mode": "async",
@@ -178,7 +177,6 @@ def test_sse_event_stream_during_run_execution() -> None:
             headers=_auth_headers(),
             json={
                 "profile_name": "general",
-                "project_id": "e2e-sse",
                 "input_parts": [{"type": "text", "text": "Say exactly: sse-test-ok"}],
                 "dispatch_mode": "async",
             },

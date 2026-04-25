@@ -60,7 +60,6 @@ class BridgeConversationSummary(BaseModel):
     tenant_key: str
     external_chat_id: str
     session_id: str
-    project_id: str | None = None
     profile_name: str | None = None
     created_at: datetime
     updated_at: datetime

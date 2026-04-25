@@ -38,10 +38,10 @@ async def db_session(db_engine: AsyncEngine) -> AsyncSession:
 @pytest.fixture
 def settings(tmp_path: Path) -> ClawSettings:
     data_dir = tmp_path / "runtime-data"
-    workspace_root = tmp_path / "workspace"
+    workspace_dir = tmp_path / "workspace"
     data_dir.mkdir(parents=True, exist_ok=True)
-    workspace_root.mkdir(parents=True, exist_ok=True)
-    return ClawSettings(api_token="test-token", data_dir=data_dir, workspace_root=workspace_root)  # noqa: S106
+    workspace_dir.mkdir(parents=True, exist_ok=True)
+    return ClawSettings(api_token="test-token", data_dir=data_dir, workspace_dir=workspace_dir)  # noqa: S106
 
 
 async def test_split_and_map_input_parts() -> None:
@@ -100,7 +100,7 @@ async def test_state_machine_and_restore_loader(
     db_session: AsyncSession,
     settings: ClawSettings,
 ) -> None:
-    session = SessionRecord(id="session-1", profile_name="general", project_id="repo-a", session_metadata={})
+    session = SessionRecord(id="session-1", profile_name="general", session_metadata={})
     run = RunRecord(
         id="run-1",
         session_id="session-1",
@@ -109,7 +109,6 @@ async def test_state_machine_and_restore_loader(
         status="queued",
         trigger_type="api",
         profile_name="general",
-        project_id="repo-a",
         input_parts=[{"type": "text", "text": "hello"}],
         run_metadata={},
     )
@@ -153,7 +152,6 @@ async def test_state_machine_and_restore_loader(
         status="running",
         trigger_type="api",
         profile_name="general",
-        project_id="repo-a",
         input_parts=[{"type": "text", "text": "retry"}],
         run_metadata={},
     )
@@ -175,7 +173,6 @@ async def test_state_machine_and_restore_loader(
         status="running",
         trigger_type="api",
         profile_name="general",
-        project_id="repo-a",
         input_parts=[{"type": "text", "text": "retry again"}],
         run_metadata={},
     )

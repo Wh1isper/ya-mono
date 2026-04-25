@@ -59,7 +59,7 @@ def settings(tmp_path: Path) -> ClawSettings:
     return ClawSettings(
         api_token="test-token",  # noqa: S106
         data_dir=tmp_path / "runtime-data",
-        workspace_root=tmp_path / "workspace",
+        workspace_dir=tmp_path / "workspace",
         execution_model="test",
         instance_id="instance-test",
     )
@@ -80,7 +80,7 @@ def _build_supervisor(
         settings=settings,
         session_factory=create_session_factory(db_engine),
         runtime_state=runtime_state,
-        workspace_provider=LocalWorkspaceProvider(settings.resolved_workspace_root),
+        workspace_provider=LocalWorkspaceProvider(settings.resolved_workspace_dir),
         environment_factory=StubEnvironmentFactory(),
         profile_resolver=StubProfileResolver(),
         runtime_builder=StubRuntimeBuilder(),
@@ -93,7 +93,7 @@ async def test_supervisor_claim_records_instance_owner(
     settings: ClawSettings,
     runtime_state: InMemoryRuntimeState,
 ) -> None:
-    session_record = SessionRecord(id="session-1", profile_name="default", project_id="repo-a", session_metadata={})
+    session_record = SessionRecord(id="session-1", profile_name="default", session_metadata={})
     run_record = RunRecord(
         id="run-1",
         session_id="session-1",
@@ -101,7 +101,6 @@ async def test_supervisor_claim_records_instance_owner(
         status="queued",
         trigger_type="api",
         profile_name="default",
-        project_id="repo-a",
         input_parts=[],
         run_metadata={},
     )
@@ -126,8 +125,8 @@ async def test_supervisor_startup_recovery_cancels_orphan_running_and_submits_qu
     settings: ClawSettings,
     runtime_state: InMemoryRuntimeState,
 ) -> None:
-    session_a = SessionRecord(id="session-a", profile_name="default", project_id="repo-a", session_metadata={})
-    session_b = SessionRecord(id="session-b", profile_name="default", project_id="repo-b", session_metadata={})
+    session_a = SessionRecord(id="session-a", profile_name="default", session_metadata={})
+    session_b = SessionRecord(id="session-b", profile_name="default", session_metadata={})
     running_run = RunRecord(
         id="run-running",
         session_id="session-a",
@@ -135,7 +134,6 @@ async def test_supervisor_startup_recovery_cancels_orphan_running_and_submits_qu
         status="queued",
         trigger_type="api",
         profile_name="default",
-        project_id="repo-a",
         input_parts=[],
         run_metadata={},
     )
@@ -146,7 +144,6 @@ async def test_supervisor_startup_recovery_cancels_orphan_running_and_submits_qu
         status="queued",
         trigger_type="api",
         profile_name="default",
-        project_id="repo-b",
         input_parts=[],
         run_metadata={},
     )

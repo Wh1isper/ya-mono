@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from ya_agent_sdk.environment import SandboxEnvironment, VirtualLocalFileOperator, VirtualMount
@@ -10,29 +11,36 @@ from ya_claw.workspace import (
     LocalWorkspaceProvider,
     MappedLocalEnvironment,
     ReusableSandboxEnvironment,
+    WorkspaceGuidance,
     WorkspaceLocalShell,
-    build_session_sandbox_container_ref,
-    build_session_sandbox_metadata,
+    build_workspace_container_ref,
+    build_workspace_sandbox_metadata,
+    format_workspace_guidance,
+    load_workspace_guidance,
 )
 
 
-def test_local_workspace_provider_resolves_virtual_workspace(tmp_path: Path) -> None:
-    provider = LocalWorkspaceProvider(tmp_path / "workspace-root")
+def test_local_workspace_provider_resolves_single_workspace(tmp_path: Path) -> None:
+    workspace_dir = tmp_path / "workspace"
+    provider = LocalWorkspaceProvider(workspace_dir)
 
-    binding = provider.resolve("repo-a", metadata={"source": "api"})
+    binding = provider.resolve(metadata={"source": "api"})
 
-    assert binding.project_id == "repo-a"
+    assert binding.host_path == workspace_dir.resolve()
     assert binding.host_path.exists()
-    assert binding.virtual_path == Path("/workspace") / "repo-a"
-    assert binding.cwd == binding.virtual_path
+    assert binding.virtual_path == Path("/workspace")
+    assert binding.cwd == Path("/workspace")
+    assert binding.readable_paths == [Path("/workspace")]
+    assert binding.writable_paths == [Path("/workspace")]
+    assert binding.metadata["source"] == "api"
     assert binding.metadata["provider"] == "local"
     assert binding.metadata["shell_backend"] == "local"
     assert binding.backend_hint == "local"
 
 
 async def test_local_environment_factory_uses_virtual_fs_and_local_shell(tmp_path: Path) -> None:
-    provider = LocalWorkspaceProvider(tmp_path / "workspace-root")
-    binding = provider.resolve("repo-a")
+    provider = LocalWorkspaceProvider(tmp_path / "workspace")
+    binding = provider.resolve()
     factory = LocalEnvironmentFactory()
     environment = factory.build(binding)
     assert isinstance(environment, MappedLocalEnvironment)
@@ -42,74 +50,18 @@ async def test_local_environment_factory_uses_virtual_fs_and_local_shell(tmp_pat
         assert env.shell is not None
         await env.file_operator.write_file("notes.txt", "hello")
         content = await env.file_operator.read_file("notes.txt")
-        exit_code, stdout, stderr = await env.shell.execute("pwd && ls", cwd=str(binding.host_path))
+        exit_code, stdout, stderr = await env.shell.execute("pwd && ls")
 
     assert content == "hello"
     assert exit_code == 0
     assert stderr == ""
+    assert str(binding.host_path) in stdout
     assert "notes.txt" in stdout
 
 
-def test_local_workspace_provider_resolves_multiple_project_mounts(tmp_path: Path) -> None:
-    provider = LocalWorkspaceProvider(tmp_path / "workspace-root")
-
-    binding = provider.resolve(
-        "repo-a",
-        metadata={
-            "projects": [
-                {"project_id": "repo-a", "description": "primary repo"},
-                {"project_id": "repo-b", "description": "reference repo"},
-            ]
-        },
-    )
-
-    assert binding.project_id == "repo-a"
-    assert [mount.project_id for mount in binding.project_mounts] == ["repo-a", "repo-b"]
-    assert [mount.virtual_path for mount in binding.project_mounts] == [
-        Path("/workspace") / "repo-a",
-        Path("/workspace") / "repo-b",
-    ]
-    assert binding.project_mounts[0].description == "primary repo"
-    assert binding.project_mounts[1].description == "reference repo"
-    assert binding.readable_paths == [Path("/workspace") / "repo-a", Path("/workspace") / "repo-b"]
-    assert binding.writable_paths == [Path("/workspace") / "repo-a", Path("/workspace") / "repo-b"]
-
-
-async def test_local_environment_factory_mounts_multiple_projects_for_fileops_and_shell(tmp_path: Path) -> None:
-    provider = LocalWorkspaceProvider(tmp_path / "workspace-root")
-    binding = provider.resolve(
-        "repo-a",
-        metadata={
-            "projects": [
-                {"project_id": "repo-a", "description": "primary repo"},
-                {"project_id": "repo-b", "description": "reference repo"},
-            ]
-        },
-    )
-    factory = LocalEnvironmentFactory()
-    environment = factory.build(binding)
-
-    async with environment as env:
-        assert isinstance(env.file_operator, VirtualLocalFileOperator)
-        assert env.shell is not None
-        await env.file_operator.write_file("notes.txt", "repo-a")
-        await env.file_operator.write_file("/workspace/repo-b/notes.txt", "repo-b")
-        repo_a_content = await env.file_operator.read_file("notes.txt")
-        repo_b_content = await env.file_operator.read_file("/workspace/repo-b/notes.txt")
-        exit_code, stdout, stderr = await env.shell.execute(
-            'printf \'%s|%s\' "$(cat notes.txt)" "$(cat ../repo-b/notes.txt)"'
-        )
-
-    assert repo_a_content == "repo-a"
-    assert repo_b_content == "repo-b"
-    assert exit_code == 0
-    assert stderr == ""
-    assert stdout == "repo-a|repo-b"
-
-
 async def test_local_environment_factory_passes_workspace_environment(tmp_path: Path) -> None:
-    provider = LocalWorkspaceProvider(tmp_path / "workspace-root")
-    binding = provider.resolve("repo-a")
+    provider = LocalWorkspaceProvider(tmp_path / "workspace")
+    binding = provider.resolve()
     factory = LocalEnvironmentFactory(workspace_environment={"LARK_APP_ID": "cli_test"})
     environment = factory.build(binding)
 
@@ -123,30 +75,38 @@ async def test_local_environment_factory_passes_workspace_environment(tmp_path: 
 
 
 def test_docker_workspace_provider_builds_declarative_binding(tmp_path: Path) -> None:
-    provider = DockerWorkspaceProvider(tmp_path / "workspace-root", image="python:3.11")
+    workspace_dir = tmp_path / "workspace"
+    provider = DockerWorkspaceProvider(workspace_dir, image="python:3.11")
 
-    binding = provider.resolve("repo-a", metadata={"session_id": "session-1"})
+    binding = provider.resolve(metadata={"session_id": "session-1"})
 
-    assert binding.project_id == "repo-a"
-    assert binding.virtual_path == Path("/workspace") / "repo-a"
+    assert binding.host_path == workspace_dir.resolve()
+    assert binding.virtual_path == Path("/workspace")
+    assert binding.cwd == Path("/workspace")
     assert binding.metadata["provider"] == "docker"
     assert binding.metadata["docker_image"] == "python:3.11"
-    assert binding.metadata["sandbox"]["container_ref"] == build_session_sandbox_container_ref("session-1")
+    assert binding.metadata["sandbox"] == {
+        "provider": "docker",
+        "container_ref": build_workspace_container_ref(image="python:3.11", workspace_dir=workspace_dir),
+        "image": "python:3.11",
+    }
     assert binding.backend_hint == "docker"
 
 
 def test_docker_environment_factory_builds_sandbox_environment(tmp_path: Path) -> None:
-    provider = DockerWorkspaceProvider(tmp_path / "workspace-root", image="python:3.11")
-    binding = provider.resolve("repo-a", metadata={"session_id": "session-1"})
+    workspace_dir = tmp_path / "workspace"
+    provider = DockerWorkspaceProvider(workspace_dir, image="python:3.11")
+    binding = provider.resolve(metadata={"session_id": "session-1"})
     factory = DockerEnvironmentFactory(image="python:3.11", workspace_uid=1234, workspace_gid=2345)
 
     environment = factory.build(binding)
 
     assert isinstance(environment, SandboxEnvironment)
     assert isinstance(environment, ReusableSandboxEnvironment)
-    assert environment.container_ref == build_session_sandbox_container_ref("session-1")
+    assert environment.container_ref == build_workspace_container_ref(image="python:3.11", workspace_dir=workspace_dir)
     assert binding.metadata["workspace_uid"] == 1234
     assert binding.metadata["workspace_gid"] == 2345
+    assert binding.metadata["sandbox"]["container_ref"] == environment.container_ref
 
 
 async def test_reusable_sandbox_environment_passes_workspace_identity_to_docker(tmp_path: Path) -> None:
@@ -164,10 +124,10 @@ async def test_reusable_sandbox_environment_passes_workspace_identity_to_docker(
         containers = FakeContainers()
 
     environment = ReusableSandboxEnvironment(
-        mounts=[VirtualMount(host_path=tmp_path / "repo-a", virtual_path=Path("/workspace/repo-a"))],
-        work_dir="/workspace/repo-a",
+        mounts=[VirtualMount(host_path=tmp_path / "workspace", virtual_path=Path("/workspace"))],
+        work_dir="/workspace",
         image="python:3.11",
-        container_ref="session-container",
+        container_ref="workspace-container",
         workspace_uid=1234,
         workspace_gid=2345,
         workspace_environment={"LARK_APP_ID": "cli_test"},
@@ -177,11 +137,11 @@ async def test_reusable_sandbox_environment_passes_workspace_identity_to_docker(
     container_id = await environment._create_container()
 
     assert container_id == "container-123"
-    assert captured_run_kwargs["name"] == "session-container"
-    assert captured_run_kwargs["working_dir"] == "/workspace/repo-a"
+    assert captured_run_kwargs["name"] == "workspace-container"
+    assert captured_run_kwargs["working_dir"] == "/workspace"
     assert captured_run_kwargs["environment"] == {
         "LARK_APP_ID": "cli_test",
-        "YA_CLAW_WORKSPACE_STARTUP_DIR": "/workspace/repo-a",
+        "YA_CLAW_WORKSPACE_STARTUP_DIR": "/workspace",
         "YA_CLAW_WORKSPACE_UID": "1234",
         "YA_CLAW_HOST_UID": "1234",
         "YA_CLAW_WORKSPACE_GID": "2345",
@@ -189,29 +149,37 @@ async def test_reusable_sandbox_environment_passes_workspace_identity_to_docker(
     }
 
 
-def test_session_sandbox_metadata_preserves_workspace_identity(tmp_path: Path) -> None:
-    provider = DockerWorkspaceProvider(tmp_path / "workspace-root", image="python:3.11")
-    binding = provider.resolve("repo-a", metadata={"session_id": "session-1"})
+def test_workspace_sandbox_metadata_preserves_workspace_identity(tmp_path: Path) -> None:
+    provider = DockerWorkspaceProvider(tmp_path / "workspace", image="python:3.11")
+    binding = provider.resolve(metadata={"session_id": "session-1"})
     factory = DockerEnvironmentFactory(image="python:3.11", workspace_uid=0, workspace_gid=0)
     environment = factory.build(binding)
     environment._container_id = "container-123"
 
-    metadata = build_session_sandbox_metadata(binding=binding, environment=environment)
+    metadata = build_workspace_sandbox_metadata(binding=binding, environment=environment)
 
     assert metadata is not None
+    assert metadata["provider"] == "docker"
+    assert metadata["container_id"] == "container-123"
+    assert metadata["container_ref"] == build_workspace_container_ref(
+        image="python:3.11",
+        workspace_dir=tmp_path / "workspace",
+    )
     assert metadata["workspace_uid"] == 0
     assert metadata["workspace_gid"] == 0
+    assert metadata["host_mount"] == str((tmp_path / "workspace").resolve())
+    assert metadata["container_mount"] == "/workspace"
+    assert metadata["cwd"] == "/workspace"
 
 
 def test_docker_environment_factory_prefers_container_id_and_keeps_stable_ref(tmp_path: Path) -> None:
-    provider = DockerWorkspaceProvider(tmp_path / "workspace-root", image="python:3.11")
+    provider = DockerWorkspaceProvider(tmp_path / "workspace", image="python:3.11")
     binding = provider.resolve(
-        "repo-a",
         metadata={
             "session_id": "session-1",
             "sandbox": {
                 "container_id": "container-123",
-                "container_ref": build_session_sandbox_container_ref("session-1"),
+                "container_ref": "workspace-container",
             },
         },
     )
@@ -221,4 +189,197 @@ def test_docker_environment_factory_prefers_container_id_and_keeps_stable_ref(tm
 
     assert isinstance(environment, ReusableSandboxEnvironment)
     assert environment.container_id == "container-123"
-    assert environment.container_ref == build_session_sandbox_container_ref("session-1")
+    assert environment.container_ref == "workspace-container"
+
+
+def test_docker_environment_factory_uses_single_cache_path(tmp_path: Path) -> None:
+    provider = DockerWorkspaceProvider(tmp_path / "workspace", image="python:3.11")
+    binding = provider.resolve(metadata={"session_id": "session-1"})
+    factory = DockerEnvironmentFactory(image="python:3.11", container_cache_dir=tmp_path / "cache")
+
+    environment = factory.build(binding)
+
+    assert isinstance(environment, ReusableSandboxEnvironment)
+    assert environment.container_cache_path == tmp_path / "cache" / "workspace.json"
+
+
+async def test_reusable_sandbox_environment_mounts_workspace_dir(tmp_path: Path) -> None:
+    captured_run_kwargs: dict[str, object] = {}
+
+    class FakeContainer:
+        id = "container-123"
+
+    class FakeContainers:
+        def run(self, **kwargs: object) -> FakeContainer:
+            captured_run_kwargs.update(kwargs)
+            return FakeContainer()
+
+    class FakeDockerClient:
+        containers = FakeContainers()
+
+    provider = DockerWorkspaceProvider(tmp_path / "workspace", image="python:3.11")
+    binding = provider.resolve(metadata={"session_id": "session-1"})
+    factory = DockerEnvironmentFactory(image="python:3.11")
+    environment = factory.build(binding)
+    environment._client = FakeDockerClient()
+
+    assert isinstance(environment, ReusableSandboxEnvironment)
+    await environment._create_container()
+
+    assert captured_run_kwargs["volumes"] == {
+        str((tmp_path / "workspace").resolve()): {"bind": "/workspace", "mode": "rw"}
+    }
+
+
+async def test_reusable_sandbox_environment_reads_and_refreshes_container_cache(tmp_path: Path) -> None:
+    cache_path = tmp_path / "cache" / "workspace.json"
+
+    class FakeContainer:
+        id = "container-123"
+        status = "running"
+
+        def __init__(self) -> None:
+            self.attrs = {"State": {}}
+
+        def reload(self) -> None:
+            return None
+
+    class FakeContainers:
+        def get(self, container_id: str) -> FakeContainer:
+            assert container_id == "container-123"
+            return FakeContainer()
+
+    class FakeDockerClient:
+        containers = FakeContainers()
+
+    environment = ReusableSandboxEnvironment(
+        mounts=[VirtualMount(host_path=tmp_path / "workspace", virtual_path=Path("/workspace"))],
+        work_dir="/workspace",
+        image="python:3.11",
+        container_ref="workspace-container",
+        container_cache_path=cache_path,
+    )
+    environment._client = FakeDockerClient()
+    cache_path.parent.mkdir(parents=True)
+    cache_path.write_text(
+        json.dumps({
+            "schema_version": 1,
+            "container_ref": "workspace-container",
+            "container_id": "container-123",
+            "image": "python:3.11",
+        }),
+        encoding="utf-8",
+    )
+
+    await environment._ensure_container()
+
+    assert environment.container_id == "container-123"
+    refreshed_payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert refreshed_payload["container_id"] == "container-123"
+    assert refreshed_payload["work_dir"] == "/workspace"
+
+
+async def test_reusable_sandbox_environment_refreshes_stale_cache(tmp_path: Path) -> None:
+    cache_path = tmp_path / "cache" / "workspace.json"
+    run_calls = 0
+
+    class NotFound(Exception):
+        pass
+
+    class FakeContainer:
+        id = "container-new"
+
+    class FakeContainers:
+        def get(self, container_ref: str) -> FakeContainer:
+            raise NotFound(container_ref)
+
+        def run(self, **kwargs: object) -> FakeContainer:
+            nonlocal run_calls
+            run_calls += 1
+            return FakeContainer()
+
+    class FakeDockerClient:
+        containers = FakeContainers()
+
+    environment = ReusableSandboxEnvironment(
+        mounts=[VirtualMount(host_path=tmp_path / "workspace", virtual_path=Path("/workspace"))],
+        work_dir="/workspace",
+        image="python:3.11",
+        container_ref="workspace-container",
+        container_cache_path=cache_path,
+    )
+    environment._client = FakeDockerClient()
+    cache_path.parent.mkdir(parents=True)
+    cache_path.write_text(
+        json.dumps({
+            "schema_version": 1,
+            "container_ref": "workspace-container",
+            "container_id": "container-stale",
+            "image": "python:3.11",
+        }),
+        encoding="utf-8",
+    )
+
+    await environment._ensure_container()
+
+    assert run_calls == 1
+    assert environment.container_id == "container-new"
+    refreshed_payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert refreshed_payload["container_id"] == "container-new"
+
+
+def test_load_workspace_guidance_reads_workspace_agents_file(tmp_path: Path) -> None:
+    provider = LocalWorkspaceProvider(tmp_path / "workspace")
+    binding = provider.resolve()
+    agents_path = tmp_path / "workspace" / "AGENTS.md"
+    agents_path.write_text("# Workspace\nUse pytest.\n", encoding="utf-8")
+
+    guidance = load_workspace_guidance(binding)
+
+    assert guidance is not None
+    assert guidance.host_path == agents_path.resolve()
+    assert guidance.virtual_path == Path("/workspace/AGENTS.md")
+    assert guidance.content == "# Workspace\nUse pytest.\n"
+
+
+def test_load_workspace_guidance_ignores_empty_file(tmp_path: Path) -> None:
+    provider = LocalWorkspaceProvider(tmp_path / "workspace")
+    binding = provider.resolve()
+    (tmp_path / "workspace" / "AGENTS.md").write_text("   \n", encoding="utf-8")
+
+    assert load_workspace_guidance(binding) is None
+
+
+def test_format_workspace_guidance_uses_virtual_path(tmp_path: Path) -> None:
+    workspace_dir = tmp_path / "workspace"
+    provider = LocalWorkspaceProvider(workspace_dir)
+    binding = provider.resolve()
+    guidance = load_workspace_guidance(binding)
+    assert guidance is None
+
+    formatted = format_workspace_guidance(
+        WorkspaceGuidance(
+            host_path=workspace_dir / "AGENTS.md",
+            virtual_path=Path('/workspace/path-"quoted"/AGENTS.md'),
+            content="Use <safe> rules.",
+        )
+    )
+
+    assert formatted == (
+        '<workspace-guidance path="/workspace/path-&quot;quoted&quot;/AGENTS.md">\n'
+        "Use <safe> rules.\n"
+        "</workspace-guidance>"
+    )
+
+
+def test_load_workspace_guidance_reads_full_large_agents_file(tmp_path: Path) -> None:
+    provider = LocalWorkspaceProvider(tmp_path / "workspace")
+    binding = provider.resolve()
+    agents_path = tmp_path / "workspace" / "AGENTS.md"
+    content = "a" * (300 * 1024)
+    agents_path.write_text(content, encoding="utf-8")
+
+    guidance = load_workspace_guidance(binding)
+
+    assert guidance is not None
+    assert guidance.content == content

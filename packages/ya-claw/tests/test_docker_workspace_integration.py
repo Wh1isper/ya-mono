@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
 from ya_claw.workspace import DockerEnvironmentFactory, DockerWorkspaceProvider
@@ -30,9 +29,8 @@ async def test_docker_environment_executes_shell_inside_virtual_workspace(
     except Exception:
         pytest.skip(f"Docker image {image} is not available locally")
 
-    session_id = f"session-{uuid4().hex[:8]}"
-    provider = DockerWorkspaceProvider(tmp_path / "workspace-root", image=image)
-    binding = provider.resolve("repo-a", metadata={"session_id": session_id})
+    provider = DockerWorkspaceProvider(tmp_path / "workspace", image=image)
+    binding = provider.resolve(metadata={"source": "integration-test"})
     factory = DockerEnvironmentFactory(image=image, cleanup_on_exit=True)
     environment = factory.build(binding)
 

@@ -26,7 +26,7 @@ def _settings(tmp_path: Path) -> ClawSettings:
     return ClawSettings(
         api_token="test-token",  # noqa: S106
         data_dir=tmp_path / "runtime-data",
-        workspace_root=tmp_path / "workspace",
+        workspace_dir=tmp_path / "workspace",
         instance_id="instance-test",
     )
 

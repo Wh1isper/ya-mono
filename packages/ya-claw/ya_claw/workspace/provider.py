@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import json
 import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -14,48 +16,28 @@ from ya_agent_sdk.environment.sandbox import DockerShell
 
 _DOCKER_SANDBOX_METADATA_KEY = "sandbox"
 _DOCKER_SANDBOX_PROVIDER = "docker"
-_DOCKER_SANDBOX_NAME_PREFIX = "ya-claw-session"
-
-
-@dataclass(slots=True)
-class ProjectMount:
-    project_id: str
-    description: str | None
-    host_path: Path
-    virtual_path: Path
-    readable: bool = True
-    writable: bool = True
-    metadata: dict[str, Any] = field(default_factory=dict)
+_DOCKER_WORKSPACE_NAME_PREFIX = "ya-claw-workspace"
+_DOCKER_CONTAINER_CACHE_SCHEMA_VERSION = 1
+_DOCKER_CONTAINER_LOCKS: dict[str, asyncio.Lock] = {}
+_DEFAULT_VIRTUAL_WORKSPACE_PATH = Path("/workspace")
+_DEFAULT_CONTAINER_CACHE_FILE = "workspace.json"
 
 
 @dataclass(slots=True)
 class WorkspaceBinding:
-    project_id: str
     host_path: Path
     virtual_path: Path
     cwd: Path
     readable_paths: list[Path]
     writable_paths: list[Path]
-    project_mounts: list[ProjectMount] = field(default_factory=list)
     environment_overrides: dict[str, str] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     backend_hint: str | None = None
 
-    def __post_init__(self) -> None:
-        if not self.project_mounts:
-            self.project_mounts = [
-                ProjectMount(
-                    project_id=self.project_id,
-                    description=None,
-                    host_path=self.host_path,
-                    virtual_path=self.virtual_path,
-                )
-            ]
-
 
 class WorkspaceProvider(ABC):
     @abstractmethod
-    def resolve(self, project_id: str, metadata: dict[str, Any] | None = None) -> WorkspaceBinding:
+    def resolve(self, metadata: dict[str, Any] | None = None) -> WorkspaceBinding:
         raise NotImplementedError
 
 
@@ -153,11 +135,12 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
         workspace_environment: dict[str, str] | None = None,
         shell_timeout: float = 30.0,
         cleanup_on_exit: bool = False,
+        container_cache_path: Path | None = None,
     ) -> None:
         super().__init__(
             mounts=mounts,
             work_dir=work_dir,
-            container_id=preferred_container_id or container_ref,
+            container_id=preferred_container_id,
             image=image,
             cleanup_on_exit=cleanup_on_exit,
             shell_timeout=shell_timeout,
@@ -166,10 +149,15 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
         self._workspace_uid = workspace_uid
         self._workspace_gid = workspace_gid
         self._workspace_environment = dict(workspace_environment or {})
+        self._container_cache_path = container_cache_path.expanduser() if container_cache_path is not None else None
 
     @property
     def container_ref(self) -> str:
         return self._container_ref
+
+    @property
+    def container_cache_path(self) -> Path | None:
+        return self._container_cache_path
 
     async def _setup(self) -> None:
         tmp_dir_path: Path | None = None
@@ -184,17 +172,10 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
             mount.host_path.resolve().mkdir(parents=True, exist_ok=True)
 
         if self._custom_shell is None:
-            if self._container_id is None:
-                self._container_id = await self._create_container()
-                self._created_container = True
-            else:
-                try:
-                    await self._verify_container()
-                except RuntimeError as exc:
-                    if "Container not found" not in str(exc):
-                        raise
-                    self._container_id = await self._create_container()
-                    self._created_container = True
+            lock_key = str(self._container_cache_path or self._container_ref)
+            lock = _DOCKER_CONTAINER_LOCKS.setdefault(lock_key, asyncio.Lock())
+            async with lock:
+                await self._ensure_container()
 
         self._file_operator = VirtualLocalFileOperator(
             mounts=self._mounts,
@@ -212,6 +193,44 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
                 container_workdir=self._work_dir,
                 default_timeout=self._shell_timeout,
             )
+
+    async def _ensure_container(self) -> None:
+        cached_container_id = self._container_id or await self._read_cached_container_id()
+        if cached_container_id is not None:
+            self._container_id = cached_container_id
+            try:
+                await self._verify_container()
+                await self._write_cached_container_id(cached_container_id)
+                return
+            except RuntimeError:
+                await self._clear_cached_container_id(cached_container_id)
+                await self._remove_container(cached_container_id)
+                self._container_id = None
+
+        discovered_container_id = await self._resolve_container_id_from_ref()
+        if discovered_container_id is not None:
+            self._container_id = discovered_container_id
+            try:
+                await self._verify_container()
+                await self._write_cached_container_id(discovered_container_id)
+                return
+            except RuntimeError:
+                await self._clear_cached_container_id(discovered_container_id)
+                await self._remove_container(discovered_container_id)
+                self._container_id = None
+
+        self._container_id = await self._create_container()
+        self._created_container = True
+        await self._write_cached_container_id(self._container_id)
+
+    async def _teardown(self) -> None:
+        if self._cleanup_on_exit and self._created_container and self._container_id is not None:
+            await self._clear_cached_container_id(self._container_id)
+            await self._stop_container()
+
+        if self._tmp_dir_obj is not None:
+            self._tmp_dir_obj.cleanup()
+            self._tmp_dir_obj = None
 
     async def _create_container(self) -> str:
         if self._image is None:
@@ -258,6 +277,128 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _run_container)
 
+    async def _verify_container(self) -> None:
+        container_id = self._container_id
+        if container_id is None:
+            raise RuntimeError("Container ID is not set")
+
+        def _check_and_start_container() -> None:
+            try:
+                container = self.client.containers.get(container_id)
+                container.reload()
+                status = _normalize_optional_str(getattr(container, "status", None))
+                if status == "running":
+                    _raise_for_unhealthy_container(container_id, container)
+                    return
+                if status in ("exited", "created", "paused"):
+                    container.start()
+                    container.reload()
+                    next_status = _normalize_optional_str(getattr(container, "status", None))
+                    if next_status != "running":
+                        raise RuntimeError(f"Container {container_id} failed to start (status: {next_status})")
+                    _raise_for_unhealthy_container(container_id, container)
+                    return
+                raise RuntimeError(f"Container {container_id} is in unrecoverable state: {status}")
+            except RuntimeError:
+                raise
+            except Exception as exc:
+                if exc.__class__.__name__ == "NotFound":
+                    raise RuntimeError(f"Container not found: {container_id}") from exc
+                raise RuntimeError(f"Failed to verify/start container: {exc}") from exc
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _check_and_start_container)
+
+    async def _resolve_container_id_from_ref(self) -> str | None:
+        container_ref = self._container_ref
+
+        def _resolve() -> str | None:
+            try:
+                container = self.client.containers.get(container_ref)
+                return _normalize_optional_str(getattr(container, "id", None))
+            except Exception:
+                return None
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _resolve)
+
+    async def _read_cached_container_id(self) -> str | None:
+        cache_path = self._container_cache_path
+        if cache_path is None:
+            return None
+
+        def _read() -> str | None:
+            try:
+                payload = json.loads(cache_path.read_text(encoding="utf-8"))
+            except Exception:
+                return None
+            if not isinstance(payload, dict):
+                return None
+            if payload.get("schema_version") != _DOCKER_CONTAINER_CACHE_SCHEMA_VERSION:
+                return None
+            if payload.get("container_ref") != self._container_ref:
+                return None
+            if payload.get("image") != self._image:
+                return None
+            return _normalize_optional_str(payload.get("container_id"))
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _read)
+
+    async def _write_cached_container_id(self, container_id: str) -> None:
+        cache_path = self._container_cache_path
+        if cache_path is None:
+            return
+        payload = {
+            "schema_version": _DOCKER_CONTAINER_CACHE_SCHEMA_VERSION,
+            "container_ref": self._container_ref,
+            "container_id": container_id,
+            "image": self._image,
+            "work_dir": self._work_dir,
+        }
+
+        def _write() -> None:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _write)
+
+    async def _clear_cached_container_id(self, container_id: str | None = None) -> None:
+        cache_path = self._container_cache_path
+        if cache_path is None:
+            return
+
+        def _clear() -> None:
+            cached_container_id: str | None = None
+            try:
+                payload = json.loads(cache_path.read_text(encoding="utf-8"))
+                if isinstance(payload, dict):
+                    cached_container_id = _normalize_optional_str(payload.get("container_id"))
+            except Exception:
+                cached_container_id = None
+            if container_id is not None and cached_container_id not in (None, container_id):
+                return
+            with contextlib.suppress(FileNotFoundError):
+                cache_path.unlink()
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _clear)
+
+    async def _remove_container(self, container_id: str) -> None:
+        def _remove() -> None:
+            try:
+                container = self.client.containers.get(container_id)
+                with contextlib.suppress(Exception):
+                    container.stop(timeout=10)
+                with contextlib.suppress(Exception):
+                    container.remove(force=True)
+            except Exception:
+                return
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _remove)
+
 
 class EnvironmentFactory(ABC):
     @abstractmethod
@@ -278,11 +419,9 @@ class LocalEnvironmentFactory(EnvironmentFactory):
         self._workspace_environment = dict(workspace_environment or {})
 
     def build(self, binding: WorkspaceBinding) -> Environment:
-        mounts = _virtual_mounts_from_binding(binding)
-        primary_mount = binding.project_mounts[0]
         return MappedLocalEnvironment(
-            mounts=mounts,
-            host_cwd=primary_mount.host_path,
+            mounts=_virtual_mounts_from_binding(binding),
+            host_cwd=binding.host_path,
             shell_timeout=self._shell_timeout,
             tmp_base_dir=self._tmp_base_dir,
             environment_overrides={**self._workspace_environment, **binding.environment_overrides},
@@ -299,6 +438,7 @@ class DockerEnvironmentFactory(EnvironmentFactory):
         workspace_environment: dict[str, str] | None = None,
         shell_timeout: float = 30.0,
         cleanup_on_exit: bool = False,
+        container_cache_dir: Path | None = None,
     ) -> None:
         self._image = image
         self._workspace_uid = workspace_uid
@@ -306,47 +446,39 @@ class DockerEnvironmentFactory(EnvironmentFactory):
         self._workspace_environment = dict(workspace_environment or {})
         self._shell_timeout = shell_timeout
         self._cleanup_on_exit = cleanup_on_exit
+        self._container_cache_dir = container_cache_dir.expanduser() if container_cache_dir is not None else None
 
     def build(self, binding: WorkspaceBinding) -> Environment:
-        sandbox_metadata = extract_session_sandbox_metadata(binding.metadata)
-        preferred_container_id = _normalize_optional_str(
-            sandbox_metadata.get("container_id") if isinstance(sandbox_metadata, dict) else None
+        sandbox_metadata = extract_workspace_sandbox_metadata(binding.metadata) or {}
+        preferred_container_id = _normalize_optional_str(sandbox_metadata.get("container_id"))
+        container_ref = _normalize_optional_str(sandbox_metadata.get("container_ref")) or build_workspace_container_ref(
+            image=self._image,
+            workspace_dir=binding.host_path,
         )
-        container_ref = _normalize_optional_str(
-            sandbox_metadata.get("container_ref") if isinstance(sandbox_metadata, dict) else None
-        )
-        if container_ref is None:
-            session_id = _normalize_optional_str(binding.metadata.get("session_id"))
-            if session_id is not None:
-                container_ref = build_session_sandbox_container_ref(session_id)
-
         mounts = _virtual_mounts_from_binding(binding)
         workspace_environment = {**self._workspace_environment, **binding.environment_overrides}
         if isinstance(self._workspace_uid, int):
             binding.metadata["workspace_uid"] = self._workspace_uid
         if isinstance(self._workspace_gid, int):
             binding.metadata["workspace_gid"] = self._workspace_gid
-
-        if container_ref is not None:
-            return ReusableSandboxEnvironment(
-                mounts=mounts,
-                work_dir=str(binding.cwd),
-                image=self._image,
-                container_ref=container_ref,
-                preferred_container_id=preferred_container_id,
-                workspace_uid=self._workspace_uid,
-                workspace_gid=self._workspace_gid,
-                workspace_environment=workspace_environment,
-                cleanup_on_exit=self._cleanup_on_exit,
-                shell_timeout=self._shell_timeout,
-            )
-
-        return SandboxEnvironment(
+        binding.metadata[_DOCKER_SANDBOX_METADATA_KEY] = {
+            **sandbox_metadata,
+            "provider": _DOCKER_SANDBOX_PROVIDER,
+            "container_ref": container_ref,
+            "image": self._image,
+        }
+        return ReusableSandboxEnvironment(
             mounts=mounts,
             work_dir=str(binding.cwd),
             image=self._image,
+            container_ref=container_ref,
+            preferred_container_id=preferred_container_id,
+            workspace_uid=self._workspace_uid,
+            workspace_gid=self._workspace_gid,
+            workspace_environment=workspace_environment,
             cleanup_on_exit=self._cleanup_on_exit,
             shell_timeout=self._shell_timeout,
+            container_cache_path=_build_container_cache_path(self._container_cache_dir),
         )
 
 
@@ -361,6 +493,7 @@ class DefaultEnvironmentFactory(EnvironmentFactory):
         tmp_base_dir: Path | None = None,
         cleanup_on_exit: bool = False,
         workspace_environment: dict[str, str] | None = None,
+        docker_container_cache_dir: Path | None = None,
     ) -> None:
         self._local_factory = LocalEnvironmentFactory(
             shell_timeout=shell_timeout,
@@ -374,6 +507,7 @@ class DefaultEnvironmentFactory(EnvironmentFactory):
             workspace_environment=workspace_environment,
             shell_timeout=shell_timeout,
             cleanup_on_exit=cleanup_on_exit,
+            container_cache_dir=docker_container_cache_dir,
         )
 
     def build(self, binding: WorkspaceBinding) -> Environment:
@@ -386,27 +520,24 @@ class DefaultEnvironmentFactory(EnvironmentFactory):
 class LocalWorkspaceProvider(WorkspaceProvider):
     def __init__(
         self,
-        workspace_root: Path,
+        workspace_dir: Path,
         *,
-        virtual_workspace_root: Path = Path("/workspace"),
+        virtual_workspace_path: Path = _DEFAULT_VIRTUAL_WORKSPACE_PATH,
     ) -> None:
-        self._workspace_root = workspace_root.expanduser().resolve()
-        self._virtual_workspace_root = virtual_workspace_root
+        self._workspace_dir = workspace_dir.expanduser().resolve()
+        self._virtual_workspace_path = virtual_workspace_path
 
-    def resolve(self, project_id: str, metadata: dict[str, Any] | None = None) -> WorkspaceBinding:
-        resolved_metadata = dict(metadata or {})
-        host_path = (self._workspace_root / project_id).resolve()
+    def resolve(self, metadata: dict[str, Any] | None = None) -> WorkspaceBinding:
         return _build_workspace_binding(
-            workspace_root=self._workspace_root,
-            virtual_workspace_root=self._virtual_workspace_root,
-            project_id=project_id,
-            metadata=resolved_metadata,
+            workspace_dir=self._workspace_dir,
+            virtual_workspace_path=self._virtual_workspace_path,
+            metadata=dict(metadata or {}),
             provider="local",
             backend_hint="local",
             extra_metadata={
                 "shell_backend": "local",
                 "file_operator": "virtual-local",
-                "host_cwd": str(host_path),
+                "host_cwd": str(self._workspace_dir),
             },
         )
 
@@ -414,36 +545,32 @@ class LocalWorkspaceProvider(WorkspaceProvider):
 class DockerWorkspaceProvider(WorkspaceProvider):
     def __init__(
         self,
-        workspace_root: Path,
+        workspace_dir: Path,
         *,
         image: str,
-        virtual_workspace_root: Path = Path("/workspace"),
+        virtual_workspace_path: Path = _DEFAULT_VIRTUAL_WORKSPACE_PATH,
     ) -> None:
-        self._workspace_root = workspace_root.expanduser().resolve()
+        self._workspace_dir = workspace_dir.expanduser().resolve()
         self._image = image
-        self._virtual_workspace_root = virtual_workspace_root
+        self._virtual_workspace_path = virtual_workspace_path
 
-    def resolve(self, project_id: str, metadata: dict[str, Any] | None = None) -> WorkspaceBinding:
+    def resolve(self, metadata: dict[str, Any] | None = None) -> WorkspaceBinding:
         resolved_metadata = dict(metadata or {})
-        host_path = (self._workspace_root / project_id).resolve()
-        virtual_path = self._virtual_workspace_root / project_id
-        session_id = _normalize_optional_str(resolved_metadata.get("session_id"))
-        sandbox_metadata = extract_session_sandbox_metadata(resolved_metadata) or {}
-        if session_id is not None:
-            sandbox_metadata = {
-                **sandbox_metadata,
-                "provider": _DOCKER_SANDBOX_PROVIDER,
-                "container_ref": _normalize_optional_str(sandbox_metadata.get("container_ref"))
-                or build_session_sandbox_container_ref(session_id),
-                "image": _normalize_optional_str(sandbox_metadata.get("image")) or self._image,
-                "project_id": project_id,
-            }
-        if sandbox_metadata:
-            resolved_metadata[_DOCKER_SANDBOX_METADATA_KEY] = sandbox_metadata
+        sandbox_metadata = extract_workspace_sandbox_metadata(resolved_metadata) or {}
+        container_ref = _normalize_optional_str(sandbox_metadata.get("container_ref")) or build_workspace_container_ref(
+            image=self._image,
+            workspace_dir=self._workspace_dir,
+        )
+        sandbox_metadata = {
+            **sandbox_metadata,
+            "provider": _DOCKER_SANDBOX_PROVIDER,
+            "container_ref": container_ref,
+            "image": _normalize_optional_str(sandbox_metadata.get("image")) or self._image,
+        }
+        resolved_metadata[_DOCKER_SANDBOX_METADATA_KEY] = sandbox_metadata
         return _build_workspace_binding(
-            workspace_root=self._workspace_root,
-            virtual_workspace_root=self._virtual_workspace_root,
-            project_id=project_id,
+            workspace_dir=self._workspace_dir,
+            virtual_workspace_path=self._virtual_workspace_path,
             metadata=resolved_metadata,
             provider="docker",
             backend_hint="docker",
@@ -451,97 +578,31 @@ class DockerWorkspaceProvider(WorkspaceProvider):
                 "shell_backend": "docker",
                 "file_operator": "virtual-local",
                 "docker_image": self._image,
-                "host_mount": str(host_path),
-                "container_mount": str(virtual_path),
+                "host_mount": str(self._workspace_dir),
+                "container_mount": str(self._virtual_workspace_path),
             },
         )
 
 
-def _extract_project_specs(
-    *,
-    project_id: str,
-    metadata: dict[str, Any],
-) -> list[dict[str, str | None]]:
-    specs: list[dict[str, str | None]] = []
-    indexes: dict[str, int] = {}
-
-    def add_spec(raw_project_id: Any, raw_description: Any = None) -> None:
-        if not isinstance(raw_project_id, str):
-            return
-        normalized_project_id = raw_project_id.strip()
-        if normalized_project_id == "":
-            return
-        description = raw_description.strip() if isinstance(raw_description, str) else None
-        existing_index = indexes.get(normalized_project_id)
-        if isinstance(existing_index, int):
-            if specs[existing_index].get("description") is None and description:
-                specs[existing_index]["description"] = description
-            return
-        indexes[normalized_project_id] = len(specs)
-        specs.append({
-            "project_id": normalized_project_id,
-            "description": description or None,
-        })
-
-    add_spec(project_id)
-    raw_projects = metadata.get("projects")
-    if isinstance(raw_projects, list):
-        for raw_project in raw_projects:
-            if isinstance(raw_project, dict):
-                add_spec(raw_project.get("project_id"), raw_project.get("description"))
-    return specs
-
-
 def _build_workspace_binding(
     *,
-    workspace_root: Path,
-    virtual_workspace_root: Path,
-    project_id: str,
+    workspace_dir: Path,
+    virtual_workspace_path: Path,
     metadata: dict[str, Any],
     provider: str,
     backend_hint: str,
     extra_metadata: dict[str, Any],
 ) -> WorkspaceBinding:
-    project_specs = _extract_project_specs(project_id=project_id, metadata=metadata)
-    project_mounts: list[ProjectMount] = []
-    for spec in project_specs:
-        current_project_id = str(spec["project_id"])
-        host_path = (workspace_root / current_project_id).resolve()
-        host_path.mkdir(parents=True, exist_ok=True)
-        virtual_path = virtual_workspace_root / current_project_id
-        project_mounts.append(
-            ProjectMount(
-                project_id=current_project_id,
-                description=spec.get("description"),
-                host_path=host_path,
-                virtual_path=virtual_path,
-                metadata={"provider": provider},
-            )
-        )
-
-    primary_mount = project_mounts[0]
-    readable_paths = [mount.virtual_path for mount in project_mounts if mount.readable]
-    writable_paths = [mount.virtual_path for mount in project_mounts if mount.writable]
+    workspace_dir.mkdir(parents=True, exist_ok=True)
     return WorkspaceBinding(
-        project_id=primary_mount.project_id,
-        host_path=primary_mount.host_path,
-        virtual_path=primary_mount.virtual_path,
-        cwd=primary_mount.virtual_path,
-        readable_paths=readable_paths,
-        writable_paths=writable_paths,
-        project_mounts=project_mounts,
+        host_path=workspace_dir,
+        virtual_path=virtual_workspace_path,
+        cwd=virtual_workspace_path,
+        readable_paths=[virtual_workspace_path],
+        writable_paths=[virtual_workspace_path],
         metadata={
             **metadata,
             "provider": provider,
-            "projects": [
-                {
-                    "project_id": mount.project_id,
-                    "description": mount.description,
-                    "host_path": str(mount.host_path),
-                    "virtual_path": str(mount.virtual_path),
-                }
-                for mount in project_mounts
-            ],
             **extra_metadata,
         },
         backend_hint=backend_hint,
@@ -549,18 +610,16 @@ def _build_workspace_binding(
 
 
 def _virtual_mounts_from_binding(binding: WorkspaceBinding) -> list[VirtualMount]:
-    return [
-        VirtualMount(host_path=mount.host_path, virtual_path=mount.virtual_path)
-        for mount in binding.project_mounts
-        if mount.readable or mount.writable
-    ]
+    return [VirtualMount(host_path=binding.host_path, virtual_path=binding.virtual_path)]
 
 
-def build_session_sandbox_container_ref(session_id: str) -> str:
-    return f"{_DOCKER_SANDBOX_NAME_PREFIX}-{session_id}"
+def build_workspace_container_ref(*, image: str, workspace_dir: Path) -> str:
+    fingerprint_source = f"{workspace_dir.expanduser().resolve()}|{image}"
+    fingerprint = hashlib.sha256(fingerprint_source.encode("utf-8")).hexdigest()[:12]
+    return f"{_DOCKER_WORKSPACE_NAME_PREFIX}-{fingerprint}"
 
 
-def extract_session_sandbox_metadata(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
+def extract_workspace_sandbox_metadata(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(metadata, dict):
         return None
     raw_sandbox = metadata.get(_DOCKER_SANDBOX_METADATA_KEY)
@@ -569,14 +628,14 @@ def extract_session_sandbox_metadata(metadata: dict[str, Any] | None) -> dict[st
     return dict(raw_sandbox)
 
 
-def build_session_sandbox_metadata(*, binding: WorkspaceBinding, environment: Environment) -> dict[str, Any] | None:
+def build_workspace_sandbox_metadata(*, binding: WorkspaceBinding, environment: Environment) -> dict[str, Any] | None:
     if not isinstance(environment, SandboxEnvironment):
         return None
     backend = (binding.backend_hint or binding.metadata.get("provider") or "").strip().lower()
     if backend != "docker":
         return None
 
-    existing = extract_session_sandbox_metadata(binding.metadata) or {}
+    existing = extract_workspace_sandbox_metadata(binding.metadata) or {}
     container_ref = _normalize_optional_str(existing.get("container_ref"))
     if container_ref is None and isinstance(environment, ReusableSandboxEnvironment):
         container_ref = environment.container_ref
@@ -587,63 +646,37 @@ def build_session_sandbox_metadata(*, binding: WorkspaceBinding, environment: En
         "container_id": environment.container_id,
         "image": _normalize_optional_str(existing.get("image"))
         or _normalize_optional_str(binding.metadata.get("docker_image")),
-        "project_id": binding.project_id,
         "workspace_uid": _first_optional_int(existing.get("workspace_uid"), binding.metadata.get("workspace_uid")),
         "workspace_gid": _first_optional_int(existing.get("workspace_gid"), binding.metadata.get("workspace_gid")),
-        "projects": [
-            {
-                "project_id": mount.project_id,
-                "description": mount.description,
-                "host_mount": str(mount.host_path),
-                "container_mount": str(mount.virtual_path),
-            }
-            for mount in binding.project_mounts
-        ],
         "host_mount": str(binding.host_path),
         "container_mount": str(binding.virtual_path),
         "cwd": str(binding.cwd),
     }
 
 
-async def cleanup_session_sandbox(metadata: dict[str, Any] | None) -> bool:
-    sandbox = extract_session_sandbox_metadata(metadata)
-    if sandbox is None:
-        return False
-
-    container_ref = _normalize_optional_str(sandbox.get("container_ref")) or _normalize_optional_str(
-        sandbox.get("container_id")
-    )
-    if container_ref is None:
-        return False
-
-    def _cleanup() -> bool:
-        try:
-            import docker
-        except Exception:
-            return False
-
-        client = docker.from_env()
-        try:
-            container = client.containers.get(container_ref)
-            with contextlib.suppress(Exception):
-                container.stop(timeout=10)
-            with contextlib.suppress(Exception):
-                container.remove(force=True)
-            return True
-        except Exception:
-            return False
-        finally:
-            with contextlib.suppress(Exception):
-                client.close()
-
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, _cleanup)
-
-
-def remove_session_sandbox_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+def remove_workspace_sandbox_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
     normalized = dict(metadata or {})
     normalized.pop(_DOCKER_SANDBOX_METADATA_KEY, None)
     return normalized
+
+
+def _raise_for_unhealthy_container(container_id: str, container: Any) -> None:
+    state = getattr(container, "attrs", {}).get("State")
+    if not isinstance(state, dict):
+        return
+    health = state.get("Health")
+    if not isinstance(health, dict):
+        return
+    health_status = _normalize_optional_str(health.get("Status"))
+    if health_status in (None, "healthy", "starting"):
+        return
+    raise RuntimeError(f"Container {container_id} is unhealthy (health: {health_status})")
+
+
+def _build_container_cache_path(cache_dir: Path | None) -> Path | None:
+    if cache_dir is None:
+        return None
+    return cache_dir / _DEFAULT_CONTAINER_CACHE_FILE
 
 
 def _normalize_optional_str(value: Any) -> str | None:

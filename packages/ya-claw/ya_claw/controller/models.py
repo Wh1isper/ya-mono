@@ -114,15 +114,8 @@ class ToolResult(BaseModel):
     error: str | None = None
 
 
-class ProjectReference(BaseModel):
-    project_id: str
-    description: str | None = None
-
-
 class SessionCreateRequest(BaseModel):
     profile_name: str | None = None
-    project_id: str | None = None
-    projects: list[ProjectReference] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     input_parts: list[InputPart] = Field(default_factory=list)
     dispatch_mode: DispatchMode = DispatchMode.ASYNC
@@ -132,8 +125,6 @@ class SessionCreateRequest(BaseModel):
 class SessionRunCreateRequest(BaseModel):
     restore_from_run_id: str | None = None
     reset_state: bool = False
-    reset_sandbox: bool = False
-    projects: list[ProjectReference] = Field(default_factory=list)
     input_parts: list[InputPart] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     dispatch_mode: DispatchMode = DispatchMode.ASYNC
@@ -143,8 +134,6 @@ class SessionRunCreateRequest(BaseModel):
 class SessionForkRequest(BaseModel):
     restore_from_run_id: str | None = None
     profile_name: str | None = None
-    project_id: str | None = None
-    projects: list[ProjectReference] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -153,8 +142,6 @@ class RunCreateRequest(BaseModel):
     restore_from_run_id: str | None = None
     reset_state: bool = False
     profile_name: str | None = None
-    project_id: str | None = None
-    projects: list[ProjectReference] = Field(default_factory=list)
     input_parts: list[InputPart] = Field(default_factory=list)
     trigger_type: TriggerType = TriggerType.API
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -173,8 +160,6 @@ class RunSummary(BaseModel):
     status: RunStatus
     trigger_type: TriggerType
     profile_name: str | None = None
-    project_id: str | None = None
-    projects: list[ProjectReference] = Field(default_factory=list)
     input_preview: str | None = None
     input_parts: list[InputPart] | None = None
     output_text: str | None = None
@@ -200,8 +185,6 @@ class SessionTurn(BaseModel):
     sequence_no: int
     restore_from_run_id: str | None = None
     profile_name: str | None = None
-    project_id: str | None = None
-    projects: list[ProjectReference] = Field(default_factory=list)
     input_preview: str | None = None
     input_parts: list[InputPart] = Field(default_factory=list)
     output_text: str | None = None
@@ -243,8 +226,6 @@ class SessionSummary(BaseModel):
     id: str
     parent_session_id: str | None = None
     profile_name: str | None = None
-    project_id: str | None = None
-    projects: list[ProjectReference] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
@@ -299,6 +280,14 @@ class ProfileSubagent(BaseModel):
     model_config_override: dict[str, Any] | None = None
 
 
+class ProfileMCPServer(BaseModel):
+    transport: Literal["streamable_http"] = "streamable_http"
+    url: str
+    headers: dict[str, str] = Field(default_factory=dict)
+    description: str = ""
+    required: bool = True
+
+
 class ProfileUpsertRequest(BaseModel):
     model: str
     model_settings_preset: str | None = None
@@ -317,6 +306,7 @@ class ProfileUpsertRequest(BaseModel):
     need_user_approve_mcps: list[str] = Field(default_factory=list)
     enabled_mcps: list[str] = Field(default_factory=list)
     disabled_mcps: list[str] = Field(default_factory=list)
+    mcp_servers: dict[str, ProfileMCPServer] = Field(default_factory=dict)
     workspace_backend_hint: str | None = None
     enabled: bool = True
     source_type: str | None = None
@@ -349,6 +339,7 @@ class ProfileDetail(ProfileSummary):
     need_user_approve_mcps: list[str] = Field(default_factory=list)
     enabled_mcps: list[str] = Field(default_factory=list)
     disabled_mcps: list[str] = Field(default_factory=list)
+    mcp_servers: dict[str, ProfileMCPServer] = Field(default_factory=dict)
     source_checksum: str | None = None
     created_at: datetime
 
@@ -393,58 +384,8 @@ def parse_input_parts(raw_input_parts: list[dict[str, Any]] | None) -> list[Inpu
     return parsed_parts
 
 
-def normalize_project_references(
-    project_id: str | None,
-    projects: list[ProjectReference] | None,
-) -> list[ProjectReference]:
-    normalized: list[ProjectReference] = []
-    indexes: dict[str, int] = {}
-
-    def add_project(reference: ProjectReference) -> None:
-        normalized_project_id = reference.project_id.strip()
-        if normalized_project_id == "":
-            return
-        normalized_description = reference.description.strip() if isinstance(reference.description, str) else None
-        existing_index = indexes.get(normalized_project_id)
-        if isinstance(existing_index, int):
-            existing = normalized[existing_index]
-            if existing.description is None and normalized_description:
-                normalized[existing_index] = ProjectReference(
-                    project_id=existing.project_id,
-                    description=normalized_description,
-                )
-            return
-        indexes[normalized_project_id] = len(normalized)
-        normalized.append(
-            ProjectReference(
-                project_id=normalized_project_id,
-                description=normalized_description or None,
-            )
-        )
-
-    if isinstance(project_id, str) and project_id.strip() != "":
-        add_project(ProjectReference(project_id=project_id))
-    for reference in projects or []:
-        add_project(reference)
-    return normalized
-
-
-def serialize_project_references(projects: list[ProjectReference]) -> list[dict[str, Any]]:
-    return [project.model_dump(mode="json", exclude_none=True) for project in projects]
-
-
 def public_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in metadata.items() if key != "projects"}
-
-
-def extract_project_references(project_id: str | None, metadata: dict[str, Any] | None) -> list[ProjectReference]:
-    raw_projects = metadata.get("projects") if isinstance(metadata, dict) else None
-    parsed_projects: list[ProjectReference] = []
-    if isinstance(raw_projects, list):
-        for item in raw_projects:
-            if isinstance(item, dict):
-                parsed_projects.append(ProjectReference.model_validate(item))
-    return normalize_project_references(project_id, parsed_projects)
+    return dict(metadata)
 
 
 def parse_message_events(raw_message_payload: Any) -> list[dict[str, Any]] | None:
@@ -474,8 +415,6 @@ def run_summary_from_record(
         status=RunStatus(record.status),
         trigger_type=TriggerType(record.trigger_type),
         profile_name=record.profile_name,
-        project_id=record.project_id,
-        projects=extract_project_references(record.project_id, record.run_metadata),
         input_preview=extract_input_preview(input_parts),
         input_parts=input_parts if include_input_parts else None,
         output_text=record.output_text,
@@ -507,8 +446,6 @@ def session_turn_from_record(record: RunRecord) -> SessionTurn:
         sequence_no=record.sequence_no,
         restore_from_run_id=record.restore_from_run_id,
         profile_name=record.profile_name,
-        project_id=record.project_id,
-        projects=extract_project_references(record.project_id, record.run_metadata),
         input_preview=extract_input_preview(input_parts),
         input_parts=input_parts,
         output_text=record.output_text,
@@ -534,8 +471,6 @@ def session_summary_from_record(
         id=record.id,
         parent_session_id=record.parent_session_id,
         profile_name=record.profile_name,
-        project_id=record.project_id,
-        projects=extract_project_references(record.project_id, record.session_metadata),
         metadata=public_metadata(dict(record.session_metadata)),
         created_at=record.created_at,
         updated_at=record.updated_at,
