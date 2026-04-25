@@ -19,6 +19,11 @@ downloads/
 eggs/
 .eggs/
 lib/
+!apps/
+!apps/ya-claw-web/
+!apps/ya-claw-web/src/
+!apps/ya-claw-web/src/lib/
+!apps/ya-claw-web/src/lib/**
 lib64/
 parts/
 sdist/

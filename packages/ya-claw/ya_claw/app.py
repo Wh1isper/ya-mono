@@ -15,9 +15,17 @@ from ya_claw.api.health import router as health_router
 from ya_claw.api.profiles import router as profiles_router
 from ya_claw.api.runs import router as runs_router
 from ya_claw.api.sessions import router as sessions_router
+from ya_claw.bridge import BridgeDispatchMode
+from ya_claw.bridge.service import BridgeSupervisor, build_bridge_supervisor
 from ya_claw.config import ClawSettings, get_settings
 from ya_claw.db.engine import create_engine, create_session_factory
-from ya_claw.execution import ClawRuntimeBuilder, ExecutionSupervisor, ProfileResolver, RuntimeInstanceManager
+from ya_claw.execution import (
+    ClawRuntimeBuilder,
+    ExecutionSupervisor,
+    ProfileResolver,
+    RunDispatcher,
+    RuntimeInstanceManager,
+)
 from ya_claw.mcp import ClawMCPConfigResolver
 from ya_claw.notifications import NotificationHub, create_notification_hub
 from ya_claw.runtime_state import InMemoryRuntimeState, create_runtime_state
@@ -57,6 +65,7 @@ class ClawApplication:
         app.state.runtime_builder = None
         app.state.execution_supervisor = None
         app.state.runtime_instance_manager = None
+        app.state.bridge_supervisor = None
 
         self.register_api_token_middleware(app)
         app.add_middleware(
@@ -79,7 +88,7 @@ class ClawApplication:
         return app
 
     @asynccontextmanager
-    async def lifespan(self, app: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(self, app: FastAPI) -> AsyncIterator[None]:  # noqa: C901
         self.settings.ensure_runtime_directories()
 
         app.state.db_engine = create_engine(
@@ -97,6 +106,7 @@ class ClawApplication:
             docker_image=self.settings.workspace_provider_docker_image,
             workspace_uid=self.settings.resolved_workspace_provider_docker_uid,
             workspace_gid=self.settings.resolved_workspace_provider_docker_gid,
+            workspace_environment=self.settings.resolved_lark_cli_environment,
         )
 
         if app.state.db_session_factory is not None:
@@ -134,8 +144,17 @@ class ClawApplication:
                 session_factory=app.state.db_session_factory,
             )
             await app.state.runtime_instance_manager.register(metadata={"environment": self.settings.environment})
-            if isinstance(self.settings.execution_model, str) and self.settings.execution_model.strip() != "":
+            if supervisor.execution_enabled:
                 await supervisor.startup_recover()
+            if self.settings.bridge_dispatch_mode == BridgeDispatchMode.EMBEDDED:
+                bridge_supervisor = build_bridge_supervisor(
+                    settings=self.settings,
+                    session_factory=app.state.db_session_factory,
+                    runtime_state=app.state.runtime_state,
+                    run_dispatcher=RunDispatcher(supervisor),
+                )
+                app.state.bridge_supervisor = bridge_supervisor
+                await bridge_supervisor.startup()
 
         try:
             yield
@@ -143,6 +162,7 @@ class ClawApplication:
             db_engine = app.state.db_engine
             runtime_state = app.state.runtime_state
             notification_hub = app.state.notification_hub
+            bridge_supervisor = app.state.bridge_supervisor
 
             app.state.db_session_factory = None
             app.state.workspace_provider = None
@@ -153,6 +173,10 @@ class ClawApplication:
             runtime_instance_manager = app.state.runtime_instance_manager
             app.state.execution_supervisor = None
             app.state.runtime_instance_manager = None
+            app.state.bridge_supervisor = None
+
+            if isinstance(bridge_supervisor, BridgeSupervisor):
+                await bridge_supervisor.shutdown()
 
             if isinstance(runtime_instance_manager, RuntimeInstanceManager):
                 await runtime_instance_manager.mark_stopped()

@@ -71,6 +71,7 @@ class MappedLocalEnvironment(Environment):
         resource_state: ResourceRegistryState | None = None,
         resource_factories: dict[str, ResourceFactory] | None = None,
         include_os_env: bool = True,
+        environment_overrides: dict[str, str] | None = None,
     ) -> None:
         super().__init__(resource_state=resource_state, resource_factories=resource_factories)
         self._mounts = mounts
@@ -79,6 +80,7 @@ class MappedLocalEnvironment(Environment):
         self._tmp_base_dir = tmp_base_dir
         self._enable_tmp_dir = enable_tmp_dir
         self._include_os_env = include_os_env
+        self._environment_overrides = dict(environment_overrides or {})
         self._tmp_dir_obj: tempfile.TemporaryDirectory[str] | None = None
 
     async def _setup(self) -> None:
@@ -98,17 +100,43 @@ class MappedLocalEnvironment(Environment):
         allowed_paths = [mount.host_path.resolve() for mount in self._mounts]
         if tmp_dir_path is not None:
             allowed_paths.append(tmp_dir_path.resolve())
-        self._shell = LocalShell(
+        self._shell = WorkspaceLocalShell(
             default_cwd=self._host_cwd,
             allowed_paths=allowed_paths,
             default_timeout=self._shell_timeout,
             include_os_env=self._include_os_env,
+            environment_overrides=self._environment_overrides,
         )
 
     async def _teardown(self) -> None:
         if self._tmp_dir_obj is not None:
             self._tmp_dir_obj.cleanup()
             self._tmp_dir_obj = None
+
+
+class WorkspaceLocalShell(LocalShell):
+    def __init__(
+        self,
+        *,
+        environment_overrides: dict[str, str],
+        default_cwd: Path | None = None,
+        allowed_paths: list[Path] | None = None,
+        default_timeout: float = 30.0,
+        include_os_env: bool = True,
+    ) -> None:
+        super().__init__(
+            default_cwd=default_cwd,
+            allowed_paths=allowed_paths,
+            default_timeout=default_timeout,
+            include_os_env=include_os_env,
+        )
+        self._environment_overrides = dict(environment_overrides)
+
+    def _build_effective_env(self, env: dict[str, str] | None) -> dict[str, str] | None:
+        merged_env = {**self._environment_overrides, **dict(env or {})}
+        if not merged_env:
+            return super()._build_effective_env(env)
+        return super()._build_effective_env(merged_env)
 
 
 class ReusableSandboxEnvironment(SandboxEnvironment):
@@ -122,6 +150,7 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
         preferred_container_id: str | None = None,
         workspace_uid: int | None = None,
         workspace_gid: int | None = None,
+        workspace_environment: dict[str, str] | None = None,
         shell_timeout: float = 30.0,
         cleanup_on_exit: bool = False,
     ) -> None:
@@ -136,6 +165,7 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
         self._container_ref = container_ref
         self._workspace_uid = workspace_uid
         self._workspace_gid = workspace_gid
+        self._workspace_environment = dict(workspace_environment or {})
 
     @property
     def container_ref(self) -> str:
@@ -194,13 +224,14 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
         container_ref = self._container_ref
         workspace_uid = self._workspace_uid
         workspace_gid = self._workspace_gid
+        workspace_environment = dict(self._workspace_environment)
 
         def _run_container() -> str:
             try:
                 volumes = {str(m.host_path.resolve()): {"bind": str(m.virtual_path), "mode": "rw"} for m in mounts}
                 if tmp_dir is not None:
                     volumes[str(tmp_dir)] = {"bind": str(tmp_dir), "mode": "rw"}
-                environment = {"YA_CLAW_WORKSPACE_STARTUP_DIR": work_dir}
+                environment = {**workspace_environment, "YA_CLAW_WORKSPACE_STARTUP_DIR": work_dir}
                 if isinstance(workspace_uid, int):
                     environment["YA_CLAW_WORKSPACE_UID"] = str(workspace_uid)
                     environment["YA_CLAW_HOST_UID"] = str(workspace_uid)
@@ -240,9 +271,11 @@ class LocalEnvironmentFactory(EnvironmentFactory):
         *,
         shell_timeout: float = 30.0,
         tmp_base_dir: Path | None = None,
+        workspace_environment: dict[str, str] | None = None,
     ) -> None:
         self._shell_timeout = shell_timeout
         self._tmp_base_dir = tmp_base_dir
+        self._workspace_environment = dict(workspace_environment or {})
 
     def build(self, binding: WorkspaceBinding) -> Environment:
         mounts = _virtual_mounts_from_binding(binding)
@@ -252,6 +285,7 @@ class LocalEnvironmentFactory(EnvironmentFactory):
             host_cwd=primary_mount.host_path,
             shell_timeout=self._shell_timeout,
             tmp_base_dir=self._tmp_base_dir,
+            environment_overrides={**self._workspace_environment, **binding.environment_overrides},
         )
 
 
@@ -262,12 +296,14 @@ class DockerEnvironmentFactory(EnvironmentFactory):
         image: str,
         workspace_uid: int | None = None,
         workspace_gid: int | None = None,
+        workspace_environment: dict[str, str] | None = None,
         shell_timeout: float = 30.0,
         cleanup_on_exit: bool = False,
     ) -> None:
         self._image = image
         self._workspace_uid = workspace_uid
         self._workspace_gid = workspace_gid
+        self._workspace_environment = dict(workspace_environment or {})
         self._shell_timeout = shell_timeout
         self._cleanup_on_exit = cleanup_on_exit
 
@@ -285,6 +321,7 @@ class DockerEnvironmentFactory(EnvironmentFactory):
                 container_ref = build_session_sandbox_container_ref(session_id)
 
         mounts = _virtual_mounts_from_binding(binding)
+        workspace_environment = {**self._workspace_environment, **binding.environment_overrides}
         if isinstance(self._workspace_uid, int):
             binding.metadata["workspace_uid"] = self._workspace_uid
         if isinstance(self._workspace_gid, int):
@@ -299,6 +336,7 @@ class DockerEnvironmentFactory(EnvironmentFactory):
                 preferred_container_id=preferred_container_id,
                 workspace_uid=self._workspace_uid,
                 workspace_gid=self._workspace_gid,
+                workspace_environment=workspace_environment,
                 cleanup_on_exit=self._cleanup_on_exit,
                 shell_timeout=self._shell_timeout,
             )
@@ -322,12 +360,18 @@ class DefaultEnvironmentFactory(EnvironmentFactory):
         shell_timeout: float = 30.0,
         tmp_base_dir: Path | None = None,
         cleanup_on_exit: bool = False,
+        workspace_environment: dict[str, str] | None = None,
     ) -> None:
-        self._local_factory = LocalEnvironmentFactory(shell_timeout=shell_timeout, tmp_base_dir=tmp_base_dir)
+        self._local_factory = LocalEnvironmentFactory(
+            shell_timeout=shell_timeout,
+            tmp_base_dir=tmp_base_dir,
+            workspace_environment=workspace_environment,
+        )
         self._docker_factory = DockerEnvironmentFactory(
             image=docker_image,
             workspace_uid=workspace_uid,
             workspace_gid=workspace_gid,
+            workspace_environment=workspace_environment,
             shell_timeout=shell_timeout,
             cleanup_on_exit=cleanup_on_exit,
         )

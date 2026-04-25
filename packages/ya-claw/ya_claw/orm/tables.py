@@ -3,12 +3,24 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ya_claw.orm.base import Base
 
 _ALLOWED_RUN_STATUSES = ("queued", "running", "completed", "failed", "cancelled")
+_ALLOWED_BRIDGE_EVENT_STATUSES = ("received", "queued", "submitted", "duplicate", "failed")
 
 
 def utc_now() -> datetime:
@@ -96,6 +108,58 @@ class RunRecord(Base):
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     session: Mapped[SessionRecord] = relationship(back_populates="runs")
+
+
+class BridgeConversationRecord(Base):
+    __tablename__ = "bridge_conversations"
+    __table_args__ = (
+        UniqueConstraint("adapter", "tenant_key", "external_chat_id", name="uq_bridge_conversations_chat"),
+        Index("ix_bridge_conversations_session_id", "session_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    adapter: Mapped[str] = mapped_column(String(32), nullable=False)
+    tenant_key: Mapped[str] = mapped_column(String(255), nullable=False, default="default")
+    external_chat_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    session_id: Mapped[str] = mapped_column(ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    profile_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    conversation_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+    last_event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BridgeEventRecord(Base):
+    __tablename__ = "bridge_events"
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN {_ALLOWED_BRIDGE_EVENT_STATUSES!s}",
+            name="ck_bridge_events_status",
+        ),
+        UniqueConstraint("adapter", "tenant_key", "event_id", name="uq_bridge_events_event"),
+        UniqueConstraint("adapter", "tenant_key", "external_message_id", name="uq_bridge_events_message"),
+        Index("ix_bridge_events_chat_created_at", "external_chat_id", "created_at"),
+        Index("ix_bridge_events_session_id", "session_id"),
+        Index("ix_bridge_events_run_id", "run_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    adapter: Mapped[str] = mapped_column(String(32), nullable=False)
+    tenant_key: Mapped[str] = mapped_column(String(255), nullable=False, default="default")
+    event_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    external_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    external_chat_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    conversation_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    session_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="received")
+    raw_event: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    normalized_event: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
 
 class RuntimeInstanceRecord(Base):

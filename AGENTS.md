@@ -77,6 +77,12 @@ Most architecture work in this repository targets `packages/ya-agent-sdk` and `p
 - `Dockerfile.ya-claw` can drop service execution privileges through `YA_CLAW_RUN_UID` and `YA_CLAW_RUN_GID`; the official workspace image defaults to UID/GID 1000 through build args
 - built-in run orchestration lives in `ya_claw/execution/coordinator.py`
 - built-in coordinator auto-dispatches only when `YA_CLAW_EXECUTION_MODEL` is configured
+- bridge adapter types are enumerated through `BridgeAdapterType`; current built-in adapter is `lark`
+- bridge deployment dispatch uses `BridgeDispatchMode` (`embedded`, `manual`) and stays separate from run execution dispatch (`queue`, `async`, `stream`)
+- `embedded` is the default bridge dispatch mode and runs adapter tasks under `BridgeSupervisor` in the same HTTP server lifespan as `ExecutionSupervisor`; `manual` starts the HTTP server without `BridgeSupervisor`
+- Lark bridge event allowlist comes from `YA_CLAW_BRIDGE_LARK_EVENT_TYPES`; defaults cover `im.chat.member.bot.added_v1`, `im.chat.member.user.added_v1`, `im.message.receive_v1`, and `drive.notice.comment_add_v1`
+- Lark message events map `(adapter, tenant_key, chat_id)` one-to-one to a session; other accepted Lark events use `chat_id` when present and fall back to stable event or Drive conversation keys; each accepted inbound event creates a bridge-triggered run after event/message dedupe
+- Lark bridge replies/actions are performed by the agent from the workspace with `lark-cli`; workspace environments receive `LARK_APP_ID` and `LARK_APP_SECRET` from process env or Lark bridge app settings
 - JSON run/session create routes return JSON consistently; foreground SSE creation uses `POST /api/v1/runs:stream`, `POST /api/v1/sessions:stream`, and `POST /api/v1/sessions/{session_id}/runs:stream`
 
 ### `packages/ya-agent-platform`

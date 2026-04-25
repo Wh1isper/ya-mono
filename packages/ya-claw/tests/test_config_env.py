@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 from ya_claw import config as config_module
+from ya_claw.bridge import BridgeAdapterType, BridgeDispatchMode
 from ya_claw.config import ClawSettings
 from ya_claw.mcp import ClawMCPConfigResolver
 
@@ -110,6 +111,49 @@ def test_settings_workspace_docker_identity_can_be_configured() -> None:
 
     assert settings.resolved_workspace_provider_docker_uid == 3456
     assert settings.resolved_workspace_provider_docker_gid == 4567
+
+
+def test_settings_resolves_bridge_and_lark_cli_environment(monkeypatch) -> None:
+    monkeypatch.delenv("LARK_APP_ID", raising=False)
+    monkeypatch.delenv("LARK_APP_SECRET", raising=False)
+    settings = ClawSettings(
+        api_token="test-token",  # noqa: S106
+        bridge_enabled_adapters="lark",
+        bridge_lark_app_id="cli_test",
+        bridge_lark_app_secret="secret-value",  # noqa: S106
+        bridge_lark_default_profile="lark-profile",
+        _env_file=None,
+    )
+
+    assert settings.bridge_dispatch_mode == BridgeDispatchMode.EMBEDDED
+    assert settings.resolved_bridge_enabled_adapters == {BridgeAdapterType.LARK}
+    assert settings.resolved_bridge_lark_event_types == [
+        "im.chat.member.bot.added_v1",
+        "im.chat.member.user.added_v1",
+        "im.message.receive_v1",
+        "drive.notice.comment_add_v1",
+    ]
+    assert settings.resolved_bridge_lark_profile == "lark-profile"
+    assert settings.resolved_lark_cli_environment == {
+        "LARK_APP_ID": "cli_test",
+        "LARK_APP_SECRET": "secret-value",
+    }
+
+
+def test_settings_lark_cli_environment_prefers_process_environment(monkeypatch) -> None:
+    monkeypatch.setenv("LARK_APP_ID", "process-cli")
+    monkeypatch.setenv("LARK_APP_SECRET", "process-secret")
+    settings = ClawSettings(
+        api_token="test-token",  # noqa: S106
+        bridge_lark_app_id="settings-cli",
+        bridge_lark_app_secret="settings-secret",  # noqa: S106
+        _env_file=None,
+    )
+
+    assert settings.resolved_lark_cli_environment == {
+        "LARK_APP_ID": "process-cli",
+        "LARK_APP_SECRET": "process-secret",
+    }
 
 
 def test_settings_resolve_global_and_project_mcp_paths(tmp_path: Path) -> None:

@@ -1,5 +1,6 @@
 from ya_claw.execution.checkpoint import MessageCheckpoint, build_message_checkpoint, commit_run_artifacts
 from ya_claw.execution.coordinator import ExecutionBuffers, ExecutionCoordinator, ExecutionSupervisor, RunCoordinator
+from ya_claw.execution.dispatcher import RunDispatcher, RunDispatchResult
 from ya_claw.execution.input import InputMappingResult, map_input_parts, split_input_parts
 from ya_claw.execution.instance import RuntimeInstanceManager
 from ya_claw.execution.profile import ProfileResolver, ResolvedProfile
@@ -26,6 +27,8 @@ __all__ = [
     "ResolvedProfile",
     "ResolvedRestorePoint",
     "RunCoordinator",
+    "RunDispatchResult",
+    "RunDispatcher",
     "RunStore",
     "RuntimeInstanceManager",
     "build_message_checkpoint",
