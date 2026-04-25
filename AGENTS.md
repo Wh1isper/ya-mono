@@ -73,6 +73,8 @@ Most architecture work in this repository targets `packages/ya-agent-sdk` and `p
 - workspace provider modules live under `ya_claw/workspace/`
 - `LocalWorkspaceProvider` uses `VirtualLocalFileOperator` plus `LocalShell`
 - `DockerWorkspaceProvider` uses Docker mounts through `SandboxEnvironment`
+- Docker workspace containers receive UID/GID envs (`YA_CLAW_WORKSPACE_UID`, `YA_CLAW_WORKSPACE_GID`, `YA_CLAW_HOST_UID`, `YA_CLAW_HOST_GID`) from the service process by default or from `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID/GID`
+- `Dockerfile.ya-claw` can drop service execution privileges through `YA_CLAW_RUN_UID` and `YA_CLAW_RUN_GID`; the official workspace image defaults to UID/GID 1000 through build args
 - built-in run orchestration lives in `ya_claw/execution/coordinator.py`
 - built-in coordinator auto-dispatches only when `YA_CLAW_EXECUTION_MODEL` is configured
 - JSON run/session create routes return JSON consistently; foreground SSE creation uses `POST /api/v1/runs:stream`, `POST /api/v1/sessions:stream`, and `POST /api/v1/sessions/{session_id}/runs:stream`

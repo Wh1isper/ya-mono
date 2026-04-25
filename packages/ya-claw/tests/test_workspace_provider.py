@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ya_agent_sdk.environment import SandboxEnvironment, VirtualLocalFileOperator
+from ya_agent_sdk.environment import SandboxEnvironment, VirtualLocalFileOperator, VirtualMount
 from ya_claw.workspace import (
     DockerEnvironmentFactory,
     DockerWorkspaceProvider,
@@ -11,6 +11,7 @@ from ya_claw.workspace import (
     MappedLocalEnvironment,
     ReusableSandboxEnvironment,
     build_session_sandbox_container_ref,
+    build_session_sandbox_metadata,
 )
 
 
@@ -121,13 +122,67 @@ def test_docker_workspace_provider_builds_declarative_binding(tmp_path: Path) ->
 def test_docker_environment_factory_builds_sandbox_environment(tmp_path: Path) -> None:
     provider = DockerWorkspaceProvider(tmp_path / "workspace-root", image="python:3.11")
     binding = provider.resolve("repo-a", metadata={"session_id": "session-1"})
-    factory = DockerEnvironmentFactory(image="python:3.11")
+    factory = DockerEnvironmentFactory(image="python:3.11", workspace_uid=1234, workspace_gid=2345)
 
     environment = factory.build(binding)
 
     assert isinstance(environment, SandboxEnvironment)
     assert isinstance(environment, ReusableSandboxEnvironment)
     assert environment.container_ref == build_session_sandbox_container_ref("session-1")
+    assert binding.metadata["workspace_uid"] == 1234
+    assert binding.metadata["workspace_gid"] == 2345
+
+
+async def test_reusable_sandbox_environment_passes_workspace_identity_to_docker(tmp_path: Path) -> None:
+    captured_run_kwargs: dict[str, object] = {}
+
+    class FakeContainer:
+        id = "container-123"
+
+    class FakeContainers:
+        def run(self, **kwargs: object) -> FakeContainer:
+            captured_run_kwargs.update(kwargs)
+            return FakeContainer()
+
+    class FakeDockerClient:
+        containers = FakeContainers()
+
+    environment = ReusableSandboxEnvironment(
+        mounts=[VirtualMount(host_path=tmp_path / "repo-a", virtual_path=Path("/workspace/repo-a"))],
+        work_dir="/workspace/repo-a",
+        image="python:3.11",
+        container_ref="session-container",
+        workspace_uid=1234,
+        workspace_gid=2345,
+    )
+    environment._client = FakeDockerClient()
+
+    container_id = await environment._create_container()
+
+    assert container_id == "container-123"
+    assert captured_run_kwargs["name"] == "session-container"
+    assert captured_run_kwargs["working_dir"] == "/workspace/repo-a"
+    assert captured_run_kwargs["environment"] == {
+        "YA_CLAW_WORKSPACE_STARTUP_DIR": "/workspace/repo-a",
+        "YA_CLAW_WORKSPACE_UID": "1234",
+        "YA_CLAW_HOST_UID": "1234",
+        "YA_CLAW_WORKSPACE_GID": "2345",
+        "YA_CLAW_HOST_GID": "2345",
+    }
+
+
+def test_session_sandbox_metadata_preserves_workspace_identity(tmp_path: Path) -> None:
+    provider = DockerWorkspaceProvider(tmp_path / "workspace-root", image="python:3.11")
+    binding = provider.resolve("repo-a", metadata={"session_id": "session-1"})
+    factory = DockerEnvironmentFactory(image="python:3.11", workspace_uid=0, workspace_gid=0)
+    environment = factory.build(binding)
+    environment._container_id = "container-123"
+
+    metadata = build_session_sandbox_metadata(binding=binding, environment=environment)
+
+    assert metadata is not None
+    assert metadata["workspace_uid"] == 0
+    assert metadata["workspace_gid"] == 0
 
 
 def test_docker_environment_factory_prefers_container_id_and_keeps_stable_ref(tmp_path: Path) -> None:

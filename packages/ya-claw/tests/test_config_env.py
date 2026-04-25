@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from ya_claw import config as config_module
@@ -88,6 +89,27 @@ def test_settings_use_official_workspace_image_by_default(monkeypatch) -> None:
     settings = ClawSettings(api_token="test-token", _env_file=None)  # noqa: S106
 
     assert settings.workspace_provider_docker_image == "ghcr.io/wh1isper/ya-claw-workspace:latest"
+
+
+def test_settings_default_workspace_docker_identity_uses_process_uid_gid(monkeypatch) -> None:
+    monkeypatch.delenv("YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID", raising=False)
+    monkeypatch.delenv("YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID", raising=False)
+    with patch.object(os, "getuid", return_value=1234), patch.object(os, "getgid", return_value=2345):
+        settings = ClawSettings(api_token="test-token", _env_file=None)  # noqa: S106
+        assert settings.resolved_workspace_provider_docker_uid == 1234
+        assert settings.resolved_workspace_provider_docker_gid == 2345
+
+
+def test_settings_workspace_docker_identity_can_be_configured() -> None:
+    settings = ClawSettings(
+        api_token="test-token",  # noqa: S106
+        workspace_provider_docker_uid=3456,
+        workspace_provider_docker_gid=4567,
+        _env_file=None,
+    )
+
+    assert settings.resolved_workspace_provider_docker_uid == 3456
+    assert settings.resolved_workspace_provider_docker_gid == 4567
 
 
 def test_settings_resolve_global_and_project_mcp_paths(tmp_path: Path) -> None:

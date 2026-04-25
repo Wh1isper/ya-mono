@@ -120,6 +120,8 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
         image: str,
         container_ref: str,
         preferred_container_id: str | None = None,
+        workspace_uid: int | None = None,
+        workspace_gid: int | None = None,
         shell_timeout: float = 30.0,
         cleanup_on_exit: bool = False,
     ) -> None:
@@ -132,6 +134,8 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
             shell_timeout=shell_timeout,
         )
         self._container_ref = container_ref
+        self._workspace_uid = workspace_uid
+        self._workspace_gid = workspace_gid
 
     @property
     def container_ref(self) -> str:
@@ -188,17 +192,26 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
         mounts = self._mounts
         tmp_dir = self.tmp_dir
         container_ref = self._container_ref
+        workspace_uid = self._workspace_uid
+        workspace_gid = self._workspace_gid
 
         def _run_container() -> str:
             try:
                 volumes = {str(m.host_path.resolve()): {"bind": str(m.virtual_path), "mode": "rw"} for m in mounts}
                 if tmp_dir is not None:
                     volumes[str(tmp_dir)] = {"bind": str(tmp_dir), "mode": "rw"}
+                environment = {"YA_CLAW_WORKSPACE_STARTUP_DIR": work_dir}
+                if isinstance(workspace_uid, int):
+                    environment["YA_CLAW_WORKSPACE_UID"] = str(workspace_uid)
+                    environment["YA_CLAW_HOST_UID"] = str(workspace_uid)
+                if isinstance(workspace_gid, int):
+                    environment["YA_CLAW_WORKSPACE_GID"] = str(workspace_gid)
+                    environment["YA_CLAW_HOST_GID"] = str(workspace_gid)
                 container = self.client.containers.run(
                     image=image,
                     volumes=volumes,
                     working_dir=work_dir,
-                    environment={"YA_CLAW_WORKSPACE_STARTUP_DIR": work_dir},
+                    environment=environment,
                     detach=True,
                     stdin_open=True,
                     tty=True,
@@ -247,10 +260,14 @@ class DockerEnvironmentFactory(EnvironmentFactory):
         self,
         *,
         image: str,
+        workspace_uid: int | None = None,
+        workspace_gid: int | None = None,
         shell_timeout: float = 30.0,
         cleanup_on_exit: bool = False,
     ) -> None:
         self._image = image
+        self._workspace_uid = workspace_uid
+        self._workspace_gid = workspace_gid
         self._shell_timeout = shell_timeout
         self._cleanup_on_exit = cleanup_on_exit
 
@@ -268,6 +285,11 @@ class DockerEnvironmentFactory(EnvironmentFactory):
                 container_ref = build_session_sandbox_container_ref(session_id)
 
         mounts = _virtual_mounts_from_binding(binding)
+        if isinstance(self._workspace_uid, int):
+            binding.metadata["workspace_uid"] = self._workspace_uid
+        if isinstance(self._workspace_gid, int):
+            binding.metadata["workspace_gid"] = self._workspace_gid
+
         if container_ref is not None:
             return ReusableSandboxEnvironment(
                 mounts=mounts,
@@ -275,6 +297,8 @@ class DockerEnvironmentFactory(EnvironmentFactory):
                 image=self._image,
                 container_ref=container_ref,
                 preferred_container_id=preferred_container_id,
+                workspace_uid=self._workspace_uid,
+                workspace_gid=self._workspace_gid,
                 cleanup_on_exit=self._cleanup_on_exit,
                 shell_timeout=self._shell_timeout,
             )
@@ -293,6 +317,8 @@ class DefaultEnvironmentFactory(EnvironmentFactory):
         self,
         *,
         docker_image: str,
+        workspace_uid: int | None = None,
+        workspace_gid: int | None = None,
         shell_timeout: float = 30.0,
         tmp_base_dir: Path | None = None,
         cleanup_on_exit: bool = False,
@@ -300,6 +326,8 @@ class DefaultEnvironmentFactory(EnvironmentFactory):
         self._local_factory = LocalEnvironmentFactory(shell_timeout=shell_timeout, tmp_base_dir=tmp_base_dir)
         self._docker_factory = DockerEnvironmentFactory(
             image=docker_image,
+            workspace_uid=workspace_uid,
+            workspace_gid=workspace_gid,
             shell_timeout=shell_timeout,
             cleanup_on_exit=cleanup_on_exit,
         )
@@ -516,6 +544,8 @@ def build_session_sandbox_metadata(*, binding: WorkspaceBinding, environment: En
         "image": _normalize_optional_str(existing.get("image"))
         or _normalize_optional_str(binding.metadata.get("docker_image")),
         "project_id": binding.project_id,
+        "workspace_uid": _first_optional_int(existing.get("workspace_uid"), binding.metadata.get("workspace_uid")),
+        "workspace_gid": _first_optional_int(existing.get("workspace_gid"), binding.metadata.get("workspace_gid")),
         "projects": [
             {
                 "project_id": mount.project_id,
@@ -577,3 +607,19 @@ def _normalize_optional_str(value: Any) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _first_optional_int(*values: Any) -> int | None:
+    for value in values:
+        normalized_value = _normalize_optional_int(value)
+        if normalized_value is not None:
+            return normalized_value
+    return None
+
+
+def _normalize_optional_int(value: Any) -> int | None:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None

@@ -73,6 +73,8 @@ class ClawSettings(BaseSettings):
 
     workspace_provider_backend: Literal["local", "docker"] = "docker"
     workspace_provider_docker_image: str = _DEFAULT_WORKSPACE_DOCKER_IMAGE
+    workspace_provider_docker_uid: int | None = None
+    workspace_provider_docker_gid: int | None = None
     default_profile: str = "default"
     profile_seed_file: Path | None = None
     auto_seed_profiles: bool = False
@@ -123,6 +125,18 @@ class ClawSettings(BaseSettings):
     @property
     def run_store_dir(self) -> Path:
         return self.runtime_data_dir / _DEFAULT_RUN_STORE_DIRNAME
+
+    @property
+    def resolved_workspace_provider_docker_uid(self) -> int:
+        if isinstance(self.workspace_provider_docker_uid, int):
+            return self.workspace_provider_docker_uid
+        return os.getuid()
+
+    @property
+    def resolved_workspace_provider_docker_gid(self) -> int:
+        if isinstance(self.workspace_provider_docker_gid, int):
+            return self.workspace_provider_docker_gid
+        return os.getgid()
 
     @property
     def api_token_value(self) -> str | None:
