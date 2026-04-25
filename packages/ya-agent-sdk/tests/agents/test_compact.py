@@ -39,6 +39,7 @@ from ya_agent_sdk.context import AgentContext, ModelConfig
 from ya_agent_sdk.context.agent import PROJECT_GUIDANCE_TAG, USER_RULES_TAG
 from ya_agent_sdk.environment.local import LocalEnvironment
 from ya_agent_sdk.filters.auto_load_files import process_auto_load_files
+from ya_agent_sdk.filters.runtime_instructions import inject_runtime_instructions
 
 # Full tag set including application-level tags for testing
 _ALL_TAGS = (*_DEFAULT_INJECTED_TAGS, PROJECT_GUIDANCE_TAG, USER_RULES_TAG)
@@ -804,6 +805,31 @@ async def test_create_agent_runs_auto_load_files_after_compact(tmp_path: Path) -
 
         assert len(auto_load_indexes) == 2
         assert auto_load_indexes[-1] > auto_load_indexes[0]
+
+
+async def test_create_agent_runs_runtime_instructions_after_compact(tmp_path: Path) -> None:
+    env = LocalEnvironment(
+        allowed_paths=[tmp_path],
+        default_path=tmp_path,
+        tmp_base_dir=tmp_path,
+    )
+
+    async with create_agent(
+        model="test",
+        env=env,
+    ) as runtime:
+        processors = runtime.agent.history_processors
+        runtime_indexes = [i for i, processor in enumerate(processors) if processor is inject_runtime_instructions]
+        compact_indexes = [
+            i for i, processor in enumerate(processors) if getattr(processor, "__name__", "") == "compact_filter"
+        ]
+        auto_load_indexes = [i for i, processor in enumerate(processors) if processor is process_auto_load_files]
+
+        assert len(runtime_indexes) == 1
+        assert compact_indexes
+        assert auto_load_indexes
+        assert runtime_indexes[0] > compact_indexes[0]
+        assert runtime_indexes[0] > auto_load_indexes[-1]
 
 
 # =============================================================================
