@@ -11,10 +11,12 @@ from ya_claw.controller.models import (
     RunCreateRequest,
     RunDetail,
     RunGetResponse,
+    RunTraceResponse,
     SteerRequest,
 )
 from ya_claw.controller.run import RunController
 from ya_claw.execution.coordinator import ExecutionSupervisor
+from ya_claw.notifications import NotificationHub
 from ya_claw.runtime_state import InMemoryRuntimeState
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -29,6 +31,7 @@ async def create_run(request: Request, payload: RunCreateRequest) -> RunDetail:
     payload.dispatch_mode = DispatchMode.ASYNC
     async with session_factory() as db_session:
         run = await controller.create(db_session, settings, runtime_state, payload)
+    await _publish_run_notification(request, "run.created", run)
     if _auto_dispatch_enabled(settings):
         _submit_run(request, run.id)
     return run
@@ -42,6 +45,7 @@ async def create_run_stream(request: Request, payload: RunCreateRequest) -> Even
     payload.dispatch_mode = DispatchMode.STREAM
     async with session_factory() as db_session:
         run = await controller.create(db_session, settings, runtime_state, payload)
+    await _publish_run_notification(request, "run.created", run)
     if not _submit_run(request, run.id):
         raise HTTPException(status_code=503, detail="Execution supervisor is unavailable.")
     return EventSourceResponse(runtime_state.stream_run_events(run.id))
@@ -66,6 +70,25 @@ async def get_run(
         )
 
 
+@router.get("/{run_id}/trace", response_model=RunTraceResponse)
+async def get_run_trace(
+    request: Request,
+    run_id: str,
+    max_item_chars: int = 4000,
+    max_total_chars: int = 12000,
+) -> RunTraceResponse:
+    settings = _get_settings(request)
+    session_factory = _get_session_factory(request)
+    async with session_factory() as db_session:
+        return await controller.get_trace(
+            db_session,
+            settings,
+            run_id,
+            max_item_chars=max_item_chars,
+            max_total_chars=max_total_chars,
+        )
+
+
 @router.post("/{run_id}/steer", response_model=ControlResponse)
 async def steer_run(request: Request, run_id: str, payload: SteerRequest) -> ControlResponse:
     runtime_state = _get_runtime_state(request)
@@ -80,7 +103,9 @@ async def interrupt_run(request: Request, run_id: str) -> RunDetail:
     runtime_state = _get_runtime_state(request)
     session_factory = _get_session_factory(request)
     async with session_factory() as db_session:
-        return await controller.interrupt(db_session, settings, runtime_state, run_id)
+        run = await controller.interrupt(db_session, settings, runtime_state, run_id)
+    await _publish_run_notification(request, "run.updated", run)
+    return run
 
 
 @router.post("/{run_id}/cancel", response_model=RunDetail)
@@ -89,7 +114,9 @@ async def cancel_run(request: Request, run_id: str) -> RunDetail:
     runtime_state = _get_runtime_state(request)
     session_factory = _get_session_factory(request)
     async with session_factory() as db_session:
-        return await controller.cancel(db_session, settings, runtime_state, run_id)
+        run = await controller.cancel(db_session, settings, runtime_state, run_id)
+    await _publish_run_notification(request, "run.updated", run)
+    return run
 
 
 @router.get("/{run_id}/events")
@@ -102,6 +129,23 @@ async def stream_run_events(
     if runtime_state.get_run_handle(run_id) is None:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' does not have an active event buffer.")
     return EventSourceResponse(runtime_state.stream_run_events(run_id, last_event_id=last_event_id))
+
+
+async def _publish_run_notification(request: Request, event_type: str, run: RunDetail) -> None:
+    notification_hub = _get_notification_hub(request)
+    await notification_hub.publish(
+        event_type,
+        {
+            "session_id": run.session_id,
+            "run_id": run.id,
+            "status": run.status,
+            "sequence_no": run.sequence_no,
+            "profile_name": run.profile_name,
+            "project_id": run.project_id,
+            "termination_reason": run.termination_reason,
+            "error_message": run.error_message,
+        },
+    )
 
 
 def _submit_run(request: Request, run_id: str) -> bool:
@@ -127,6 +171,13 @@ def _get_runtime_state(request: Request) -> InMemoryRuntimeState:
     if not isinstance(runtime_state, InMemoryRuntimeState):
         raise TypeError("Runtime state is unavailable.")
     return runtime_state
+
+
+def _get_notification_hub(request: Request) -> NotificationHub:
+    notification_hub = request.app.state.notification_hub
+    if not isinstance(notification_hub, NotificationHub):
+        raise TypeError("Notification hub is unavailable.")
+    return notification_hub
 
 
 def _get_execution_supervisor(request: Request) -> ExecutionSupervisor | None:

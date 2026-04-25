@@ -57,7 +57,7 @@ def _create_schema() -> None:
     asyncio.run(_run())
 
 
-def _mark_run_completed(session_id: str, run_id: str) -> None:
+def _mark_run_completed(session_id: str, run_id: str, *, output_text: str | None = None) -> None:
     async def _run() -> None:
         settings = get_settings()
         for _ in range(5):
@@ -71,6 +71,8 @@ def _mark_run_completed(session_id: str, run_id: str) -> None:
                     assert isinstance(session_record, SessionRecord)
                     assert isinstance(run_record, RunRecord)
                     run_record.status = "completed"
+                    run_record.output_text = output_text
+                    run_record.output_summary = output_text[:4000] if isinstance(output_text, str) else None
                     run_record.started_at = now - timedelta(seconds=2)
                     run_record.finished_at = now - timedelta(seconds=1)
                     run_record.committed_at = now
@@ -364,3 +366,205 @@ def test_run_get_exposes_session_state_and_message() -> None:
     assert session_response.status_code == 200
     assert session_response.json()["state"] == {"state": "ready"}
     assert session_response.json()["message"] == []
+
+
+def test_session_detail_can_include_input_parts_for_run_replay() -> None:
+    _create_schema()
+
+    with TestClient(create_app()) as client:
+        create_session_response = client.post(
+            "/api/v1/sessions",
+            headers=_auth_headers(),
+            json={
+                "input_parts": [
+                    {"type": "mode", "mode": "plan"},
+                    {"type": "text", "text": "render this exactly"},
+                    {
+                        "type": "url",
+                        "url": "https://example.com/image.png",
+                        "kind": "image",
+                        "filename": "image.png",
+                    },
+                ]
+            },
+        )
+        assert create_session_response.status_code == 201
+        session_id = create_session_response.json()["session"]["id"]
+
+        default_response = client.get(f"/api/v1/sessions/{session_id}", headers=_auth_headers())
+        include_response = client.get(
+            f"/api/v1/sessions/{session_id}?include_input_parts=true",
+            headers=_auth_headers(),
+        )
+
+    assert default_response.status_code == 200
+    assert default_response.json()["session"]["runs"][0]["input_parts"] is None
+    assert include_response.status_code == 200
+    assert include_response.json()["session"]["runs"][0]["input_parts"] == [
+        {"type": "mode", "mode": "plan", "params": None, "metadata": None},
+        {"type": "text", "text": "render this exactly", "metadata": None},
+        {
+            "type": "url",
+            "url": "https://example.com/image.png",
+            "kind": "image",
+            "filename": "image.png",
+            "storage": "ephemeral",
+            "metadata": None,
+        },
+    ]
+
+
+def test_session_turns_return_completed_runs_with_raw_input_and_output() -> None:
+    _create_schema()
+
+    with TestClient(create_app()) as client:
+        create_session_response = client.post("/api/v1/sessions", headers=_auth_headers(), json={})
+        assert create_session_response.status_code == 201
+        session_id = create_session_response.json()["session"]["id"]
+
+        first_run_response = client.post(
+            "/api/v1/runs",
+            headers=_auth_headers(),
+            json={"session_id": session_id, "input_parts": [{"type": "text", "text": "completed-1"}]},
+        )
+        assert first_run_response.status_code == 201
+        first_run_id = first_run_response.json()["id"]
+
+    _mark_run_completed(session_id, first_run_id, output_text="answer-1")
+
+    with TestClient(create_app()) as client:
+        failed_run_response = client.post(
+            f"/api/v1/sessions/{session_id}/runs",
+            headers=_auth_headers(),
+            json={"input_parts": [{"type": "text", "text": "failed"}]},
+        )
+        assert failed_run_response.status_code == 201
+        failed_run_id = failed_run_response.json()["id"]
+
+    async def _mark_failed() -> None:
+        settings = get_settings()
+        engine = create_engine(settings.resolved_database_url)
+        session_factory = create_session_factory(engine)
+        try:
+            async with session_factory() as db_session:
+                session_record = await db_session.get(SessionRecord, session_id)
+                run_record = await db_session.get(RunRecord, failed_run_id)
+                assert isinstance(session_record, SessionRecord)
+                assert isinstance(run_record, RunRecord)
+                run_record.status = "failed"
+                run_record.error_message = "boom"
+                session_record.active_run_id = None
+                await db_session.commit()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_mark_failed())
+
+    with TestClient(create_app()) as client:
+        second_run_response = client.post(
+            f"/api/v1/sessions/{session_id}/runs",
+            headers=_auth_headers(),
+            json={"input_parts": [{"type": "text", "text": "completed-2"}]},
+        )
+        assert second_run_response.status_code == 201
+        second_run_id = second_run_response.json()["id"]
+
+    _mark_run_completed(session_id, second_run_id, output_text="answer-2")
+
+    with TestClient(create_app()) as client:
+        page_1_response = client.get(
+            f"/api/v1/sessions/{session_id}/turns?limit=1",
+            headers=_auth_headers(),
+        )
+        page_2_response = client.get(
+            f"/api/v1/sessions/{session_id}/turns?limit=1&before_sequence_no=3",
+            headers=_auth_headers(),
+        )
+
+    assert page_1_response.status_code == 200
+    page_1_payload = page_1_response.json()
+    assert page_1_payload["session_id"] == session_id
+    assert page_1_payload["has_more"] is True
+    assert page_1_payload["next_before_sequence_no"] == 3
+    assert len(page_1_payload["turns"]) == 1
+    assert page_1_payload["turns"][0]["run_id"] == second_run_id
+    assert page_1_payload["turns"][0]["input_parts"] == [{"type": "text", "text": "completed-2", "metadata": None}]
+    assert page_1_payload["turns"][0]["output_text"] == "answer-2"
+    assert page_1_payload["turns"][0]["output_summary"] == "answer-2"
+
+    assert page_2_response.status_code == 200
+    page_2_payload = page_2_response.json()
+    assert page_2_payload["has_more"] is False
+    assert [turn["run_id"] for turn in page_2_payload["turns"]] == [first_run_id]
+    assert page_2_payload["turns"][0]["output_text"] == "answer-1"
+
+
+def test_run_trace_projects_tool_call_and_response_with_trimming() -> None:
+    _create_schema()
+
+    with TestClient(create_app()) as client:
+        create_session_response = client.post("/api/v1/sessions", headers=_auth_headers(), json={})
+        assert create_session_response.status_code == 201
+        session_id = create_session_response.json()["session"]["id"]
+
+        create_run_response = client.post(
+            "/api/v1/runs",
+            headers=_auth_headers(),
+            json={"session_id": session_id, "input_parts": [{"type": "text", "text": "use tools"}]},
+        )
+        assert create_run_response.status_code == 201
+        run_id = create_run_response.json()["id"]
+
+    _mark_run_completed(session_id, run_id, output_text="done")
+
+    settings = get_settings()
+    run_dir = settings.run_store_dir / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "message.json").write_text(
+        json.dumps([
+            {"type": "TEXT_MESSAGE_CHUNK", "messageId": "m1", "delta": "hello"},
+            {
+                "type": "TOOL_CALL_CHUNK",
+                "toolCallId": "tool-1",
+                "toolCallName": "shell_exec",
+                "delta": '{"command":"echo hello"}',
+            },
+            {
+                "type": "TOOL_CALL_RESULT",
+                "toolCallId": "tool-1",
+                "messageId": "tool-1:result",
+                "role": "tool",
+                "content": "x" * 300,
+            },
+        ]),
+        encoding="utf-8",
+    )
+
+    with TestClient(create_app()) as client:
+        trace_response = client.get(
+            f"/api/v1/runs/{run_id}/trace?max_item_chars=256&max_total_chars=280",
+            headers=_auth_headers(),
+        )
+
+    assert trace_response.status_code == 200
+    payload = trace_response.json()
+    assert payload["run_id"] == run_id
+    assert payload["session_id"] == session_id
+    assert payload["truncated"] is True
+    assert payload["item_count"] == 2
+    assert payload["trace"][0] == {
+        "sequence_no": 1,
+        "type": "tool_call",
+        "tool_call_id": "tool-1",
+        "tool_name": "shell_exec",
+        "message_id": None,
+        "role": None,
+        "content": '{"command":"echo hello"}',
+        "truncated": False,
+    }
+    assert payload["trace"][1]["type"] == "tool_response"
+    assert payload["trace"][1]["tool_call_id"] == "tool-1"
+    assert payload["trace"][1]["message_id"] == "tool-1:result"
+    assert payload["trace"][1]["role"] == "tool"
+    assert len(payload["trace"][1]["content"]) == 256
+    assert payload["trace"][1]["truncated"] is True

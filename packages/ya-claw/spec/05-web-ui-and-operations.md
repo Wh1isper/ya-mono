@@ -55,6 +55,27 @@ Shows live event output, final summary, AGUI-aligned event flow, effective `proj
 
 Shows the final run result, commit metadata, and continuation readiness.
 
+## Console API Contract
+
+The web shell uses these API layers:
+
+- `/api/v1/claw/info` for startup handshake, capability flags, storage model, workspace backend, and auth mode.
+- `/api/v1/claw/notifications` for global SSE notifications that refresh overview lists and selected session metadata.
+- `/api/v1/sessions` and nested run routes for chat creation, continuation, lineage, turns, and committed replay.
+- `/api/v1/runs/{run_id}/events` and `/api/v1/sessions/{session_id}/events` for detailed AGUI-aligned live output.
+- `/api/v1/profiles` for AgentProfile management.
+
+The web shell should implement SSE through `fetch` and `ReadableStream` parsing so bearer authorization headers are sent consistently. The global notification stream updates collection state, while nested run and session streams render active AGUI output.
+
+```mermaid
+flowchart LR
+    INFO[/claw/info/] --> SHELL[Console Shell]
+    NOTIFY[/claw/notifications/] --> OVERVIEW[Overview and Lists]
+    SESSIONS[/sessions/] --> CHAT[Chat Console]
+    RUN_EVENTS[/runs/:id/events/] --> CHAT
+    PROFILES[/profiles/] --> ADMIN[Profile Admin]
+```
+
 ## Startup Flow
 
 The default startup path is:

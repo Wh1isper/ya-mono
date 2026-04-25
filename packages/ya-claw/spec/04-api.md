@@ -20,14 +20,17 @@ flowchart TB
     ROOT --> SESSIONS[/sessions]
     ROOT --> RUNS[/runs]
     ROOT --> EVENTS[/events via nested session and run routes]
-    ROOT --> PROFILES[/profiles and seed operations later]
+    ROOT --> PROFILES[/profiles and seed operations]
+    ROOT --> CLAW[/claw info and notifications]
 ```
 
 ## Top-level Endpoints
 
-| Method | Path       | Purpose                              |
-| ------ | ---------- | ------------------------------------ |
-| `GET`  | `/healthz` | service, storage, and runtime health |
+| Method | Path                         | Purpose                                      |
+| ------ | ---------------------------- | -------------------------------------------- |
+| `GET`  | `/healthz`                   | service, storage, and runtime health         |
+| `GET`  | `/api/v1/claw/info`          | web console startup handshake and capability |
+| `GET`  | `/api/v1/claw/notifications` | global console notification SSE stream       |
 
 ## Sessions
 
@@ -36,6 +39,7 @@ flowchart TB
 | `POST` | `/api/v1/sessions`                        | create a session with optional first queued run |
 | `GET`  | `/api/v1/sessions`                        | list sessions                                   |
 | `GET`  | `/api/v1/sessions/{session_id}`           | inspect session and committed state             |
+| `GET`  | `/api/v1/sessions/{session_id}/turns`     | list completed conversational turns             |
 | `POST` | `/api/v1/sessions/{session_id}/runs`      | create a new queued run under the session       |
 | `POST` | `/api/v1/sessions/{session_id}/steer`     | steer the active run through the session        |
 | `POST` | `/api/v1/sessions/{session_id}/interrupt` | interrupt the active run through the session    |
@@ -49,6 +53,7 @@ flowchart TB
 | ------ | --------------------------------- | ------------------------------- |
 | `POST` | `/api/v1/runs`                    | create a queued run directly    |
 | `GET`  | `/api/v1/runs/{run_id}`           | inspect run and committed state |
+| `GET`  | `/api/v1/runs/{run_id}/trace`     | inspect compact tool trace      |
 | `POST` | `/api/v1/runs/{run_id}/steer`     | steer a specific active run     |
 | `POST` | `/api/v1/runs/{run_id}/interrupt` | interrupt a specific active run |
 | `POST` | `/api/v1/runs/{run_id}/cancel`    | cancel a specific active run    |
@@ -137,6 +142,8 @@ Suggested run summary fields:
 - `profile_name`
 - `project_id`
 - `input_preview`
+- `input_parts` when `include_input_parts=true`
+- `output_text`
 - `output_summary`
 - `error_message`
 - `termination_reason`
@@ -157,7 +164,7 @@ Session and run GET endpoints should return the structured record plus committed
 
 ### Session GET
 
-`GET /api/v1/sessions/{session_id}?include_message=true`
+`GET /api/v1/sessions/{session_id}?include_message=true&include_input_parts=true`
 
 ```json
 {
@@ -172,6 +179,15 @@ Session and run GET endpoints should return the structured record plus committed
   "message": []
 }
 ```
+
+`include_input_parts=true` includes each listed run's original `input_parts` for UI replay.
+
+### Session Turns
+
+`GET /api/v1/sessions/{session_id}/turns?limit=20`
+
+Returns completed runs only. Each turn includes the original `input_parts`, `output_text`, and `output_summary`.
+The endpoint paginates by descending `sequence_no` with `before_sequence_no`.
 
 ### Run GET
 
@@ -191,6 +207,26 @@ Session and run GET endpoints should return the structured record plus committed
   "message": []
 }
 ```
+
+### Run Trace
+
+`GET /api/v1/runs/{run_id}/trace?max_item_chars=4000&max_total_chars=12000`
+
+Returns a compact projection of committed `message.json` tool events:
+
+- `TOOL_CALL_CHUNK` as `tool_call`
+- `TOOL_CALL_RESULT` as `tool_response`
+
+The response trims each item and the total trace payload according to query parameters.
+
+## Agent Self-Session Tools
+
+The built-in `session` toolset exposes read-only tools for the running agent:
+
+- `list_session_turns` reads completed turns for the current session through an internal HTTP client.
+- `get_run_trace` reads tool-call and tool-response trace for a run in the current session.
+
+The client carries the current `session_id` and bearer token internally. Tool calls do not accept a session ID and reject trace payloads from any other session.
 
 ## Control Endpoints
 
@@ -225,10 +261,63 @@ The single-node baseline keeps the event buffer in memory.
 Queued-run creation and active execution are separate concerns.
 SSE reflects active or recently buffered execution, not the act of durable creation itself.
 
-## Future Profile API
+## Console Info and Notifications
 
-YA Claw should eventually expose profile management and seed sync APIs.
-The profile records remain durable database state even when seeded from YAML.
+The web console reads `/api/v1/claw/info` during startup to discover environment, auth mode, runtime surfaces, and feature flags.
+
+Suggested response shape:
+
+```json
+{
+  "name": "YA Claw",
+  "environment": "development",
+  "version": "0.1.0",
+  "public_base_url": "http://127.0.0.1:9042",
+  "instance_id": "host-123-abcdef",
+  "auth": "bearer",
+  "surfaces": ["profiles", "sessions", "runs", "notifications"],
+  "workspace_provider_backend": "docker",
+  "storage_model": "sqlite",
+  "features": {
+    "session_events": true,
+    "run_events": true,
+    "notifications": true,
+    "profiles": true
+  }
+}
+```
+
+The notification stream at `/api/v1/claw/notifications` is a global SSE stream for list and overview refreshes. Each event payload is JSON:
+
+```json
+{
+  "id": "1",
+  "type": "run.updated",
+  "created_at": "2026-04-25T13:00:00Z",
+  "payload": {
+    "session_id": "session_123",
+    "run_id": "run_456",
+    "status": "running"
+  }
+}
+```
+
+Notification events are buffered in process memory and support `Last-Event-ID` replay. The web console should still use session and run event streams for detailed AGUI output.
+
+Initial notification types:
+
+- `session.created`
+- `run.created`
+- `run.updated`
+- `profile.created`
+- `profile.updated`
+- `profile.deleted`
+- `profiles.seeded`
+
+## Profiles
+
+Profile management is available through `/api/v1/profiles` CRUD routes and `/api/v1/profiles/seed`.
+Profile records remain durable database state even when seeded from YAML.
 
 ## Authentication
 

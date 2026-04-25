@@ -1,30 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-install_agent_browser_skill() {
-  local bundled_skill_root="/opt/ya-claw/skills/agent-browser"
+copy_bundled_skills() {
+  local bundled_skills_root="/opt/ya-claw/skills"
+  local startup_dir="${YA_CLAW_WORKSPACE_STARTUP_DIR:-${PWD}}"
+  local skills_root="${startup_dir}/.agents/skills"
 
-  if [[ ! -d "${bundled_skill_root}" ]]; then
+  if [[ ! -d "${bundled_skills_root}" ]]; then
     return 0
   fi
 
-  shopt -s nullglob
-  local workspace_dir
-  for workspace_dir in /workspace/*; do
-    if [[ ! -d "${workspace_dir}" ]]; then
+  mkdir -p "${skills_root}"
+
+  shopt -s nullglob dotglob
+  local bundled_skill_dir
+  for bundled_skill_dir in "${bundled_skills_root}"/*; do
+    if [[ ! -d "${bundled_skill_dir}" ]]; then
       continue
     fi
 
-    local skills_root="${workspace_dir}/.agents/skills"
-    if [[ -e "${skills_root}/agent-browser/SKILL.md" ]]; then
-      continue
-    fi
-
-    mkdir -p "${skills_root}"
-    cp -R "${bundled_skill_root}" "${skills_root}/agent-browser"
+    local skill_name
+    skill_name="$(basename "${bundled_skill_dir}")"
+    mkdir -p "${skills_root}/${skill_name}"
+    cp -R "${bundled_skill_dir}/." "${skills_root}/${skill_name}/"
   done
 }
 
-install_agent_browser_skill
+copy_bundled_skills
 
 exec "$@"

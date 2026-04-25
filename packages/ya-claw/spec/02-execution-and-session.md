@@ -71,6 +71,7 @@ Suggested run fields:
 - `project_id`
 - `input_parts`
 - `metadata`
+- `output_text`
 - `output_summary`
 - `error_message`
 - `termination_reason`
@@ -183,6 +184,7 @@ The request payload should use:
 - `command`
 
 The execution input mapper converts `input_parts` into the SDK `UserPrompt` shape.
+The run record keeps the original JSON-compatible `input_parts` payload for replay and UI reconstruction.
 
 ## Event Flow
 
@@ -218,9 +220,10 @@ A successful commit should:
 
 1. persist `state.json` for the run
 2. persist compacted AGUI replay events to `message.json`
-3. set `committed_at`
-4. set session `head_success_run_id`
-5. clear session `active_run_id`
+3. persist final `output_text` and `output_summary` on the run record
+4. set `committed_at`
+5. set session `head_success_run_id`
+6. clear session `active_run_id`
 
 ## Failure and Interrupt Semantics
 

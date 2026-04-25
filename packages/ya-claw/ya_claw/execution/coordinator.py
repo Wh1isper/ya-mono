@@ -29,8 +29,10 @@ from ya_claw.execution.restore import ResolvedRestorePoint, load_restore_point
 from ya_claw.execution.runtime import ClawRuntimeBuilder
 from ya_claw.execution.state_machine import complete_run, fail_run, interrupt_run, mark_run_running
 from ya_claw.execution.store import RunStore
+from ya_claw.notifications import NotificationHub
 from ya_claw.orm.tables import RunRecord, SessionRecord
 from ya_claw.runtime_state import InMemoryRuntimeState
+from ya_claw.toolsets.session import CLAW_SELF_CLIENT_KEY, ClawSelfClient
 from ya_claw.workspace import (
     EnvironmentFactory,
     WorkspaceBinding,
@@ -45,6 +47,7 @@ logger = logging.getLogger(__name__)
 class ExecutionBuffers:
     latest_state_payload: dict[str, Any] | None = None
     latest_message_payload: dict[str, Any] | None = None
+    output_text: str | None = None
     output_summary: str | None = None
 
 
@@ -59,6 +62,7 @@ class ExecutionSupervisor:
         environment_factory: EnvironmentFactory,
         profile_resolver: ProfileResolver,
         runtime_builder: ClawRuntimeBuilder,
+        notification_hub: NotificationHub | None = None,
     ) -> None:
         self._settings = settings
         self._session_factory = session_factory
@@ -67,6 +71,7 @@ class ExecutionSupervisor:
         self._environment_factory = environment_factory
         self._profile_resolver = profile_resolver
         self._runtime_builder = runtime_builder
+        self._notification_hub = notification_hub
         self._run_store = RunStore(settings)
 
     def submit_run(self, run_id: str) -> bool:
@@ -126,6 +131,7 @@ class ExecutionSupervisor:
                 profile_resolver=self._profile_resolver,
                 runtime_builder=self._runtime_builder,
                 run_store=self._run_store,
+                notification_hub=self._notification_hub,
             )
             await coordinator.execute(run_id)
         finally:
@@ -144,6 +150,11 @@ class ExecutionSupervisor:
             mark_run_running(session_record, run_record, claimed_by=self._settings.instance_id)
             await db_session.commit()
             await db_session.refresh(run_record)
+            await _publish_run_status_notification(
+                self._notification_hub,
+                "run.updated",
+                run_record,
+            )
 
             agui_adapter = AguiEventAdapter(session_id=session_record.id, run_id=run_id)
             await self._runtime_state.append_run_event(
@@ -171,6 +182,7 @@ class RunCoordinator:
         profile_resolver: ProfileResolver,
         runtime_builder: ClawRuntimeBuilder,
         run_store: RunStore | None = None,
+        notification_hub: NotificationHub | None = None,
     ) -> None:
         self._settings = settings
         self._session_factory = session_factory
@@ -179,6 +191,7 @@ class RunCoordinator:
         self._environment_factory = environment_factory
         self._profile_resolver = profile_resolver
         self._runtime_builder = runtime_builder
+        self._notification_hub = notification_hub
         self._run_store = run_store or RunStore(settings)
 
     async def execute(self, run_id: str) -> None:
@@ -246,9 +259,15 @@ class RunCoordinator:
                     message=self._extract_replay_events(effective_message_payload),
                 )
                 complete_run(session_record, run_record)
+                run_record.output_text = buffers.output_text
                 run_record.output_summary = buffers.output_summary
                 await db_session.commit()
                 await db_session.refresh(run_record)
+                await _publish_run_status_notification(
+                    self._notification_hub,
+                    "run.updated",
+                    run_record,
+                )
 
                 agui_adapter = AguiEventAdapter(session_id=session_record.id, run_id=run_id)
                 await self._runtime_state.append_run_event(
@@ -294,9 +313,15 @@ class RunCoordinator:
 
                 fail_run(session_record, run_record)
                 run_record.error_message = self._stringify_error(exc)
+                run_record.output_text = buffers.output_text
                 run_record.output_summary = buffers.output_summary
                 await db_session.commit()
                 await db_session.refresh(run_record)
+                await _publish_run_status_notification(
+                    self._notification_hub,
+                    "run.updated",
+                    run_record,
+                )
                 agui_adapter = AguiEventAdapter(session_id=session_record.id, run_id=run_id)
                 await self._runtime_state.append_run_event(
                     run_id,
@@ -330,6 +355,14 @@ class RunCoordinator:
         environment = self._environment_factory.build(workspace_binding)
         background_monitor = BackgroundMonitor(run_id=run_id, runtime_state=self._runtime_state)
         environment.resources.set(BACKGROUND_MONITOR_KEY, background_monitor)
+        environment.resources.set(
+            CLAW_SELF_CLIENT_KEY,
+            ClawSelfClient(
+                base_url=self._settings.public_base_url,
+                api_token=self._settings.require_api_token(),
+                session_id=session_id,
+            ),
+        )
 
         restored_state = self._extract_resumable_state(restore_point)
         runtime = self._runtime_builder.build(
@@ -383,9 +416,9 @@ class RunCoordinator:
                                 streamer.run,
                                 replay_events=self._runtime_state.get_replay_events(run_id),
                             )
-                            buffers.output_summary = self._summarize_output(
-                                streamer.run.result.output if streamer.run.result else None
-                            )
+                            output = streamer.run.result.output if streamer.run.result else None
+                            buffers.output_text = self._stringify_output(output)
+                            buffers.output_summary = self._summarize_output(output)
                             if isinstance(stream_event.event, (ModelRequestStartEvent, ModelRequestCompleteEvent)):
                                 checkpoint = build_message_checkpoint(
                                     run_id=run_id,
@@ -423,9 +456,9 @@ class RunCoordinator:
                     trigger_type=trigger_type,
                     message_payload=buffers.latest_message_payload,
                 )
-                buffers.output_summary = self._summarize_output(
-                    streamer.run.result.output if streamer.run.result else None
-                )
+                output = streamer.run.result.output if streamer.run.result else None
+                buffers.output_text = self._stringify_output(output)
+                buffers.output_summary = self._summarize_output(output)
 
     async def _build_initial_prompt(
         self,
@@ -657,13 +690,19 @@ class RunCoordinator:
             "message_count": len(messages) if isinstance(messages, list) else None,
         }
 
-    def _summarize_output(self, output: Any) -> str | None:
+    def _stringify_output(self, output: Any) -> str | None:
         if output is None:
             return None
         if isinstance(output, str):
             value = output.strip()
-            return value[:4000] or None
-        return str(output)[:4000]
+            return value or None
+        return str(output)
+
+    def _summarize_output(self, output: Any) -> str | None:
+        value = self._stringify_output(output)
+        if value is None:
+            return None
+        return value[:4000]
 
     def _stringify_error(self, exc: Exception) -> str:
         try:
@@ -693,6 +732,29 @@ class RunCoordinator:
 
 
 ExecutionCoordinator = RunCoordinator
+
+
+async def _publish_run_status_notification(
+    notification_hub: NotificationHub | None,
+    event_type: str,
+    run_record: RunRecord,
+) -> None:
+    if notification_hub is None:
+        return
+    await notification_hub.publish(
+        event_type,
+        {
+            "session_id": run_record.session_id,
+            "run_id": run_record.id,
+            "status": run_record.status,
+            "sequence_no": run_record.sequence_no,
+            "profile_name": run_record.profile_name,
+            "project_id": run_record.project_id,
+            "termination_reason": run_record.termination_reason,
+            "error_message": run_record.error_message,
+            "output_summary": run_record.output_summary,
+        },
+    )
 
 
 async def _load_run_scope(db_session: AsyncSession, run_id: str) -> tuple[SessionRecord, RunRecord]:

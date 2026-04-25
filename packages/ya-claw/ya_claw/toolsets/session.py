@@ -1,0 +1,331 @@
+"""Self-session tools for YA Claw runtime."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import Annotated, Any, Protocol, runtime_checkable
+from urllib.parse import urlparse
+
+from pydantic import Field
+from pydantic_ai import RunContext
+from ya_agent_sdk.context import AgentContext
+from ya_agent_sdk.toolsets.core.base import BaseTool
+
+CLAW_SELF_CLIENT_KEY = "claw_self_client"
+_DEFAULT_HTTP_TIMEOUT_SECONDS = 10.0
+
+
+@runtime_checkable
+class SelfSessionClient(Protocol):
+    session_id: str
+
+    async def list_session_turns(self, *, limit: int, before_sequence_no: int | None) -> dict[str, Any]: ...
+
+    async def get_run_trace(self, *, run_id: str, max_item_chars: int, max_total_chars: int) -> dict[str, Any]: ...
+
+
+class ClawSelfClient:
+    """HTTP client scoped to the current YA Claw session."""
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_token: str,
+        session_id: str,
+        timeout_seconds: float = _DEFAULT_HTTP_TIMEOUT_SECONDS,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._api_token = api_token
+        self.session_id = session_id
+        self._timeout_seconds = timeout_seconds
+
+    def close(self) -> None:
+        return None
+
+    async def setup(self) -> None:
+        return None
+
+    def get_toolsets(self) -> list[Any]:
+        return []
+
+    async def list_session_turns(self, *, limit: int, before_sequence_no: int | None) -> dict[str, Any]:
+        params: dict[str, str] = {"limit": str(limit)}
+        if isinstance(before_sequence_no, int):
+            params["before_sequence_no"] = str(before_sequence_no)
+        path = f"/api/v1/sessions/{urllib.parse.quote(self.session_id)}/turns"
+        return await self._get_json(path, params=params)
+
+    async def get_run_trace(self, *, run_id: str, max_item_chars: int, max_total_chars: int) -> dict[str, Any]:
+        params = {
+            "max_item_chars": str(max_item_chars),
+            "max_total_chars": str(max_total_chars),
+        }
+        path = f"/api/v1/runs/{urllib.parse.quote(run_id)}/trace"
+        payload = await self._get_json(path, params=params)
+        response_session_id = payload.get("session_id")
+        if response_session_id != self.session_id:
+            raise RuntimeError("Requested run does not belong to the current session.")
+        return payload
+
+    async def _get_json(self, path: str, *, params: dict[str, str]) -> dict[str, Any]:
+        payload = await asyncio.to_thread(self._get_json_sync, path, params)
+        if isinstance(payload, dict):
+            return payload
+        raise RuntimeError("YA Claw self API returned a non-object JSON payload.")
+
+    def _get_json_sync(self, path: str, params: dict[str, str]) -> Any:
+        query = urllib.parse.urlencode(params)
+        url = f"{self._base_url}{path}"
+        if query:
+            url = f"{url}?{query}"
+        parsed_url = urlparse(url)
+        if parsed_url.scheme not in {"http", "https"}:
+            raise RuntimeError("YA Claw self API URL must use http or https.")
+        request = urllib.request.Request(  # noqa: S310
+            url,
+            headers={"Authorization": f"Bearer {self._api_token}"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self._timeout_seconds) as response:  # noqa: S310
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = _decode_error_detail(exc)
+            raise RuntimeError(f"YA Claw self API request failed with status {exc.code}: {detail}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"YA Claw self API request failed: {exc.reason}") from exc
+
+
+class ListSessionTurnsTool(BaseTool):
+    """List completed turns from the current YA Claw session."""
+
+    name = "list_session_turns"
+    description = "List completed turns from the current YA Claw session. Returns trimmed input and output JSON."
+
+    def is_available(self, ctx: RunContext[AgentContext]) -> bool:
+        return _get_self_client(ctx) is not None
+
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+        if _get_self_client(ctx) is None:
+            return None
+        return (
+            "List completed turns from the current YA Claw session. "
+            "Use this to inspect earlier successful work in this conversation. "
+            "The tool is scoped to the current session and returns trimmed JSON."
+        )
+
+    async def call(
+        self,
+        ctx: RunContext[AgentContext],
+        limit: Annotated[int, Field(description="Maximum completed turns to fetch, clamped to 1..50")] = 10,
+        before_sequence_no: Annotated[
+            int | None,
+            Field(description="Fetch completed turns with sequence_no lower than this value"),
+        ] = None,
+        max_input_chars: Annotated[int, Field(description="Maximum characters per turn input payload")] = 2000,
+        max_output_chars: Annotated[int, Field(description="Maximum characters per turn output_text")] = 4000,
+        include_binary_data: Annotated[bool, Field(description="Include trimmed binary base64 data when true")] = False,
+    ) -> str:
+        client = _get_self_client(ctx)
+        if client is None:
+            return "Error: YA Claw self-session client is unavailable."
+        normalized_limit = min(max(limit, 1), 50)
+        normalized_max_input_chars = min(max(max_input_chars, 200), 20000)
+        normalized_max_output_chars = min(max(max_output_chars, 200), 50000)
+        try:
+            payload = await client.list_session_turns(
+                limit=normalized_limit,
+                before_sequence_no=before_sequence_no,
+            )
+            if payload.get("session_id") != client.session_id:
+                return "Error: YA Claw self API returned a different session."
+            return _dump_json(
+                _compact_turns_payload(
+                    payload,
+                    max_input_chars=normalized_max_input_chars,
+                    max_output_chars=normalized_max_output_chars,
+                    include_binary_data=include_binary_data,
+                )
+            )
+        except Exception as exc:
+            return f"Error: {exc}"
+
+
+class GetRunTraceTool(BaseTool):
+    """Get tool trace for a run in the current YA Claw session."""
+
+    name = "get_run_trace"
+    description = "Get tool-call and tool-response trace for a run in the current YA Claw session."
+
+    def is_available(self, ctx: RunContext[AgentContext]) -> bool:
+        return _get_self_client(ctx) is not None
+
+    async def get_instruction(self, ctx: RunContext[AgentContext]) -> str | None:
+        if _get_self_client(ctx) is None:
+            return None
+        return (
+            "Get tool-call and tool-response trace for a run in the current YA Claw session. "
+            "Use run IDs returned by list_session_turns. The tool rejects runs outside the current session."
+        )
+
+    async def call(
+        self,
+        ctx: RunContext[AgentContext],
+        run_id: Annotated[str, Field(description="Run ID from the current YA Claw session")],
+        max_item_chars: Annotated[int, Field(description="Maximum characters per trace item")] = 2000,
+        max_total_chars: Annotated[int, Field(description="Maximum total characters across trace items")] = 8000,
+    ) -> str:
+        client = _get_self_client(ctx)
+        if client is None:
+            return "Error: YA Claw self-session client is unavailable."
+        normalized_item_chars = min(max(max_item_chars, 256), 20000)
+        normalized_total_chars = min(max(max_total_chars, normalized_item_chars), 100000)
+        try:
+            payload = await client.get_run_trace(
+                run_id=run_id,
+                max_item_chars=normalized_item_chars,
+                max_total_chars=normalized_total_chars,
+            )
+            if payload.get("session_id") != client.session_id:
+                return "Error: YA Claw self API returned a different session."
+            return _dump_json(payload)
+        except Exception as exc:
+            return f"Error: {exc}"
+
+
+def _get_self_client(ctx: RunContext[AgentContext]) -> SelfSessionClient | None:
+    if ctx.deps.resources is None:
+        return None
+    resource = ctx.deps.resources.get(CLAW_SELF_CLIENT_KEY)
+    if isinstance(resource, SelfSessionClient):
+        return resource
+    return None
+
+
+def _compact_turns_payload(
+    payload: dict[str, Any],
+    *,
+    max_input_chars: int,
+    max_output_chars: int,
+    include_binary_data: bool,
+) -> dict[str, Any]:
+    turns = payload.get("turns")
+    compact_turns: list[dict[str, Any]] = []
+    if isinstance(turns, list):
+        for turn in turns:
+            if isinstance(turn, dict):
+                compact_turns.append(
+                    _compact_turn(
+                        turn,
+                        max_input_chars=max_input_chars,
+                        max_output_chars=max_output_chars,
+                        include_binary_data=include_binary_data,
+                    )
+                )
+    return {
+        "session_id": payload.get("session_id"),
+        "limit": payload.get("limit"),
+        "has_more": payload.get("has_more"),
+        "next_before_sequence_no": payload.get("next_before_sequence_no"),
+        "turns": compact_turns,
+    }
+
+
+def _compact_turn(
+    turn: dict[str, Any],
+    *,
+    max_input_chars: int,
+    max_output_chars: int,
+    include_binary_data: bool,
+) -> dict[str, Any]:
+    input_parts, input_truncated = _trim_json_value(
+        _sanitize_input_parts(turn.get("input_parts"), include_binary_data=include_binary_data),
+        max_chars=max_input_chars,
+    )
+    output_text, output_truncated = _trim_text(_string_or_none(turn.get("output_text")), max_output_chars)
+    return {
+        "run_id": turn.get("run_id"),
+        "sequence_no": turn.get("sequence_no"),
+        "restore_from_run_id": turn.get("restore_from_run_id"),
+        "profile_name": turn.get("profile_name"),
+        "project_id": turn.get("project_id"),
+        "input_preview": turn.get("input_preview"),
+        "input_parts": input_parts,
+        "input_truncated": input_truncated,
+        "output_text": output_text,
+        "output_truncated": output_truncated,
+        "output_summary": turn.get("output_summary"),
+        "created_at": turn.get("created_at"),
+        "committed_at": turn.get("committed_at"),
+    }
+
+
+def _sanitize_input_parts(value: Any, *, include_binary_data: bool) -> Any:
+    if not isinstance(value, list):
+        return []
+    return [
+        _sanitize_input_part(part, include_binary_data=include_binary_data) for part in value if isinstance(part, dict)
+    ]
+
+
+def _sanitize_input_part(part: dict[str, Any], *, include_binary_data: bool) -> dict[str, Any]:
+    sanitized = dict(part)
+    if sanitized.get("type") == "binary":
+        data = sanitized.get("data")
+        if isinstance(data, str):
+            sanitized["data_length"] = len(data)
+            if include_binary_data:
+                sanitized["data"], sanitized["data_truncated"] = _trim_text(data, 2000)
+            else:
+                sanitized.pop("data", None)
+                sanitized["data_omitted"] = True
+    return sanitized
+
+
+def _trim_json_value(value: Any, *, max_chars: int) -> tuple[Any, bool]:
+    dumped = _dump_json(value)
+    if len(dumped) <= max_chars:
+        return value, False
+    return json.loads(json.dumps(_trim_text(dumped, max_chars)[0], ensure_ascii=False)), True
+
+
+def _trim_text(value: str | None, max_chars: int) -> tuple[str | None, bool]:
+    if value is None:
+        return None, False
+    if len(value) <= max_chars:
+        return value, False
+    return value[:max_chars], True
+
+
+def _string_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _dump_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _decode_error_detail(exc: urllib.error.HTTPError) -> str:
+    try:
+        raw_body = exc.read().decode("utf-8", errors="replace")
+    except Exception:
+        return exc.reason
+    if raw_body == "":
+        return exc.reason
+    try:
+        payload = json.loads(raw_body)
+    except json.JSONDecodeError:
+        return raw_body[:500]
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    if isinstance(detail, str):
+        return detail[:500]
+    return raw_body[:500]

@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from ya_claw.api.claw import router as claw_router
 from ya_claw.api.health import router as health_router
 from ya_claw.api.profiles import router as profiles_router
 from ya_claw.api.runs import router as runs_router
@@ -18,6 +19,7 @@ from ya_claw.config import ClawSettings, get_settings
 from ya_claw.db.engine import create_engine, create_session_factory
 from ya_claw.execution import ClawRuntimeBuilder, ExecutionSupervisor, ProfileResolver, RuntimeInstanceManager
 from ya_claw.mcp import ClawMCPConfigResolver
+from ya_claw.notifications import NotificationHub, create_notification_hub
 from ya_claw.runtime_state import InMemoryRuntimeState, create_runtime_state
 from ya_claw.workspace import (
     DefaultEnvironmentFactory,
@@ -47,6 +49,7 @@ class ClawApplication:
         app.state.db_engine = None
         app.state.db_session_factory = None
         app.state.runtime_state = None
+        app.state.notification_hub = None
         app.state.workspace_provider = None
         app.state.environment_factory = None
         app.state.profile_resolver = None
@@ -64,6 +67,7 @@ class ClawApplication:
             allow_headers=["*"],
         )
         app.include_router(health_router)
+        app.include_router(claw_router, prefix="/api/v1")
         app.include_router(profiles_router, prefix="/api/v1")
         app.include_router(sessions_router, prefix="/api/v1")
         app.include_router(runs_router, prefix="/api/v1")
@@ -87,6 +91,7 @@ class ClawApplication:
         )
         app.state.db_session_factory = create_session_factory(app.state.db_engine)
         app.state.runtime_state = create_runtime_state()
+        app.state.notification_hub = create_notification_hub()
         app.state.workspace_provider = self.create_workspace_provider()
         app.state.environment_factory = DefaultEnvironmentFactory(
             docker_image=self.settings.workspace_provider_docker_image,
@@ -119,6 +124,7 @@ class ClawApplication:
                 environment_factory=app.state.environment_factory,
                 profile_resolver=app.state.profile_resolver,
                 runtime_builder=app.state.runtime_builder,
+                notification_hub=app.state.notification_hub,
             )
             app.state.execution_supervisor = supervisor
             app.state.runtime_instance_manager = RuntimeInstanceManager(
@@ -134,6 +140,7 @@ class ClawApplication:
         finally:
             db_engine = app.state.db_engine
             runtime_state = app.state.runtime_state
+            notification_hub = app.state.notification_hub
 
             app.state.db_session_factory = None
             app.state.workspace_provider = None
@@ -150,6 +157,9 @@ class ClawApplication:
 
             if isinstance(runtime_state, InMemoryRuntimeState):
                 await runtime_state.aclose()
+
+            if isinstance(notification_hub, NotificationHub):
+                await notification_hub.aclose()
 
             if isinstance(db_engine, AsyncEngine):
                 await db_engine.dispose()
