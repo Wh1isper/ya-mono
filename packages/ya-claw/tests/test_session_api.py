@@ -91,7 +91,9 @@ def _mark_run_completed(session_id: str, run_id: str, *, output_text: str | None
 def test_session_and_run_endpoints_support_rerun_controls_and_events() -> None:
     _create_schema()
 
-    with TestClient(create_app()) as client:
+    app = create_app()
+    with TestClient(app) as client:
+        app.state.execution_supervisor = None
         create_session_response = client.post(
             "/api/v1/sessions",
             headers=_auth_headers(),
