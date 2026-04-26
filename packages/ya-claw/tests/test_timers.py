@@ -169,6 +169,73 @@ async def test_schedule_controller_dispatch_due_scans_due_records_and_submits_ru
     assert record.next_fire_at.replace(tzinfo=UTC) > now
 
 
+async def test_heartbeat_dispatch_due_handles_sqlite_naive_datetimes(
+    db_session: AsyncSession,
+    settings: ClawSettings,
+) -> None:
+    settings.heartbeat_enabled = True
+    settings.heartbeat_interval_seconds = 1
+    controller = HeartbeatController()
+    runtime_state = InMemoryRuntimeState()
+    supervisor = RecordingSupervisor()
+    dispatcher = RunDispatcher(supervisor)  # type: ignore[arg-type]
+    naive_scheduled_at = datetime(2026, 4, 26, 5, 30)
+    db_session.add(
+        HeartbeatFireRecord(
+            id="heartbeat-fire-naive",
+            scheduled_at=naive_scheduled_at,
+            fired_at=naive_scheduled_at,
+            status="submitted",
+            dedupe_key="heartbeat-fire-naive",
+            fire_metadata={"manual": False},
+        )
+    )
+    await db_session.commit()
+
+    fire = await controller.dispatch_due(
+        db_session,
+        settings,
+        runtime_state,
+        dispatcher,
+    )
+
+    assert fire is not None
+    assert fire.status == "submitted"
+    assert fire.run_id in supervisor.submitted_run_ids
+
+
+async def test_schedule_dispatch_due_handles_sqlite_naive_datetimes(
+    db_session: AsyncSession,
+    settings: ClawSettings,
+) -> None:
+    controller = ScheduleController()
+    runtime_state = InMemoryRuntimeState()
+    supervisor = RecordingSupervisor()
+    dispatcher = RunDispatcher(supervisor)  # type: ignore[arg-type]
+    now = datetime(2026, 4, 26, 5, 30, tzinfo=UTC)
+
+    schedule = await controller.create(
+        db_session,
+        ScheduleCreateRequest(
+            name="Naive datetime schedule",
+            prompt="Report timer status.",
+            cron="* * * * *",
+            timezone="UTC",
+            profile_name="default",
+        ),
+    )
+    record = await db_session.get(ScheduleRecord, schedule.id)
+    assert isinstance(record, ScheduleRecord)
+    record.next_fire_at = datetime(2026, 4, 26, 5, 29)
+    await db_session.commit()
+
+    fired = await controller.dispatch_due(db_session, settings, runtime_state, dispatcher, now=now)
+
+    assert len(fired) == 1
+    assert fired[0].status == "submitted"
+    assert fired[0].run_id in supervisor.submitted_run_ids
+
+
 async def test_heartbeat_controller_defaults_and_manual_trigger_create_isolated_run(
     db_session: AsyncSession,
     settings: ClawSettings,
