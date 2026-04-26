@@ -10,6 +10,7 @@ from typing import Any, cast
 from pydantic import BaseModel
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from y_agent_environment import Environment
 from ya_agent_sdk.agents.main import AgentInterrupted, AgentRuntime, stream_agent
@@ -47,6 +48,7 @@ logger = logging.getLogger(__name__)
 class ExecutionBuffers:
     latest_state_payload: dict[str, Any] | None = None
     latest_message_payload: dict[str, Any] | None = None
+    terminal_event: dict[str, Any] | None = None
     output_text: str | None = None
     output_summary: str | None = None
 
@@ -76,7 +78,10 @@ class ExecutionSupervisor:
 
     @property
     def execution_enabled(self) -> bool:
-        return isinstance(self._settings.execution_model, str) and self._settings.execution_model.strip() != ""
+        if isinstance(self._settings.execution_model, str) and self._settings.execution_model.strip() != "":
+            return True
+        seed_file = self._settings.resolved_profile_seed_file
+        return self._settings.auto_seed_profiles and seed_file is not None and seed_file.exists()
 
     def submit_run(self, run_id: str) -> bool:
         if self._runtime_state.get_background_task(run_id) is not None:
@@ -114,8 +119,12 @@ class ExecutionSupervisor:
             return cancelled_ids
 
     async def startup_recover(self) -> dict[str, list[str]]:
-        cancelled_running = await self.cancel_orphaned_running_runs()
-        submitted_queued = await self.recover_queued_runs()
+        try:
+            cancelled_running = await self.cancel_orphaned_running_runs()
+            submitted_queued = await self.recover_queued_runs()
+        except SQLAlchemyError:
+            logger.warning("Run tables are unavailable; skipping startup recovery.")
+            return {"cancelled_running": [], "submitted_queued": []}
         return {
             "cancelled_running": cancelled_running,
             "submitted_queued": submitted_queued,
@@ -254,16 +263,27 @@ class RunCoordinator:
                     "message_count": effective_message_payload["message_count"],
                     "version": 3,
                 }
+                complete_run(session_record, run_record)
+                run_record.output_text = buffers.output_text
+                run_record.output_summary = buffers.output_summary
+                agui_adapter = AguiEventAdapter(session_id=session_record.id, run_id=run_id)
+                buffers.terminal_event = agui_adapter.build_run_finished_event(
+                    result={
+                        "termination_reason": run_record.termination_reason,
+                        "committed_at": run_record.committed_at.isoformat() if run_record.committed_at else None,
+                        "output_summary": run_record.output_summary,
+                    }
+                )
                 commit_run_artifacts(
                     self._run_store,
                     run_id=run_record.id,
                     session_id=session_record.id,
                     state=effective_state_payload,
-                    message=self._extract_replay_events(effective_message_payload),
+                    message=self._extract_replay_events(
+                        effective_message_payload,
+                        terminal_event=buffers.terminal_event,
+                    ),
                 )
-                complete_run(session_record, run_record)
-                run_record.output_text = buffers.output_text
-                run_record.output_summary = buffers.output_summary
                 await db_session.commit()
                 await db_session.refresh(run_record)
                 await _publish_run_status_notification(
@@ -272,16 +292,9 @@ class RunCoordinator:
                     run_record,
                 )
 
-                agui_adapter = AguiEventAdapter(session_id=session_record.id, run_id=run_id)
                 await self._runtime_state.append_run_event(
                     run_id,
-                    agui_adapter.build_run_finished_event(
-                        result={
-                            "termination_reason": run_record.termination_reason,
-                            "committed_at": run_record.committed_at.isoformat() if run_record.committed_at else None,
-                            "output_summary": run_record.output_summary,
-                        }
-                    ),
+                    buffers.terminal_event,
                     terminal=True,
                 )
                 terminal_event_emitted = True
@@ -394,9 +407,7 @@ class RunCoordinator:
             await self._persist_workspace_sandbox(session_id, workspace_binding, environment)
             async with stream_agent(
                 runtime,
-                user_prompt_factory=lambda runtime_obj: self._build_initial_prompt(
-                    runtime_obj, input_parts, workspace_binding
-                ),
+                user_prompt_factory=lambda runtime_obj: self._build_initial_prompt(runtime_obj, input_parts),
                 message_history=restored_messages,
             ) as streamer:
                 steering_task = asyncio.create_task(
@@ -404,7 +415,6 @@ class RunCoordinator:
                         run_id=run_id,
                         runtime=runtime,
                         streamer=streamer,
-                        workspace_binding=workspace_binding,
                     ),
                     name=f"ya-claw-run-{run_id}-signals",
                 )
@@ -464,10 +474,9 @@ class RunCoordinator:
         self,
         runtime_obj: AgentRuntime[ClawAgentContext, Any, Environment],
         input_parts: list[InputPart],
-        workspace_binding: WorkspaceBinding,
     ) -> str | list[Any]:
         mapping = await map_input_parts(input_parts, file_operator=runtime_obj.ctx.file_operator)
-        return self._build_user_prompt(mapping, workspace_binding=workspace_binding)
+        return self._build_user_prompt(mapping)
 
     async def _forward_runtime_signals(
         self,
@@ -475,7 +484,6 @@ class RunCoordinator:
         run_id: str,
         runtime: AgentRuntime[ClawAgentContext, Any, Environment],
         streamer: Any,
-        workspace_binding: WorkspaceBinding,
     ) -> None:
         while True:
             termination_reason = self._runtime_state.get_termination_requested(run_id)
@@ -487,7 +495,7 @@ class RunCoordinator:
             for raw_batch in steering_batches:
                 parts = parse_input_parts(list(raw_batch))
                 mapping = await map_input_parts(parts, file_operator=runtime.ctx.file_operator)
-                content = self._build_user_prompt(mapping, workspace_binding=workspace_binding)
+                content = self._build_user_prompt(mapping)
                 runtime.ctx.send_message(BusMessage(content=content, source="user", target="main"))
 
             await asyncio.sleep(0.1)
@@ -548,26 +556,10 @@ class RunCoordinator:
             return "async"
         return handle.dispatch_mode
 
-    def _build_user_prompt(
-        self,
-        mapping: InputMappingResult,
-        *,
-        workspace_binding: WorkspaceBinding,
-    ) -> str | list[Any]:
-        prompt_parts: list[Any] = []
-        instruction_lines = [
-            f"Workspace cwd: {workspace_binding.cwd}",
-            f"Writable paths: {', '.join(str(path) for path in workspace_binding.writable_paths)}",
-        ]
-        if mapping.mode_parts:
-            instruction_lines.append("Modes: " + ", ".join(part.mode for part in mapping.mode_parts))
-        if mapping.command_parts:
-            instruction_lines.append("Commands: " + ", ".join(part.name for part in mapping.command_parts))
-        prompt_parts.append("\n".join(instruction_lines))
-        prompt_parts.extend(mapping.user_prompt)
-        if len(prompt_parts) == 1 and isinstance(prompt_parts[0], str):
-            return prompt_parts[0]
-        return prompt_parts
+    def _build_user_prompt(self, mapping: InputMappingResult) -> str | list[Any]:
+        if len(mapping.user_prompt) == 1 and isinstance(mapping.user_prompt[0], str):
+            return mapping.user_prompt[0]
+        return list(mapping.user_prompt)
 
     def _extract_resumable_state(self, restore_point: ResolvedRestorePoint | None) -> ResumableState | None:
         if restore_point is None or restore_point.state is None:
@@ -650,11 +642,17 @@ class RunCoordinator:
             "version": 4,
         }
 
-    def _extract_replay_events(self, message_payload: dict[str, Any] | None) -> list[dict[str, Any]]:
+    def _extract_replay_events(
+        self,
+        message_payload: dict[str, Any] | None,
+        *,
+        terminal_event: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         raw_events = message_payload.get("events") if isinstance(message_payload, dict) else None
-        if not isinstance(raw_events, list):
-            return []
-        return [event for event in raw_events if isinstance(event, dict)]
+        events = [event for event in raw_events if isinstance(event, dict)] if isinstance(raw_events, list) else []
+        if terminal_event is not None:
+            events.append(terminal_event)
+        return events
 
     def _build_message_payload(self, run: Any, *, replay_events: list[dict[str, Any]]) -> dict[str, Any]:
         messages = ModelMessagesTypeAdapter.dump_python(run.all_messages(), mode="json")

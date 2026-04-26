@@ -65,7 +65,7 @@ The development server listens on `http://127.0.0.1:9042` by default.
 YA Claw loads `YA_CLAW_*` settings from `packages/ya-claw/.env` and the process environment.
 YA Claw startup also exports provider variables such as `GATEWAY_API_KEY` and `GATEWAY_BASE_URL` from `packages/ya-claw/.env` into the process environment.
 Use [`packages/ya-agent-sdk/.env.example`](../ya-agent-sdk/.env.example) for shared SDK and tool environment variables when you want the same keys outside YA Claw startup.
-Set `YA_CLAW_PROFILE_SEED_FILE` plus `YA_CLAW_AUTO_SEED_PROFILES=true` when you want packaged profiles to seed into the database on startup.
+Set `YA_CLAW_PROFILE_SEED_FILE` plus `YA_CLAW_AUTO_SEED_PROFILES=true` when you want packaged profiles to seed into the database on startup. Seeded profiles use create/update semantics: every startup refreshes matching database profiles from the YAML file, including subagent configuration, while profiles absent from the YAML file remain in the database.
 Set `YA_CLAW_EXECUTION_MODEL` when you want runs to auto-dispatch through the built-in coordinator.
 Without that setting, created runs stay queued until another execution path picks them up.
 

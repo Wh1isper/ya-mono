@@ -64,7 +64,7 @@ describe('AGUI event reducer', () => {
     })
   })
 
-  it('keeps runtime custom events as visible runtime cards', () => {
+  it('keeps runtime custom events as visible runtime cards by default', () => {
     const timeline = buildTimeline([
       custom('ya_claw.run_queued', { run_id: 'run-a', status: 'queued' }),
     ])
@@ -72,6 +72,25 @@ describe('AGUI event reducer', () => {
     expect(timeline.blocks[0]).toMatchObject({
       kind: 'runtime_event',
       name: 'ya_claw.run_queued',
+    })
+  })
+
+  it('can hide runtime events for chat rendering', () => {
+    const timeline = buildTimeline(
+      [
+        custom('ya_claw.run_queued', { run_id: 'run-a', status: 'queued' }),
+        { type: 'TEXT_MESSAGE_CHUNK', messageId: 'm1', delta: 'Done' },
+        { type: 'RUN_FINISHED', result: 'Done' },
+      ],
+      [],
+      'run-a',
+      { includeRuntimeEvents: false },
+    )
+
+    expect(timeline.blocks).toHaveLength(1)
+    expect(timeline.blocks[0]).toMatchObject({
+      kind: 'assistant_message',
+      content: 'Done',
     })
   })
 })

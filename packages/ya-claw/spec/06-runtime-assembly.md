@@ -37,11 +37,10 @@ Suggested fields:
 
 ### WorkspaceBinding
 
-`WorkspaceBinding` is a declarative value object.
+`WorkspaceBinding` is a declarative single-workspace value object.
 
 Suggested fields:
 
-- `project_id`
 - `host_path`
 - `virtual_path`
 - `cwd`
@@ -57,7 +56,6 @@ Suggested fields:
 
 Suggested fields:
 
-- `project_id`
 - `virtual_path`
 - `cwd`
 - `readable_paths`
@@ -74,7 +72,6 @@ Suggested fields:
 - `session_id`
 - `claw_run_id`
 - `profile_name`
-- `project_id`
 - `restore_from_run_id`
 - `dispatch_mode`
 - `workspace_binding`
@@ -93,7 +90,7 @@ Suggested inputs:
 - `Environment`
 - optional `ResumableState`
 - run and session metadata
-- source metadata such as API, schedule, or bridge ingress
+- source metadata such as API, schedule, heartbeat, or bridge ingress
 
 Suggested output:
 
@@ -112,7 +109,7 @@ sequenceDiagram
 
     COORD->>PROF: resolve(profile_name)
     PROF-->>COORD: ResolvedProfile
-    COORD->>WP: resolve(project_id, metadata)
+    COORD->>WP: resolve(metadata)
     WP-->>COORD: WorkspaceBinding
     COORD->>EF: build(binding, profile)
     EF-->>COORD: Environment
@@ -124,7 +121,7 @@ sequenceDiagram
 ## Environment Construction Rule
 
 Environment construction belongs to `EnvironmentFactory`.
-`WorkspaceProvider` should not own concrete environment instantiation.
+`EnvironmentFactory` owns concrete environment instantiation.
 
 This keeps:
 
@@ -135,7 +132,7 @@ This keeps:
 ## Context Construction Rule
 
 `ClawAgentContext` should be the stable home for YA Claw metadata.
-The coordinator should not carry an ever-growing argument list for runtime metadata.
+The context object keeps runtime metadata centralized and typed.
 
 Recommended context construction inputs:
 
@@ -159,6 +156,44 @@ Recommended context construction inputs:
 - apply profile MCP filters and approval policy
 - attach subagent configs
 - construct system prompt or template variables from resolved profile and binding
+- inject workspace guidance from `AGENTS.md` when present
+- inject heartbeat guidance from `HEARTBEAT.md` only when `source_kind="heartbeat"`
+
+## Guidance Loading
+
+YA Claw has two workspace guidance files:
+
+| File                      | Loaded for                                              | Purpose                              |
+| ------------------------- | ------------------------------------------------------- | ------------------------------------ |
+| `/workspace/AGENTS.md`    | normal runs, schedule runs, heartbeat runs, bridge runs | general workspace guidance           |
+| `/workspace/HEARTBEAT.md` | heartbeat runs only                                     | runtime-owned heartbeat instructions |
+
+Heartbeat guidance should be injected as a tagged block:
+
+```xml
+<heartbeat-guidance path="/workspace/HEARTBEAT.md">
+...
+</heartbeat-guidance>
+```
+
+Schedule `isolate_session` runs load schedule input and regular workspace guidance only.
+
+## Schedule and Heartbeat Assembly
+
+Schedule runs carry:
+
+- `trigger_type = "schedule"`
+- `source_kind = "schedule"`
+- `source_metadata.schedule_id`
+- `source_metadata.schedule_fire_id`
+- `source_metadata.execution_mode`
+
+Heartbeat runs carry:
+
+- `trigger_type = "heartbeat"`
+- `source_kind = "heartbeat"`
+- `source_metadata.heartbeat_fire_id`
+- heartbeat profile and prompt from runtime settings
 
 ## Example Construction Shape
 
@@ -170,7 +205,8 @@ runtime = runtime_builder.build(
     restore_state=restore_state,
     session_id=session.id,
     run_id=run.id,
-    project_id=run.project_id,
+    source_kind=run.trigger_type,
+    source_metadata=run.metadata.get("source", {}),
 )
 ```
 
@@ -183,6 +219,7 @@ Runtime assembly should be testable in layers:
 3. `EnvironmentFactory` unit tests
 4. `ClawRuntimeBuilder` unit tests with stub profile and binding
 5. `RunCoordinator` integration tests from queued run to terminal state
+6. schedule and heartbeat assembly tests for source metadata and guidance loading
 
 ## Design Principle
 

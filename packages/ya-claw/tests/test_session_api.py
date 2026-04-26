@@ -27,12 +27,15 @@ def clear_claw_settings(monkeypatch, tmp_path: Path) -> None:
         "YA_CLAW_EXECUTION_MODEL",
         "YA_CLAW_EXECUTION_MODEL_SETTINGS_PRESET",
         "YA_CLAW_EXECUTION_MODEL_CONFIG_PRESET",
+        "YA_CLAW_PROFILE_SEED_FILE",
+        "YA_CLAW_AUTO_SEED_PROFILES",
     ):
         monkeypatch.delenv(env_name, raising=False)
 
     monkeypatch.setenv("YA_CLAW_API_TOKEN", "test-token")
     monkeypatch.setenv("YA_CLAW_DATA_DIR", str(tmp_path / "runtime-data"))
     monkeypatch.setenv("YA_CLAW_WORKSPACE_DIR", str(tmp_path / "workspace"))
+    monkeypatch.setenv("YA_CLAW_AUTO_SEED_PROFILES", "false")
 
     get_settings.cache_clear()
     yield

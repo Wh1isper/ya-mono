@@ -60,6 +60,13 @@ profiles:
         model: gateway@openai-responses:gpt-5.4-mini
         model_settings_preset: openai_responses_high
         model_config_preset: gpt5_270k
+      - name: executor
+        description: Execute tasks
+        system_prompt: |
+          You execute tasks.
+        model: inherit
+        model_settings_preset: inherit
+        model_config_preset: inherit
 """.strip(),
         encoding="utf-8",
     )
@@ -104,11 +111,14 @@ profiles:
     }
     assert resolved_profile.unified_subagents is True
     assert resolved_profile.workspace_backend_hint == "docker"
-    assert [config.name for config in resolved_profile.subagent_configs] == ["explorer", "searcher"]
+    assert [config.name for config in resolved_profile.subagent_configs] == ["explorer", "searcher", "executor"]
     assert resolved_profile.subagent_configs[0].tools is None
     assert resolved_profile.subagent_configs[1].model == "gateway@openai-responses:gpt-5.4-mini"
     assert isinstance(resolved_profile.subagent_configs[1].model_settings, dict)
     assert isinstance(resolved_profile.subagent_configs[1].model_cfg, dict)
+    assert resolved_profile.subagent_configs[2].model == "inherit"
+    assert resolved_profile.subagent_configs[2].model_settings is None
+    assert resolved_profile.subagent_configs[2].model_cfg is None
 
     async with session_factory() as db_session:
         record = await db_session.get(ProfileRecord, "default")
@@ -120,7 +130,78 @@ profiles:
         assert record.disabled_mcps == ["github"]
         assert record.mcp_servers["context7"]["transport"] == "streamable_http"
         assert record.unified_subagents is True
-        assert [item["name"] for item in record.subagents] == ["explorer", "searcher"]
+        assert [item["name"] for item in record.subagents] == ["explorer", "searcher", "executor"]
+
+
+async def test_profile_resolver_updates_existing_seeded_profile_and_subagents(
+    tmp_path: Path,
+    db_engine: AsyncEngine,
+) -> None:
+    seed_file = tmp_path / "profiles.yaml"
+    seed_file.write_text(
+        """
+profiles:
+  - name: default
+    model: gateway@openai-responses:gpt-5.4
+    system_prompt: old prompt
+    builtin_toolsets: [core]
+    subagents:
+      - name: explorer
+        description: Explore the codebase
+        system_prompt: old explorer prompt
+""".strip(),
+        encoding="utf-8",
+    )
+    settings = ClawSettings(
+        api_token="test-token",  # noqa: S106
+        data_dir=tmp_path / "runtime-data",
+        workspace_dir=tmp_path / "workspace",
+        profile_seed_file=seed_file,
+    )
+    session_factory = create_session_factory(db_engine)
+    resolver = ProfileResolver(settings=settings, session_factory=session_factory)
+
+    assert await resolver.seed_profiles() == ["default"]
+
+    seed_file.write_text(
+        """
+profiles:
+  - name: default
+    model: gateway@openai-responses:gpt-5.5
+    system_prompt: updated prompt
+    builtin_toolsets: [core, web]
+    subagents:
+      - name: debugger
+        description: Debug runtime issues
+        system_prompt: updated debugger prompt
+        model: inherit
+        model_settings_preset: inherit
+        model_config_preset: inherit
+""".strip(),
+        encoding="utf-8",
+    )
+
+    assert await resolver.seed_profiles() == ["default"]
+    resolved_profile = await resolver.resolve("default")
+
+    assert resolved_profile.model == "gateway@openai-responses:gpt-5.5"
+    assert resolved_profile.system_prompt == "updated prompt"
+    assert resolved_profile.builtin_toolsets == ["core", "web"]
+    assert [config.name for config in resolved_profile.subagent_configs] == ["debugger"]
+    assert resolved_profile.subagent_configs[0].system_prompt == "updated debugger prompt"
+    assert resolved_profile.subagent_configs[0].model == "inherit"
+    assert resolved_profile.subagent_configs[0].model_settings is None
+    assert resolved_profile.subagent_configs[0].model_cfg is None
+
+    async with session_factory() as db_session:
+        record = await db_session.get(ProfileRecord, "default")
+        assert isinstance(record, ProfileRecord)
+        assert record.model == "gateway@openai-responses:gpt-5.5"
+        assert record.system_prompt == "updated prompt"
+        assert [item["name"] for item in record.subagents] == ["debugger"]
+        assert record.subagents[0]["system_prompt"] == "updated debugger prompt"
+        assert record.source_type == "seed"
+        assert record.source_checksum is not None
 
 
 async def test_profile_resolver_rejects_stdio_mcp_from_yaml(

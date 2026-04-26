@@ -293,7 +293,7 @@ profiles:
       - Do not request user input - return to main agent instead
       - Keep changes focused and minimal
       - Test changes when possible
-    model: gateway@anthropic:claude-opus-4-6
+    model: inherit
     model_settings_preset: inherit
     model_config_preset: inherit
   - name: explorer

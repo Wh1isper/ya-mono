@@ -44,7 +44,9 @@ It should store:
 - queued, running, terminal run state, and run claim ownership
 - runtime instance heartbeat records
 - profile records and seed provenance
-- `project_id`, `profile_name`, and request metadata needed for routing
+- schedules and schedule fire history
+- heartbeat fire history
+- `profile_name` and request metadata needed for routing
 
 ### Session Metadata Principle
 
@@ -71,7 +73,9 @@ Suggested layout:
 │           ├── state.json
 │           └── message.json
 └── workspace/
-    └── ... project-managed files ...
+    ├── AGENTS.md
+    ├── HEARTBEAT.md
+    └── ... workspace files ...
 ```
 
 ### Run Store Principle
@@ -187,8 +191,16 @@ Preferred initial checkpoints are:
 
 This gives the rerun path a durable best-effort message snapshot without advancing the session success pointer.
 
+## Schedule and Heartbeat Storage
+
+Schedules are durable database resources. `schedules` stores the timer definition, ownership scope, trigger definition, execution mode, and latest dispatch pointers. `schedule_fires` stores each due or manual fire, dedupe key, dispatch result, created session, run, or steered active run.
+
+Heartbeat configuration is runtime-owned settings. `heartbeat_fires` stores heartbeat fire history for console inspection and operational audit.
+
+Schedule and heartbeat run outputs still commit through the normal run store under `run-store/{run_id}/`.
+
 ## Storage Principle
 
-- database for sessions, runs, profiles, and execution indexes
+- database for sessions, runs, profiles, schedules, heartbeat fire history, and execution indexes
 - run store for committed or checkpointed continuity blobs
 - in-memory registry and event buffers for active execution and replay

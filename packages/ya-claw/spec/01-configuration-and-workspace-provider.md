@@ -34,21 +34,29 @@ flowchart TB
 | `YA_CLAW_DATABASE_URL`                    | SQLite or PostgreSQL connection string                             |
 | `YA_CLAW_AUTO_MIGRATE`                    | startup schema migration switch                                    |
 | `YA_CLAW_WEB_DIST_DIR`                    | bundled web shell directory                                        |
-| `YA_CLAW_DATA_DIR`                        | runtime data root for session store                                |
-| `YA_CLAW_WORKSPACE_ROOT`                  | top-level runtime workspace root for project-managed data          |
+| `YA_CLAW_DATA_DIR`                        | runtime data root for run store and runtime records                |
+| `YA_CLAW_WORKSPACE_DIR`                   | single workspace directory exposed to agent environments           |
 | `YA_CLAW_DATABASE_ECHO`                   | SQL logging                                                        |
 | `YA_CLAW_DATABASE_POOL_SIZE`              | pool size                                                          |
 | `YA_CLAW_DATABASE_MAX_OVERFLOW`           | pool overflow                                                      |
 | `YA_CLAW_DATABASE_POOL_RECYCLE_SECONDS`   | connection recycle interval                                        |
 | `YA_CLAW_DEFAULT_PROFILE`                 | bootstrap profile name used when a request omits `profile_name`    |
 | `YA_CLAW_PROFILE_SEED_FILE`               | optional YAML seed file for profiles                               |
-| `YA_CLAW_AUTO_SEED_PROFILES`              | load or refresh seeded profiles on startup                         |
+| `YA_CLAW_AUTO_SEED_PROFILES`              | create or refresh matching seeded profiles from YAML on startup    |
 | `YA_CLAW_WORKSPACE_PROVIDER_BACKEND`      | bootstrap workspace backend hint for local development or fallback |
 | `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE` | Docker image for Docker-backed environment construction            |
 | `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID`   | UID used inside auto-started Docker workspace containers           |
 | `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID`   | GID used inside auto-started Docker workspace containers           |
 | `YA_CLAW_MCP_CONFIG_FILE`                 | global MCP JSON file injected into every runtime                   |
-| `YA_CLAW_PROJECT_MCP_CONFIG_PATH`         | per-workspace MCP JSON path with project-level priority            |
+| `YA_CLAW_WORKSPACE_MCP_CONFIG_PATH`       | workspace MCP JSON path with workspace-level priority              |
+| `YA_CLAW_SCHEDULE_DISPATCH_ENABLED`       | enable schedule dispatcher                                         |
+| `YA_CLAW_SCHEDULE_TICK_SECONDS`           | schedule dispatcher scan interval                                  |
+| `YA_CLAW_SCHEDULE_MAX_DUE_PER_TICK`       | maximum due schedules handled per scan                             |
+| `YA_CLAW_HEARTBEAT_ENABLED`               | enable heartbeat dispatcher                                        |
+| `YA_CLAW_HEARTBEAT_INTERVAL_SECONDS`      | heartbeat interval                                                 |
+| `YA_CLAW_HEARTBEAT_PROFILE`               | heartbeat profile name                                             |
+| `YA_CLAW_HEARTBEAT_PROMPT`                | heartbeat input prompt                                             |
+| `YA_CLAW_HEARTBEAT_ON_ACTIVE`             | heartbeat active-run policy                                        |
 
 LLM provider keys and tool API keys stay in environment variables and follow `ya-agent-sdk` conventions.
 
@@ -91,13 +99,24 @@ Recommended resolution order:
 3. merge optional override JSON blocks
 4. apply request-level transient overrides when explicitly allowed
 
+### Built-in Toolsets
+
+Profiles select built-in toolsets by name.
+
+Important built-in YA Claw toolsets:
+
+- `session`: read-only current-session inspection tools
+- `schedule`: agent-owned schedule management tools
+
+The `schedule` toolset uses the same internal-client resource pattern as the `session` toolset. The runtime injects current `session_id`, `run_id`, current profile, and bearer token into the resource layer. Agent-facing schedule tools accept a plain text prompt, simple timing fields, and boolean session behavior flags.
+
 ### Runtime-Wide MCP Configuration
 
 YA Claw loads MCP server definitions from a dedicated JSON file layer.
 
 Resolution order:
 
-1. project file at `<workspace>/.ya-claw/mcp.json`
+1. workspace file at `<workspace>/.ya-claw/mcp.json`
 2. global file at `~/.ya-claw/mcp.json`
 
 The runtime builder injects the resolved MCP servers into every agent through one `ToolProxyToolset`.
@@ -115,29 +134,20 @@ Recommended behavior:
 - explicit prune mode removes seeded rows no longer present in YAML
 - manually created rows remain first-class records
 
-## Project References
+## Single Workspace
 
-`project_id` is application input.
-YA Claw treats it as an opaque selector.
+YA Claw uses one configured workspace directory.
 
-Typical examples:
+Workspace mapping:
 
-- a bridge maps one group chat to one `project_id`
-- the web shell restores the last used `project_id` from application state
-- another application sends a one-off `project_id` with a direct API request
+- host path: `YA_CLAW_WORKSPACE_DIR` or the default runtime workspace directory
+- virtual path: `/workspace`
+- default cwd: `/workspace`
+- skill path: `/workspace/.agents/skills/`
+- workspace guidance: `/workspace/AGENTS.md`
+- heartbeat guidance: `/workspace/HEARTBEAT.md`
 
-YA Claw also accepts `projects` for multi-project sessions and runs. Each entry contains:
-
-- `project_id` — opaque selector mapped under the configured workspace root
-- `description` — operator or application supplied context for the agent
-
-The first normalized project is the primary project and default cwd. Every project maps to:
-
-- host path: `{YA_CLAW_WORKSPACE_ROOT}/{project_id}`
-- virtual path: `/workspace/{project_id}`
-- skill path: `/workspace/{project_id}/.agents/skills/`
-
-YA Claw does not need project CRUD or a runtime-managed project catalog.
+Sessions, runs, schedules, heartbeat, and bridges all resolve to this same workspace binding. Per-session or per-bridge separation belongs in session metadata, bridge metadata, run metadata, and workspace files chosen by the agent.
 
 ## Official Docker Workspace Image
 
@@ -152,18 +162,18 @@ The image provides a ready-to-use agent workspace on Debian stable with:
 - `agent-browser` installed through npm and configured to use `/usr/bin/chromium`
 - an `agent-browser` discovery skill copied into mounted workspace `.agents/skills/` directories at container start
 
-The workspace provider still treats the image as an implementation detail carried by `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE`. Deployments can override the image while keeping the same binding and environment factory contracts.
+The workspace provider treats the image as an implementation detail carried by `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE`. Deployments can override the image while keeping the same binding and environment factory contracts.
 
 Auto-started Docker workspace containers receive `YA_CLAW_WORKSPACE_UID`, `YA_CLAW_WORKSPACE_GID`, `YA_CLAW_HOST_UID`, and `YA_CLAW_HOST_GID`. The default UID/GID comes from the YA Claw service process, and deployments can override them through `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID` and `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID`.
 
 ## WorkspaceProvider
 
-`WorkspaceProvider` is the runtime boundary that turns project references plus request metadata into one declarative `WorkspaceBinding`.
+`WorkspaceProvider` is the runtime boundary that returns one declarative `WorkspaceBinding` for a run.
 
 A provider should return:
 
-- one or more host workspace paths
-- one or more virtual workspace paths exposed to the agent
+- one host workspace path
+- one virtual workspace path exposed to the agent
 - one default cwd
 - readable and writable virtual paths
 - environment overrides
@@ -174,25 +184,25 @@ A provider should return:
 
 `WorkspaceBinding` is a declarative value object.
 It describes execution boundaries and path policy.
-It does not own the concrete SDK `Environment` instance.
+Concrete SDK `Environment` construction belongs to `EnvironmentFactory`.
 
-`WorkspaceBinding.project_mounts` carries the normalized project map. `readable_paths` and `writable_paths` are derived from the mount virtual paths, and the primary mount defines `cwd`.
+The configured workspace path defines `cwd`, readable paths, and writable paths.
 
 ### LocalWorkspaceProvider
 
 Suggested shape:
 
-- host paths under configured workspace root
-- virtual paths under `/workspace/{project_id}`
-- path policy restricted to mounted project roots
+- host path from the configured workspace directory
+- virtual path `/workspace`
+- path policy restricted to the workspace root
 - backend hint `local`
 
 ### DockerWorkspaceProvider
 
 Suggested shape:
 
-- host workspace paths mounted into the container
-- virtual paths shared by shell and file operations
+- host workspace path mounted into the container
+- virtual path `/workspace` shared by shell and file operations
 - backend hint `docker`
 - optional image hint from profile or service bootstrap config
 
@@ -223,7 +233,6 @@ Suggested fields:
 - `session_id`
 - `claw_run_id`
 - `profile_name`
-- `project_id`
 - `restore_from_run_id`
 - `dispatch_mode`
 - `workspace_binding`
@@ -234,7 +243,7 @@ Suggested fields:
 ### Context Principle
 
 `ClawAgentContext` carries YA Claw metadata in one stable place.
-The coordinator should not become a parameter shuttle for runtime metadata.
+The context object keeps runtime metadata centralized and typed.
 
 ## ClawRuntimeBuilder
 
@@ -262,7 +271,7 @@ sequenceDiagram
 
     COORD->>PROF: resolve(profile_name)
     PROF-->>COORD: ResolvedProfile
-    COORD->>PROV: resolve(project_id, metadata)
+    COORD->>PROV: resolve(metadata)
     PROV-->>COORD: WorkspaceBinding
     COORD->>ENVF: build(binding)
     ENVF-->>COORD: Environment

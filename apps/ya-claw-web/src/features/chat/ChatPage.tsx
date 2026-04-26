@@ -3,6 +3,7 @@ import {
   Activity,
   Bot,
   CheckCircle2,
+  ChevronRight,
   Clock3,
   FilePenLine,
   Files,
@@ -37,7 +38,7 @@ import { queryKeys } from '../../api/queryKeys'
 import { EmptyState } from '../../components/EmptyState'
 import { JsonView } from '../../components/JsonView'
 import { StatusBadge } from '../../components/StatusBadge'
-import { cn, formatShortId } from '../../lib/utils'
+import { cn, formatShortId, safeJsonStringify } from '../../lib/utils'
 import { useConnectionStore } from '../../stores/connectionStore'
 import { useLayoutStore } from '../../stores/layoutStore'
 import type {
@@ -58,41 +59,56 @@ export function ChatPage() {
   const selectSession = useLayoutStore((state) => state.selectSession)
   const selectRun = useLayoutStore((state) => state.selectRun)
   const [sessionSearch, setSessionSearch] = useState('')
+  const [isComposingNew, setIsComposingNew] = useState(false)
   const autoSelectedSessionRef = useRef(false)
   const sessions = useSessionsQuery()
   const selectedSession = useSessionQuery(selectedSessionId)
+  const activeSessionData = selectedSessionId ? selectedSession.data : undefined
   const resolvedRunId =
     selectedRunId ??
-    selectedSession.data?.session.active_run_id ??
-    selectedSession.data?.session.head_run_id ??
+    activeSessionData?.session.active_run_id ??
+    activeSessionData?.session.head_run_id ??
     null
   const selectedRun = useRunQuery(resolvedRunId)
+  const activeRunData = resolvedRunId ? selectedRun.data : undefined
   const live = useRunEventStream(
     resolvedRunId,
-    selectedRun.data?.run.status ?? null,
+    activeRunData?.run.status ?? null,
   )
+  const liveEvents = useMemo(
+    () => (resolvedRunId ? live.events : []),
+    [live.events, resolvedRunId],
+  )
+  const streamStatus: StreamStatus = resolvedRunId ? live.status : 'idle'
+  const contentLoading =
+    Boolean(selectedSessionId && selectedSession.isLoading) ||
+    Boolean(resolvedRunId && selectedRun.isLoading)
 
   useEffect(() => {
     const firstSessionId = sessions.data?.[0]?.id
     if (
       !selectedSessionId &&
+      !isComposingNew &&
       firstSessionId &&
       !autoSelectedSessionRef.current
     ) {
       autoSelectedSessionRef.current = true
       selectSession(firstSessionId)
     }
-  }, [selectSession, selectedSessionId, sessions.data])
+  }, [isComposingNew, selectSession, selectedSessionId, sessions.data])
 
   useEffect(() => {
-    if (!selectedRunId) {
-      const nextRunId =
-        selectedSession.data?.session.active_run_id ??
-        selectedSession.data?.session.head_run_id ??
-        null
-      if (nextRunId) selectRun(nextRunId)
-    }
-  }, [selectRun, selectedRunId, selectedSession.data])
+    if (selectedSessionId) setIsComposingNew(false)
+  }, [selectedSessionId])
+
+  useEffect(() => {
+    if (!selectedSessionId || selectedRunId) return
+    const nextRunId =
+      activeSessionData?.session.active_run_id ??
+      activeSessionData?.session.head_run_id ??
+      null
+    if (nextRunId) selectRun(nextRunId)
+  }, [activeSessionData, selectRun, selectedRunId, selectedSessionId])
 
   const filteredSessions = useMemo(() => {
     const needle = sessionSearch.trim().toLowerCase()
@@ -113,30 +129,40 @@ export function ChatPage() {
 
   const timeline = useMemo(() => {
     const run =
-      selectedRun.data?.run ??
-      selectedSession.data?.session.runs.find(
+      activeRunData?.run ??
+      activeSessionData?.session.runs.find(
         (item) => item.id === resolvedRunId,
       ) ??
       null
     const replay =
-      selectedRun.data?.message ??
-      run?.message ??
-      selectedSession.data?.message ??
-      []
+      activeRunData?.message ?? run?.message ?? activeSessionData?.message ?? []
     const inputParts = run?.input_parts ?? []
     const base = buildTimeline(
       replay,
       inputParts,
       run?.id ?? resolvedRunId ?? 'run',
+      { includeRuntimeEvents: false },
     )
-    if (!live.events.length) return base
-    return live.events.reduce(
-      (state, event) => reduceAguiEvent(state, event),
+    if (!liveEvents.length) return base
+    return liveEvents.reduce(
+      (state, event) =>
+        reduceAguiEvent(state, event, { includeRuntimeEvents: false }),
       base,
     )
-  }, [live.events, resolvedRunId, selectedRun.data, selectedSession.data])
+  }, [activeRunData, activeSessionData, liveEvents, resolvedRunId])
 
-  const runs = selectedSession.data?.session.runs ?? []
+  const runs = activeSessionData?.session.runs ?? []
+  const runEvents = useMemo(() => {
+    const run =
+      activeRunData?.run ??
+      activeSessionData?.session.runs.find(
+        (item) => item.id === resolvedRunId,
+      ) ??
+      null
+    const replay =
+      activeRunData?.message ?? run?.message ?? activeSessionData?.message ?? []
+    return [...replay, ...liveEvents]
+  }, [activeRunData, activeSessionData, liveEvents, resolvedRunId])
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-slate-100">
@@ -149,11 +175,13 @@ export function ChatPage() {
             </h1>
           </div>
           <div className="flex items-center gap-2 text-xs text-slate-500">
-            <LivePill status={live.status} eventCount={live.events.length} />
+            <LivePill status={streamStatus} eventCount={liveEvents.length} />
             <button
               type="button"
               className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
               onClick={() => {
+                autoSelectedSessionRef.current = true
+                setIsComposingNew(true)
                 selectSession(null)
                 selectRun(null)
               }}
@@ -194,28 +222,38 @@ export function ChatPage() {
         </Panel>
         <ResizeHandle />
         <Panel defaultSize="58%" minSize="42%">
-          <div className="flex h-full min-h-0 flex-col">
-            <RunStrip
-              runs={runs}
-              selectedRunId={resolvedRunId}
-              onSelectRun={selectRun}
-            />
-            <RunControlBar run={selectedRun.data?.run ?? null} />
-            <TimelinePanel
-              timeline={timeline}
-              loading={selectedSession.isLoading || selectedRun.isLoading}
-            />
-            <Composer
-              selectedSessionId={selectedSessionId}
-              selectedProfile={
-                selectedSession.data?.session.profile_name ?? null
-              }
-              sessionLocked={
-                selectedSession.data?.session.status === 'queued' ||
-                selectedSession.data?.session.status === 'running'
-              }
-            />
-          </div>
+          <Group orientation="horizontal" className="h-full min-h-0">
+            <Panel defaultSize="68%" minSize="44%">
+              <div className="flex h-full min-h-0 flex-col">
+                <RunStrip
+                  runs={runs}
+                  selectedRunId={resolvedRunId}
+                  onSelectRun={selectRun}
+                />
+                <RunControlBar run={activeRunData?.run ?? null} />
+                <TimelinePanel timeline={timeline} loading={contentLoading} />
+                <Composer
+                  selectedSessionId={selectedSessionId}
+                  selectedProfile={
+                    activeSessionData?.session.profile_name ?? null
+                  }
+                  sessionLocked={
+                    activeSessionData?.session.status === 'queued' ||
+                    activeSessionData?.session.status === 'running'
+                  }
+                />
+              </div>
+            </Panel>
+            <ResizeHandle />
+            <Panel defaultSize="32%" minSize="260px">
+              <EventDevToolsPanel
+                events={runEvents}
+                streamStatus={streamStatus}
+                liveEventCount={liveEvents.length}
+                loading={contentLoading}
+              />
+            </Panel>
+          </Group>
         </Panel>
       </Group>
     </div>
@@ -378,6 +416,126 @@ function RunControlBar({ run }: { run: RunSummary | null }) {
           Cancel
         </button>
       </div>
+    </div>
+  )
+}
+
+function EventDevToolsPanel({
+  events,
+  streamStatus,
+  liveEventCount,
+  loading,
+}: {
+  events: AguiEvent[]
+  streamStatus: StreamStatus
+  liveEventCount: number
+  loading: boolean
+}) {
+  return (
+    <aside className="flex h-full min-h-0 flex-col border-l border-slate-200 bg-slate-950 text-slate-100">
+      <div className="flex h-12 shrink-0 items-center justify-between border-b border-slate-800 px-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Event stream
+          </p>
+          <p className="mono text-[11px] text-slate-500">
+            {events.length} events · {liveEventCount} live
+          </p>
+        </div>
+        <span
+          className={cn(
+            'rounded-full border px-2 py-1 text-[11px] font-medium capitalize',
+            streamStatus === 'streaming' &&
+              'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+            streamStatus === 'connecting' &&
+              'border-amber-500/40 bg-amber-500/10 text-amber-300',
+            streamStatus === 'error' &&
+              'border-rose-500/40 bg-rose-500/10 text-rose-300',
+            (streamStatus === 'idle' || streamStatus === 'closed') &&
+              'border-slate-700 bg-slate-900 text-slate-400',
+          )}
+        >
+          {streamStatus}
+        </span>
+      </div>
+      <div className="scrollbar-thin min-h-0 flex-1 overflow-auto p-2">
+        {loading ? (
+          <div className="space-y-2 p-2">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div
+                key={index}
+                className="h-9 animate-pulse rounded bg-slate-900"
+              />
+            ))}
+          </div>
+        ) : null}
+        {!loading && events.length === 0 ? (
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-3 text-xs text-slate-400">
+            Select a run to inspect raw AGUI events.
+          </div>
+        ) : null}
+        <div className="space-y-1">
+          {events.map((event, index) => (
+            <EventRow
+              key={`${index}:${eventKey(event)}`}
+              event={event}
+              index={index}
+            />
+          ))}
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+function EventRow({ event, index }: { event: AguiEvent; index: number }) {
+  const [expanded, setExpanded] = useState(false)
+  const type = eventTypeLabel(event)
+  const name = eventNameLabel(event)
+  const timestamp = eventTimestampLabel(event)
+  const tone = eventTone(event)
+
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/80">
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-slate-800/70"
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <ChevronRight
+          className={cn(
+            'h-3.5 w-3.5 shrink-0 text-slate-500 transition',
+            expanded && 'rotate-90',
+          )}
+        />
+        <span className="mono w-8 shrink-0 text-[11px] text-slate-500">
+          {index + 1}
+        </span>
+        <span
+          className={cn(
+            'h-2 w-2 shrink-0 rounded-full',
+            tone === 'success' && 'bg-emerald-400',
+            tone === 'error' && 'bg-rose-400',
+            tone === 'warning' && 'bg-amber-400',
+            tone === 'running' && 'bg-blue-400',
+            tone === 'info' && 'bg-slate-500',
+          )}
+        />
+        <span className="mono min-w-0 flex-1 truncate text-[11px] text-slate-200">
+          {type}
+          {name ? <span className="text-slate-500"> · {name}</span> : null}
+        </span>
+        {timestamp ? (
+          <span className="mono shrink-0 text-[10px] text-slate-500">
+            {timestamp}
+          </span>
+        ) : null}
+      </button>
+      {expanded ? (
+        <pre className="scrollbar-thin max-h-80 overflow-auto border-t border-slate-800 p-2 text-[11px] leading-5 text-slate-300">
+          {safeJsonStringify(event)}
+        </pre>
+      ) : null}
     </div>
   )
 }
@@ -692,16 +850,20 @@ function Composer({
   sessionLocked: boolean
 }) {
   const [text, setText] = useState('')
-  const [profileName, setProfileName] = useState(selectedProfile ?? '')
   const createSession = useCreateSessionMutation()
   const createRun = useCreateSessionRunMutation(selectedSessionId)
   const profiles = useProfilesQuery()
+  const profileOptions = profiles.data ?? []
+  const defaultProfileName = profileOptions[0]?.name ?? ''
+  const [profileName, setProfileName] = useState(
+    selectedProfile ?? defaultProfileName,
+  )
   const selectSession = useLayoutStore((store) => store.selectSession)
   const selectRun = useLayoutStore((store) => store.selectRun)
 
   useEffect(() => {
-    setProfileName(selectedProfile ?? '')
-  }, [selectedProfile])
+    setProfileName(selectedProfile ?? defaultProfileName)
+  }, [defaultProfileName, selectedProfile])
 
   const isPending = createSession.isPending || createRun.isPending
   const canSend = text.trim().length > 0 && !isPending
@@ -752,19 +914,24 @@ function Composer({
           />
           <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
             <div className="flex min-w-0 flex-1 items-center gap-2">
-              <select
-                className="max-w-52 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 outline-none ring-blue-600 focus:ring-2"
-                value={profileName}
-                onChange={(event) => setProfileName(event.target.value)}
-                disabled={Boolean(selectedSessionId) || sessionLocked}
-              >
-                <option value="">default profile</option>
-                {(profiles.data ?? []).map((profile) => (
-                  <option key={profile.name} value={profile.name}>
-                    {profile.name}
-                  </option>
-                ))}
-              </select>
+              {profileOptions.length > 0 ? (
+                <select
+                  className="max-w-52 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 outline-none ring-blue-600 focus:ring-2"
+                  value={profileName}
+                  onChange={(event) => setProfileName(event.target.value)}
+                  disabled={Boolean(selectedSessionId) || sessionLocked}
+                >
+                  {profileOptions.map((profile) => (
+                    <option key={profile.name} value={profile.name}>
+                      {profile.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                  No profiles
+                </span>
+              )}
             </div>
             <button
               type="button"
@@ -784,6 +951,66 @@ function Composer({
       </div>
     </div>
   )
+}
+
+function eventKey(event: AguiEvent) {
+  return [
+    typeof event.type === 'string' ? event.type : 'event',
+    typeof event.name === 'string' ? event.name : '',
+    typeof event.timestamp === 'number' || typeof event.timestamp === 'string'
+      ? String(event.timestamp)
+      : '',
+    typeof event.messageId === 'string' ? event.messageId : '',
+    typeof event.toolCallId === 'string' ? event.toolCallId : '',
+  ].join(':')
+}
+
+function eventTypeLabel(event: AguiEvent) {
+  return typeof event.type === 'string' && event.type.trim()
+    ? event.type
+    : 'UNKNOWN'
+}
+
+function eventNameLabel(event: AguiEvent) {
+  if (typeof event.name === 'string' && event.name.trim()) return event.name
+  const value = event.value
+  if (value && typeof value === 'object') {
+    const payload = value as Record<string, unknown>
+    const nestedName = payload.name
+    if (typeof nestedName === 'string' && nestedName.trim()) return nestedName
+  }
+  if (typeof event.toolCallName === 'string' && event.toolCallName.trim()) {
+    return event.toolCallName
+  }
+  if (typeof event.tool_call_name === 'string' && event.tool_call_name.trim()) {
+    return event.tool_call_name
+  }
+  return ''
+}
+
+function eventTimestampLabel(event: AguiEvent) {
+  const timestamp = event.timestamp as unknown
+  if (typeof timestamp === 'number') {
+    return new Date(timestamp).toLocaleTimeString()
+  }
+  if (typeof timestamp === 'string' && timestamp.trim()) {
+    const parsed = Date.parse(timestamp)
+    if (Number.isFinite(parsed)) return new Date(parsed).toLocaleTimeString()
+    return timestamp
+  }
+  return ''
+}
+
+function eventTone(
+  event: AguiEvent,
+): 'info' | 'running' | 'success' | 'warning' | 'error' {
+  const label =
+    `${eventTypeLabel(event)} ${eventNameLabel(event)}`.toLowerCase()
+  if (label.includes('error') || label.includes('failed')) return 'error'
+  if (label.includes('interrupt') || label.includes('cancel')) return 'warning'
+  if (label.includes('finished') || label.includes('complete')) return 'success'
+  if (label.includes('start') || label.includes('running')) return 'running'
+  return 'info'
 }
 
 function LivePill({
@@ -823,7 +1050,7 @@ function LivePill({
 
 function ResizeHandle() {
   return (
-    <Separator className="group relative w-1 bg-slate-100 transition hover:bg-blue-100">
+    <Separator className="group relative w-1 shrink-0 bg-slate-100 transition hover:bg-blue-100">
       <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-200 group-hover:bg-blue-300" />
     </Separator>
   )

@@ -21,7 +21,7 @@ import jinja2
 from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, UsageLimits, UserError
 from pydantic_ai._agent_graph import CallToolsNode, HistoryProcessor, ModelRequestNode
 from pydantic_ai.capabilities import AbstractCapability
-from pydantic_ai.messages import ModelMessage, UserContent
+from pydantic_ai.messages import ModelMessage, ToolCallPart, UserContent
 from pydantic_ai.models import KnownModelName, Model
 from pydantic_ai.output import OutputSpec
 from pydantic_ai.run import AgentRun
@@ -83,6 +83,10 @@ class AgentInterrupted(Exception):
     """
 
     pass
+
+
+def _has_tool_call_parts(parts: Sequence[object]) -> bool:
+    return any(isinstance(part, ToolCallPart) for part in parts)
 
 
 def _suspend_current_task_cancellation() -> tuple[asyncio.Task[Any] | None, int]:
@@ -1104,17 +1108,20 @@ async def stream_agent(  # noqa: C901
         to reference the loop that just completed its model request phase.
         """
         current_loop = tracker.loop_index - 1
-        await emit_lifecycle_event(ToolCallsStartEvent(event_id=ctx.run_id, loop_index=current_loop))
+        has_tool_calls = _has_tool_call_parts(node.model_response.parts)
+        if has_tool_calls:
+            await emit_lifecycle_event(ToolCallsStartEvent(event_id=ctx.run_id, loop_index=current_loop))
 
         await process_node(node, run)
 
-        await emit_lifecycle_event(
-            ToolCallsCompleteEvent(
-                event_id=ctx.run_id,
-                loop_index=current_loop,
-                duration_seconds=time.perf_counter() - node_start_time,
+        if has_tool_calls:
+            await emit_lifecycle_event(
+                ToolCallsCompleteEvent(
+                    event_id=ctx.run_id,
+                    loop_index=current_loop,
+                    duration_seconds=time.perf_counter() - node_start_time,
+                )
             )
-        )
 
     async def process_all_nodes(run: AgentRun[AgentDepsT, OutputT]) -> None:
         """Process all nodes in the agent run with lifecycle events."""

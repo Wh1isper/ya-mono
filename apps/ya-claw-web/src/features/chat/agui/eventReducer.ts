@@ -19,10 +19,15 @@ export function createInitialTimelineState(): AguiTimelineState {
   return { blocks: [], rawEvents: [] }
 }
 
+export type TimelineReduceOptions = {
+  includeRuntimeEvents?: boolean
+}
+
 export function buildTimeline(
   events: AguiEvent[],
   inputParts: InputPart[] = [],
   runId = 'run',
+  options: TimelineReduceOptions = {},
 ): AguiTimelineState {
   let state = createInitialTimelineState()
   if (inputParts.length > 0) {
@@ -34,7 +39,7 @@ export function buildTimeline(
     })
   }
   for (const event of events) {
-    state = reduceAguiEvent(state, event)
+    state = reduceAguiEvent(state, event, options)
   }
   return state
 }
@@ -42,6 +47,7 @@ export function buildTimeline(
 export function reduceAguiEvent(
   state: AguiTimelineState,
   event: AguiEvent,
+  options: TimelineReduceOptions = {},
 ): AguiTimelineState {
   const nextState: AguiTimelineState = {
     blocks: [...state.blocks],
@@ -66,10 +72,16 @@ export function reduceAguiEvent(
     eventType === 'RUN_FINISHED' ||
     eventType === 'RUN_ERROR'
   ) {
-    return appendBlock(nextState, runtimeEventFromAgui(eventType, event))
+    return options.includeRuntimeEvents === false
+      ? nextState
+      : appendBlock(nextState, runtimeEventFromAgui(eventType, event))
   }
   if (eventType === 'CUSTOM') {
-    return appendBlock(nextState, blockFromCustomEvent(event))
+    const block = blockFromCustomEvent(event)
+    return options.includeRuntimeEvents === false &&
+      block.kind === 'runtime_event'
+      ? nextState
+      : appendBlock(nextState, block)
   }
   return nextState
 }
