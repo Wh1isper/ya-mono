@@ -70,7 +70,7 @@ Seed or pre-create the selected AgentProfile before enabling bridge traffic. See
 
 Bridge adapters ingest events and create runs. Agents perform replies and follow-up actions from the workspace using adapter-specific CLIs or tools. For Lark, the agent prompt includes the source message ID and a recommended `lark-cli im +messages-reply` command shape.
 
-Workspace environments receive `LARK_APP_ID` and `LARK_APP_SECRET` from explicit process environment values when set. YA Claw falls back to Lark bridge app settings for workspace credential injection.
+Workspace environments receive built-in `LARK_APP_ID` and `LARK_APP_SECRET` aliases from explicit process environment values when set. YA Claw falls back to Lark bridge app settings for workspace credential injection. Additional workspace environment values are forwarded by listing process env names in `YA_CLAW_WORKSPACE_ENV_VARS`.
 
 ## References
 

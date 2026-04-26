@@ -6,6 +6,7 @@ from pathlib import Path
 from ya_agent_sdk.environment import LocalFileOperator, SandboxEnvironment, VirtualMount
 from ya_claw.workspace import (
     DockerEnvironmentFactory,
+    DockerExtraMount,
     DockerWorkspaceProvider,
     LocalEnvironmentFactory,
     LocalWorkspaceProvider,
@@ -263,6 +264,56 @@ async def test_service_docker_plus_docker_shell_uses_host_visible_mount_for_cont
     await environment._create_container()
 
     assert captured_run_kwargs["volumes"] == {str(host_workspace_dir.resolve()): {"bind": "/workspace", "mode": "rw"}}
+
+
+async def test_docker_environment_factory_passes_extra_mounts_to_container(tmp_path: Path) -> None:
+    captured_run_kwargs: dict[str, object] = {}
+
+    class FakeContainer:
+        id = "container-123"
+
+    class FakeContainers:
+        def run(self, **kwargs: object) -> FakeContainer:
+            captured_run_kwargs.update(kwargs)
+            return FakeContainer()
+
+    class FakeDockerClient:
+        containers = FakeContainers()
+
+    workspace_dir = tmp_path / "workspace"
+    home_dir = tmp_path / "home"
+    cache_dir = tmp_path / "cache"
+    provider = DockerWorkspaceProvider(
+        workspace_dir,
+        image="python:3.11",
+        extra_mounts=[
+            DockerExtraMount(host_path=home_dir, container_path=Path("/home/claw"), mode="rw"),
+            DockerExtraMount(host_path=cache_dir, container_path=Path("/cache"), mode="ro"),
+        ],
+    )
+    binding = provider.resolve(metadata={"session_id": "session-1"})
+    factory = DockerEnvironmentFactory(
+        image="python:3.11",
+        extra_mounts=[
+            DockerExtraMount(host_path=home_dir, container_path=Path("/home/claw"), mode="rw"),
+            DockerExtraMount(host_path=cache_dir, container_path=Path("/cache"), mode="ro"),
+        ],
+    )
+    environment = factory.build(binding)
+    environment._client = FakeDockerClient()
+
+    assert isinstance(environment, ReusableSandboxEnvironment)
+    await environment._create_container()
+
+    assert binding.metadata["extra_mounts"] == [
+        {"host_path": str(home_dir), "container_path": "/home/claw", "mode": "rw"},
+        {"host_path": str(cache_dir), "container_path": "/cache", "mode": "ro"},
+    ]
+    assert captured_run_kwargs["volumes"] == {
+        str(workspace_dir.resolve()): {"bind": "/workspace", "mode": "rw"},
+        str(home_dir.resolve()): {"bind": "/home/claw", "mode": "rw"},
+        str(cache_dir.resolve()): {"bind": "/cache", "mode": "ro"},
+    }
 
 
 async def test_reusable_sandbox_environment_reads_and_refreshes_container_cache(tmp_path: Path) -> None:

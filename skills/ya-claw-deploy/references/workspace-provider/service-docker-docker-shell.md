@@ -24,9 +24,10 @@ YA_CLAW_WORKSPACE_DIR=/var/lib/ya-claw/workspace
 YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOST_WORKSPACE_DIR=/srv/ya-claw/workspace
 YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE=ghcr.io/wh1isper/ya-claw-workspace:latest
 YA_CLAW_WORKSPACE_PROVIDER_DOCKER_CONTAINER_CACHE_DIR=/var/lib/ya-claw/data/docker-workspace-containers
+YA_CLAW_WORKSPACE_PROVIDER_DOCKER_EXTRA_MOUNTS=/srv/ya-claw/home:/home/claw:rw
 ```
 
-`YA_CLAW_WORKSPACE_DIR` is the service-container path. `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOST_WORKSPACE_DIR` is the Docker daemon-visible host path used for the workspace container bind mount.
+`YA_CLAW_WORKSPACE_DIR` is the service-container path. `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOST_WORKSPACE_DIR` is the Docker daemon-visible host path used for the workspace container bind mount. Extra mount host paths are also Docker daemon-visible host paths.
 
 ## Compose Shape
 
@@ -44,6 +45,7 @@ services:
       YA_CLAW_WORKSPACE_DIR: /var/lib/ya-claw/workspace
       YA_CLAW_WORKSPACE_PROVIDER_BACKEND: docker
       YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOST_WORKSPACE_DIR: /srv/ya-claw/workspace
+      YA_CLAW_WORKSPACE_PROVIDER_DOCKER_EXTRA_MOUNTS: /srv/ya-claw/home:/home/claw:rw
     volumes:
       - /srv/ya-claw:/var/lib/ya-claw
       - ./profiles.yaml:/etc/ya-claw/profiles.yaml:ro

@@ -44,6 +44,13 @@ class WorkspaceBinding:
     backend_hint: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class DockerExtraMount:
+    host_path: Path
+    container_path: Path
+    mode: str = "rw"
+
+
 class WorkspaceProvider(ABC):
     @abstractmethod
     def resolve(self, metadata: dict[str, Any] | None = None) -> WorkspaceBinding:
@@ -152,6 +159,7 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
         cleanup_on_exit: bool = False,
         container_cache_path: Path | None = None,
         docker_host_paths: list[Path] | None = None,
+        docker_mount_modes: list[str] | None = None,
     ) -> None:
         super().__init__(
             mounts=mounts,
@@ -169,6 +177,7 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
         self._docker_host_paths = (
             [path.expanduser() for path in docker_host_paths] if docker_host_paths is not None else []
         )
+        self._docker_mount_modes = list(docker_mount_modes or [])
 
     @property
     def container_ref(self) -> str:
@@ -294,7 +303,7 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
                 volumes = {
                     str(_resolve_docker_mount_host_path(mounts, self._docker_host_paths, index).resolve()): {
                         "bind": str(mount.virtual_path),
-                        "mode": "rw",
+                        "mode": _resolve_docker_mount_mode(self._docker_mount_modes, index),
                     }
                     for index, mount in enumerate(mounts)
                 }
@@ -524,6 +533,7 @@ class DockerEnvironmentFactory(EnvironmentFactory):
         shell_timeout: float = 30.0,
         cleanup_on_exit: bool = False,
         container_cache_dir: Path | None = None,
+        extra_mounts: list[DockerExtraMount] | None = None,
     ) -> None:
         self._image = image
         self._workspace_uid = workspace_uid
@@ -532,6 +542,7 @@ class DockerEnvironmentFactory(EnvironmentFactory):
         self._shell_timeout = shell_timeout
         self._cleanup_on_exit = cleanup_on_exit
         self._container_cache_dir = container_cache_dir.expanduser() if container_cache_dir is not None else None
+        self._extra_mounts = list(extra_mounts or [])
 
     def build(self, binding: WorkspaceBinding) -> Environment:
         sandbox_metadata = extract_workspace_sandbox_metadata(binding.metadata) or {}
@@ -540,11 +551,18 @@ class DockerEnvironmentFactory(EnvironmentFactory):
             image=self._image,
             workspace_dir=_resolve_binding_docker_host_path(binding),
         )
-        mounts = _virtual_mounts_from_binding(binding)
-        docker_host_paths = [_resolve_binding_docker_host_path(binding)]
+        mounts = [
+            *_virtual_mounts_from_binding(binding),
+            *[VirtualMount(mount.host_path, mount.container_path) for mount in self._extra_mounts],
+        ]
+        docker_host_paths = [
+            _resolve_binding_docker_host_path(binding),
+            *[mount.host_path for mount in self._extra_mounts],
+        ]
+        docker_mount_modes = ["rw", *[mount.mode for mount in self._extra_mounts]]
         workspace_environment = {**self._workspace_environment, **binding.environment_overrides}
         logger.info(
-            "Building Docker environment provider={} service_path={} docker_host_path={} virtual_path={} cwd={} image={} container_ref={} preferred_container_id={}",
+            "Building Docker environment provider={} service_path={} docker_host_path={} virtual_path={} cwd={} image={} container_ref={} preferred_container_id={} extra_mounts={}",
             binding.metadata.get("provider"),
             binding.host_path,
             _resolve_binding_docker_host_path(binding),
@@ -553,6 +571,7 @@ class DockerEnvironmentFactory(EnvironmentFactory):
             self._image,
             container_ref,
             preferred_container_id,
+            [(str(mount.host_path), str(mount.container_path), mount.mode) for mount in self._extra_mounts],
         )
         if isinstance(self._workspace_uid, int):
             binding.metadata["workspace_uid"] = self._workspace_uid
@@ -577,6 +596,7 @@ class DockerEnvironmentFactory(EnvironmentFactory):
             shell_timeout=self._shell_timeout,
             container_cache_path=_build_container_cache_path(self._container_cache_dir),
             docker_host_paths=docker_host_paths,
+            docker_mount_modes=docker_mount_modes,
         )
 
 
@@ -592,6 +612,7 @@ class DefaultEnvironmentFactory(EnvironmentFactory):
         cleanup_on_exit: bool = False,
         workspace_environment: dict[str, str] | None = None,
         docker_container_cache_dir: Path | None = None,
+        docker_extra_mounts: list[DockerExtraMount] | None = None,
     ) -> None:
         self._local_factory = LocalEnvironmentFactory(
             shell_timeout=shell_timeout,
@@ -606,6 +627,7 @@ class DefaultEnvironmentFactory(EnvironmentFactory):
             shell_timeout=shell_timeout,
             cleanup_on_exit=cleanup_on_exit,
             container_cache_dir=docker_container_cache_dir,
+            extra_mounts=docker_extra_mounts,
         )
 
     def build(self, binding: WorkspaceBinding) -> Environment:
@@ -658,6 +680,7 @@ class DockerWorkspaceProvider(WorkspaceProvider):
         image: str,
         docker_host_workspace_dir: Path | None = None,
         virtual_workspace_path: Path = _DEFAULT_VIRTUAL_WORKSPACE_PATH,
+        extra_mounts: list[DockerExtraMount] | None = None,
     ) -> None:
         self._workspace_dir = workspace_dir.expanduser().resolve()
         self._docker_host_workspace_dir = (
@@ -667,6 +690,7 @@ class DockerWorkspaceProvider(WorkspaceProvider):
         )
         self._image = image
         self._virtual_workspace_path = virtual_workspace_path
+        self._extra_mounts = list(extra_mounts or [])
 
     def resolve(self, metadata: dict[str, Any] | None = None) -> WorkspaceBinding:
         resolved_metadata = dict(metadata or {})
@@ -683,12 +707,13 @@ class DockerWorkspaceProvider(WorkspaceProvider):
         }
         resolved_metadata[_DOCKER_SANDBOX_METADATA_KEY] = sandbox_metadata
         logger.info(
-            "Resolving Docker workspace binding service_workspace_dir={} docker_host_workspace_dir={} virtual_path={} image={} container_ref={} metadata_keys={}",
+            "Resolving Docker workspace binding service_workspace_dir={} docker_host_workspace_dir={} virtual_path={} image={} container_ref={} extra_mounts={} metadata_keys={}",
             self._workspace_dir,
             self._docker_host_workspace_dir,
             self._virtual_workspace_path,
             self._image,
             container_ref,
+            [(str(mount.host_path), str(mount.container_path), mount.mode) for mount in self._extra_mounts],
             sorted(resolved_metadata.keys()),
         )
         return _build_workspace_binding(
@@ -705,6 +730,14 @@ class DockerWorkspaceProvider(WorkspaceProvider):
                 "host_mount": str(self._docker_host_workspace_dir),
                 "service_mount": str(self._workspace_dir),
                 "container_mount": str(self._virtual_workspace_path),
+                "extra_mounts": [
+                    {
+                        "host_path": str(mount.host_path),
+                        "container_path": str(mount.container_path),
+                        "mode": mount.mode,
+                    }
+                    for mount in self._extra_mounts
+                ],
             },
         )
 
@@ -750,6 +783,12 @@ def _resolve_docker_mount_host_path(mounts: list[VirtualMount], docker_host_path
     if index < len(docker_host_paths):
         return docker_host_paths[index]
     return mounts[index].host_path
+
+
+def _resolve_docker_mount_mode(docker_mount_modes: list[str], index: int) -> str:
+    if index < len(docker_mount_modes):
+        return docker_mount_modes[index]
+    return "rw"
 
 
 def build_workspace_container_ref(*, image: str, workspace_dir: Path) -> str:

@@ -69,7 +69,7 @@ YA_CLAW_AUTO_SEED_PROFILES=true
 
 ## Workspace Reply Credentials
 
-Agents reply from the workspace with `lark-cli`. YA Claw builds workspace reply credentials from the service process environment in this order:
+Agents reply from the workspace with `lark-cli`. YA Claw builds built-in workspace reply credential aliases from the service process environment in this order:
 
 1. `LARK_APP_ID` and `LARK_APP_SECRET`
 2. `YA_CLAW_BRIDGE_LARK_APP_ID` and `YA_CLAW_BRIDGE_LARK_APP_SECRET`
@@ -79,6 +79,13 @@ Use explicit `LARK_*` variables when the workspace should use a separate Lark id
 ```env
 LARK_APP_ID=cli_xxx
 LARK_APP_SECRET=replace-with-app-secret
+```
+
+Forward additional process env values into the workspace with `YA_CLAW_WORKSPACE_ENV_VARS`:
+
+```env
+MY_TOOL_API_KEY=replace-with-tool-key
+YA_CLAW_WORKSPACE_ENV_VARS=MY_TOOL_API_KEY
 ```
 
 For Docker shell shapes, `DefaultEnvironmentFactory` passes these values into `DockerEnvironmentFactory`; `ReusableSandboxEnvironment` then creates the workspace container with Docker SDK `containers.run(environment=...)`. The variables become container-level environment values available to `lark-cli`.

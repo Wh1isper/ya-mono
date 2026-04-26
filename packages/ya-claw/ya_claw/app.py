@@ -124,7 +124,7 @@ class ClawApplication:
             docker_image=self.settings.workspace_provider_docker_image,
             workspace_uid=self.settings.resolved_workspace_provider_docker_uid,
             workspace_gid=self.settings.resolved_workspace_provider_docker_gid,
-            workspace_environment=self.settings.resolved_lark_cli_environment,
+            workspace_environment=self.settings.resolved_workspace_environment,
             docker_container_cache_dir=self.settings.resolved_workspace_provider_docker_container_cache_dir,
         )
 
@@ -215,15 +215,20 @@ class ClawApplication:
     def create_workspace_provider(self) -> WorkspaceProvider:
         if self.settings.workspace_provider_backend == "docker":
             logger.info(
-                "Configuring Docker workspace provider image={} service_workspace_dir={} docker_host_workspace_dir={}",
+                "Configuring Docker workspace provider image={} service_workspace_dir={} docker_host_workspace_dir={} extra_mounts={}",
                 self.settings.workspace_provider_docker_image,
                 self.settings.resolved_workspace_dir,
                 self.settings.resolved_workspace_provider_docker_host_workspace_dir,
+                [
+                    (str(mount.host_path), str(mount.container_path), mount.mode)
+                    for mount in self.settings.resolved_workspace_provider_docker_extra_mounts
+                ],
             )
             return DockerWorkspaceProvider(
                 self.settings.resolved_workspace_dir,
                 image=self.settings.workspace_provider_docker_image,
                 docker_host_workspace_dir=self.settings.resolved_workspace_provider_docker_host_workspace_dir,
+                extra_mounts=self.settings.resolved_workspace_provider_docker_extra_mounts,
             )
         logger.info("Configuring local workspace provider workspace_dir={}", self.settings.resolved_workspace_dir)
         return LocalWorkspaceProvider(self.settings.resolved_workspace_dir)

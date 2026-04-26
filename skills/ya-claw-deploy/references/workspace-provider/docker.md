@@ -23,6 +23,12 @@ Set this when the service process path and Docker daemon path differ:
 YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOST_WORKSPACE_DIR=/srv/ya-claw/workspace
 ```
 
+Mount additional host directories into the reusable workspace container with comma-separated `host_path:container_path[:mode]` entries. Supported modes are `rw` and `ro`.
+
+```env
+YA_CLAW_WORKSPACE_PROVIDER_DOCKER_EXTRA_MOUNTS=/srv/ya-claw/home:/home/claw:rw,/srv/ya-claw/cache:/cache:ro
+```
+
 ## Binding Semantics
 
 `DockerWorkspaceProvider` returns a binding with:
@@ -34,6 +40,8 @@ YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOST_WORKSPACE_DIR=/srv/ya-claw/workspace
 | `virtual_path`     | `/workspace`                                                                                                      |
 | `cwd`              | `/workspace`                                                                                                      |
 | `backend_hint`     | `docker`                                                                                                          |
+
+Extra mounts are recorded in binding metadata as `extra_mounts` and passed to Docker container creation. The workspace container sees the configured `container_path` values directly.
 
 `DockerEnvironmentFactory` creates a `ReusableSandboxEnvironment`. It uses `host_path` for virtual file operations and `docker_host_path` as the bind mount source when creating the workspace container.
 
@@ -51,7 +59,7 @@ The selected container ID is cached at:
 ${YA_CLAW_WORKSPACE_PROVIDER_DOCKER_CONTAINER_CACHE_DIR}/workspace.json
 ```
 
-On each run, YA Claw reads the cache, verifies the container, starts stopped containers, checks Docker health when available, recreates failed containers, and writes the refreshed cache.
+On each run, YA Claw reads the cache, verifies the container, starts stopped containers, checks Docker health when available, recreates failed containers, and writes the refreshed cache. Recreate the workspace container after changing extra mount configuration.
 
 ## Docker Permission
 
@@ -74,11 +82,13 @@ YA_CLAW_HOST_UID=<configured uid>
 YA_CLAW_HOST_GID=<configured gid>
 ```
 
-Lark credentials are injected when configured:
+Workspace environment values are injected when configured. Built-in Lark aliases are available for `lark-cli`, and additional process env values are forwarded by name:
 
 ```env
 LARK_APP_ID=cli_xxx
 LARK_APP_SECRET=replace-with-secret
+MY_TOOL_API_KEY=replace-with-tool-key
+YA_CLAW_WORKSPACE_ENV_VARS=MY_TOOL_API_KEY
 ```
 
 ## UID/GID Alignment
