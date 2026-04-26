@@ -221,7 +221,6 @@ def settings(tmp_path: Path) -> ClawSettings:
         api_token="test-token",  # noqa: S106
         data_dir=data_dir,
         workspace_dir=workspace_dir,
-        execution_model="stub-model",
     )
 
 
@@ -273,7 +272,6 @@ async def test_run_dispatcher_submits_with_profile_model_only(
         workspace_dir=tmp_path / "workspace",
         profile_seed_file=seed_file,
         auto_seed_profiles=True,
-        execution_model=None,
     )
     supervisor = ExecutionSupervisor(
         settings=settings,

@@ -66,8 +66,7 @@ YA Claw loads `YA_CLAW_*` settings from `packages/ya-claw/.env` and the process 
 YA Claw startup also exports provider variables such as `GATEWAY_API_KEY` and `GATEWAY_BASE_URL` from `packages/ya-claw/.env` into the process environment.
 Use [`packages/ya-agent-sdk/.env.example`](../ya-agent-sdk/.env.example) for shared SDK and tool environment variables when you want the same keys outside YA Claw startup.
 Set `YA_CLAW_PROFILE_SEED_FILE` plus `YA_CLAW_AUTO_SEED_PROFILES=true` when you want packaged profiles to seed into the database on startup. Seeded profiles use create/update semantics: every startup refreshes matching database profiles from the YAML file, including subagent configuration, while profiles absent from the YAML file remain in the database.
-Set `YA_CLAW_EXECUTION_MODEL` when you want runs to auto-dispatch through the built-in coordinator.
-Without that setting, created runs stay queued until another execution path picks them up.
+Runs auto-dispatch through the built-in coordinator and resolve model/runtime behavior from AgentProfile rows. The default profile name is `default`.
 
 Profile, MCP, and coordinator settings:
 
@@ -76,6 +75,7 @@ Profile, MCP, and coordinator settings:
 - `YA_CLAW_DEFAULT_PROFILE=default`
 - `YA_CLAW_WORKSPACE_PROVIDER_BACKEND=local|docker`
 - `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE=ghcr.io/wh1isper/ya-claw-workspace:latest`
+- `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOST_WORKSPACE_DIR=/srv/ya-claw/workspace`
 - `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID=<service process UID>`
 - `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID=<service process GID>`
 - `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_CONTAINER_CACHE_DIR=~/.ya-claw/data/docker-workspace-containers`

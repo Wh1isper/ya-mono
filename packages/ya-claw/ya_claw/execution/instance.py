@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-import logging
 import os
 import socket
 from datetime import UTC, datetime
 from typing import Any
 
+from loguru import logger
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ya_claw.config import ClawSettings
 from ya_claw.orm.tables import RuntimeInstanceRecord
-
-logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> datetime:
@@ -57,6 +55,12 @@ class RuntimeInstanceManager:
                     record.heartbeat_at = now
                     record.stopped_at = None
                 await db_session.commit()
+                logger.info(
+                    "Runtime instance active instance_id={} hostname={} process_id={}",
+                    self.instance_id,
+                    socket.gethostname(),
+                    os.getpid(),
+                )
                 return True
         except SQLAlchemyError:
             logger.warning("Runtime instance table is unavailable; skipping instance registration.")
@@ -72,6 +76,7 @@ class RuntimeInstanceManager:
                     record.heartbeat_at = now
                     record.stopped_at = None
                     await db_session.commit()
+                    logger.debug("Runtime instance heartbeat instance_id={}", self.instance_id)
                     return True
         except SQLAlchemyError:
             logger.warning("Runtime instance table is unavailable; skipping instance heartbeat.")
@@ -88,6 +93,7 @@ class RuntimeInstanceManager:
                     record.heartbeat_at = now
                     record.stopped_at = now
                     await db_session.commit()
+                    logger.info("Runtime instance stopped instance_id={}", self.instance_id)
                     return True
         except SQLAlchemyError:
             logger.warning("Runtime instance table is unavailable; skipping instance stop marker.")

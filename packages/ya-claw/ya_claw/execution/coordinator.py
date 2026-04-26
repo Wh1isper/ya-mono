@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from loguru import logger
 from pydantic import BaseModel
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 from sqlalchemy import select
@@ -41,8 +41,6 @@ from ya_claw.workspace import (
     build_workspace_sandbox_metadata,
 )
 
-logger = logging.getLogger(__name__)
-
 
 @dataclass(slots=True)
 class ExecutionBuffers:
@@ -76,16 +74,11 @@ class ExecutionSupervisor:
         self._notification_hub = notification_hub
         self._run_store = RunStore(settings)
 
-    @property
-    def execution_enabled(self) -> bool:
-        if isinstance(self._settings.execution_model, str) and self._settings.execution_model.strip() != "":
-            return True
-        seed_file = self._settings.resolved_profile_seed_file
-        return self._settings.auto_seed_profiles and seed_file is not None and seed_file.exists()
-
     def submit_run(self, run_id: str) -> bool:
         if self._runtime_state.get_background_task(run_id) is not None:
+            logger.debug("Run submission skipped run_id={} reason=background_task_exists", run_id)
             return False
+        logger.info("Submitting run to execution supervisor run_id={}", run_id)
         task = asyncio.create_task(self._claim_and_execute(run_id), name=f"ya-claw-supervisor-{run_id}")
         self._runtime_state.register_background_task(run_id, task)
         return True
@@ -98,6 +91,7 @@ class ExecutionSupervisor:
             statement = select(RunRecord).where(RunRecord.status == "queued").order_by(RunRecord.created_at.asc())
             result = await db_session.execute(statement)
             run_ids = [record.id for record in result.scalars().all()]
+        logger.info("Recovering queued runs count={} run_ids={}", len(run_ids), run_ids)
         for run_id in run_ids:
             self.submit_run(run_id)
         return run_ids
@@ -116,6 +110,7 @@ class ExecutionSupervisor:
                 interrupt_run(session_record, run_record)
                 cancelled_ids.append(run_record.id)
             await db_session.commit()
+            logger.info("Cancelled orphaned running runs count={} run_ids={}", len(cancelled_ids), cancelled_ids)
             return cancelled_ids
 
     async def startup_recover(self) -> dict[str, list[str]]:
@@ -154,12 +149,20 @@ class ExecutionSupervisor:
         async with self._session_factory() as db_session:
             session_record, run_record = await _load_run_scope(db_session, run_id)
             if run_record.status != "queued":
+                logger.debug("Run claim skipped run_id={} status={}", run_id, run_record.status)
                 return False
 
             dispatch_mode = self._resolve_dispatch_mode(run_id)
             if self._runtime_state.get_run_handle(run_id) is None:
                 self._runtime_state.register_run(session_record.id, run_id, dispatch_mode=dispatch_mode)
 
+            logger.info(
+                "Claiming run run_id={} session_id={} dispatch_mode={} instance_id={}",
+                run_id,
+                session_record.id,
+                dispatch_mode,
+                self._settings.instance_id,
+            )
             mark_run_running(session_record, run_record, claimed_by=self._settings.instance_id)
             await db_session.commit()
             await db_session.refresh(run_record)
@@ -174,6 +177,7 @@ class ExecutionSupervisor:
                 run_id,
                 agui_adapter.build_run_started_event(input_parts=list(run_record.input_parts)),
             )
+            logger.info("Run claimed run_id={} session_id={}", run_id, session_record.id)
             return True
 
     def _resolve_dispatch_mode(self, run_id: str) -> str:
@@ -211,12 +215,15 @@ class RunCoordinator:
         buffers = ExecutionBuffers()
         terminal_event_emitted = False
 
+        logger.info("Executing run run_id={}", run_id)
         try:
             async with self._session_factory() as db_session:
                 session_record, run_record = await _load_run_scope(db_session, run_id)
                 if run_record.status != "running":
+                    logger.debug("Run execution skipped run_id={} status={}", run_id, run_record.status)
                     return
                 if self._runtime_state.get_termination_requested(run_id) is not None:
+                    logger.debug("Run execution skipped run_id={} reason=termination_requested", run_id)
                     return
 
                 profile = await self._profile_resolver.resolve(run_record.profile_name or session_record.profile_name)
@@ -228,6 +235,14 @@ class RunCoordinator:
                     explicit_run_id=run_record.restore_from_run_id,
                 )
                 dispatch_mode = self._resolve_dispatch_mode(run_id)
+                logger.debug(
+                    "Run execution prepared run_id={} session_id={} profile={} dispatch_mode={} restore_from_run_id={}",
+                    run_id,
+                    session_record.id,
+                    profile.name,
+                    dispatch_mode,
+                    run_record.restore_from_run_id,
+                )
 
             await self._execute_agent_run(
                 run_id=run_id,
@@ -298,7 +313,14 @@ class RunCoordinator:
                     terminal=True,
                 )
                 terminal_event_emitted = True
+                logger.info(
+                    "Run completed run_id={} session_id={} output_summary_chars={}",
+                    run_id,
+                    session_record.id,
+                    len(run_record.output_summary or ""),
+                )
         except AgentInterrupted:
+            logger.info("Run interrupted by agent runtime run_id={}", run_id)
             async with self._session_factory() as db_session:
                 session_record, run_record = await _load_run_scope(db_session, run_id)
                 if buffers.latest_message_payload is not None:
@@ -311,7 +333,7 @@ class RunCoordinator:
                     write_message_checkpoint(self._run_store, checkpoint)
                 await db_session.commit()
         except Exception as exc:
-            logger.exception("YA Claw run execution failed", extra={"run_id": run_id})
+            logger.exception("YA Claw run execution failed run_id={}", run_id)
             async with self._session_factory() as db_session:
                 session_record, run_record = await _load_run_scope(db_session, run_id)
                 if buffers.latest_message_payload is not None:
@@ -339,6 +361,12 @@ class RunCoordinator:
                     run_record,
                 )
                 agui_adapter = AguiEventAdapter(session_id=session_record.id, run_id=run_id)
+                logger.info(
+                    "Run failed run_id={} session_id={} error={}",
+                    run_id,
+                    session_record.id,
+                    run_record.error_message,
+                )
                 await self._runtime_state.append_run_event(
                     run_id,
                     agui_adapter.build_run_error_event(
@@ -351,6 +379,9 @@ class RunCoordinator:
         finally:
             if not terminal_event_emitted:
                 await self._runtime_state.close_run(run_id)
+                logger.debug(
+                    "Run runtime state closed run_id={} terminal_event_emitted={}", run_id, terminal_event_emitted
+                )
 
     async def _execute_agent_run(
         self,
@@ -367,6 +398,15 @@ class RunCoordinator:
         run_metadata: dict[str, Any],
         buffers: ExecutionBuffers,
     ) -> None:
+        logger.info(
+            "Starting agent run run_id={} session_id={} profile={} dispatch_mode={} workspace_provider={} cwd={}",
+            run_id,
+            session_id,
+            profile.name,
+            dispatch_mode,
+            workspace_binding.metadata.get("provider"),
+            workspace_binding.cwd,
+        )
         environment = self._environment_factory.build(workspace_binding)
         background_monitor = BackgroundMonitor(run_id=run_id, runtime_state=self._runtime_state)
         environment.resources.set(BACKGROUND_MONITOR_KEY, background_monitor)
@@ -405,6 +445,12 @@ class RunCoordinator:
             if isinstance(environment, Environment):
                 runtime.ctx.container_id = self._extract_environment_container_id(environment)
             await self._persist_workspace_sandbox(session_id, workspace_binding, environment)
+            logger.debug(
+                "Agent runtime entered run_id={} session_id={} container_id={}",
+                run_id,
+                session_id,
+                runtime.ctx.container_id,
+            )
             async with stream_agent(
                 runtime,
                 user_prompt_factory=lambda runtime_obj: self._build_initial_prompt(runtime_obj, input_parts),
@@ -439,15 +485,14 @@ class RunCoordinator:
                                 )
                                 write_message_checkpoint(self._run_store, checkpoint)
                     streamer.raise_if_exception()
+                    logger.debug("Agent stream completed run_id={} session_id={}", run_id, session_id)
                 finally:
                     steering_task.cancel()
                     await asyncio.gather(steering_task, return_exceptions=True)
 
                 drained_background = await background_monitor.drain_or_cancel(timeout=10.0)
                 if not drained_background:
-                    logger.warning(
-                        "YA Claw background subagents cancelled after drain timeout", extra={"run_id": run_id}
-                    )
+                    logger.warning("YA Claw background subagents cancelled after drain timeout run_id={}", run_id)
 
                 if streamer.run is None:
                     if self._runtime_state.get_termination_requested(run_id) is not None:
@@ -469,6 +514,14 @@ class RunCoordinator:
                 output = streamer.run.result.output if streamer.run.result else None
                 buffers.output_text = self._stringify_output(output)
                 buffers.output_summary = self._summarize_output(output)
+                logger.debug(
+                    "Agent run artifacts prepared run_id={} message_count={} output_summary_chars={}",
+                    run_id,
+                    buffers.latest_message_payload.get("message_count")
+                    if isinstance(buffers.latest_message_payload, dict)
+                    else None,
+                    len(buffers.output_summary or ""),
+                )
 
     async def _build_initial_prompt(
         self,
@@ -493,6 +546,7 @@ class RunCoordinator:
 
             steering_batches = self._runtime_state.consume_steering_inputs(run_id)
             for raw_batch in steering_batches:
+                logger.debug("Forwarding steering input run_id={} input_parts={}", run_id, len(raw_batch))
                 parts = parse_input_parts(list(raw_batch))
                 mapping = await map_input_parts(parts, file_operator=runtime.ctx.file_operator)
                 content = self._build_user_prompt(mapping)
@@ -520,6 +574,16 @@ class RunCoordinator:
         if isinstance(profile.workspace_backend_hint, str) and profile.workspace_backend_hint.strip() != "":
             binding.backend_hint = profile.workspace_backend_hint
             binding.metadata["workspace_backend_hint"] = profile.workspace_backend_hint
+        logger.debug(
+            "Workspace binding resolved run_id={} session_id={} provider={} backend_hint={} host_path={} virtual_path={} docker_host_path={}",
+            run_record.id,
+            session_record.id,
+            binding.metadata.get("provider"),
+            binding.backend_hint,
+            binding.host_path,
+            binding.virtual_path,
+            binding.docker_host_path,
+        )
         return binding
 
     def _extract_environment_container_id(self, environment: Environment) -> str | None:
@@ -549,6 +613,12 @@ class RunCoordinator:
             session_metadata["sandbox"] = sandbox_metadata
             session_record.session_metadata = session_metadata
             await db_session.commit()
+            logger.debug(
+                "Persisted workspace sandbox metadata session_id={} container_id={} container_ref={}",
+                session_id,
+                sandbox_metadata.get("container_id"),
+                sandbox_metadata.get("container_ref"),
+            )
 
     def _resolve_dispatch_mode(self, run_id: str) -> str:
         handle = self._runtime_state.get_run_handle(run_id)

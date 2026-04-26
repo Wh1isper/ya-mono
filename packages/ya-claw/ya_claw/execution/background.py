@@ -4,19 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
 from y_agent_environment import BaseResource
 
 if TYPE_CHECKING:
     from ya_agent_sdk.toolsets.core.base import BaseTool, Toolset
 
     from ya_claw.runtime_state import InMemoryRuntimeState
-
-logger = logging.getLogger(__name__)
 
 BACKGROUND_MONITOR_KEY = "background_monitor"
 
@@ -101,14 +99,14 @@ class BackgroundMonitor(BaseResource):
             is_resume=is_resume,
         )
         task.add_done_callback(lambda _task: self._on_task_done(agent_id))
-        logger.debug("Registered background task: %s (%s)", agent_id, subagent_name)
+        logger.debug("Registered background task agent_id={} subagent_name={}", agent_id, subagent_name)
 
     def _on_task_done(self, agent_id: str) -> None:
         task = self._tasks.get(agent_id)
         if task is not None and task.done():
             self._tasks.pop(agent_id, None)
             self._task_info.pop(agent_id, None)
-        logger.debug("Background task completed: %s", agent_id)
+        logger.debug("Background task completed agent_id={}", agent_id)
 
     async def emit_subagent_spawned(
         self,

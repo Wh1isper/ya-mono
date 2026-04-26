@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path
 
-from ya_claw.workspace.provider import WorkspaceBinding
+from loguru import logger
 
-logger = logging.getLogger(__name__)
+from ya_claw.workspace.provider import WorkspaceBinding
 
 WORKSPACE_GUIDANCE_FILENAME = "AGENTS.md"
 WORKSPACE_GUIDANCE_TAG = "workspace-guidance"
@@ -28,16 +27,10 @@ def load_workspace_guidance(binding: WorkspaceBinding) -> WorkspaceGuidance | No
     try:
         content = guidance_path.read_text(encoding="utf-8")
     except OSError as exc:
-        logger.warning(
-            "Failed to read workspace guidance file",
-            extra={"path": str(guidance_path), "error": str(exc)},
-        )
+        logger.warning("Failed to read workspace guidance file path={} error={}", guidance_path, exc)
         return None
     except UnicodeDecodeError as exc:
-        logger.warning(
-            "Failed to decode workspace guidance file",
-            extra={"path": str(guidance_path), "error": str(exc)},
-        )
+        logger.warning("Failed to decode workspace guidance file path={} error={}", guidance_path, exc)
         return None
 
     if content.strip() == "":

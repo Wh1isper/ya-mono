@@ -5,6 +5,7 @@ from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import HTTPException
+from loguru import logger
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,6 +55,7 @@ class RunController:
                     detail="session_id is required when restore_from_run_id is provided.",
                 )
             session_id = uuid4().hex
+            logger.debug("Creating session for standalone run session_id={}", session_id)
             session_record = SessionRecord(
                 id=session_id,
                 profile_name=request.profile_name,
@@ -82,6 +84,15 @@ class RunController:
         if restore_from_run_id is not None:
             await self._validate_restore_source(db_session, session_id, restore_from_run_id)
 
+        logger.debug(
+            "Creating run session_id={} profile={} dispatch_mode={} trigger_type={} restore_from_run_id={} reset_state={}",
+            session_id,
+            request.profile_name or session_record.profile_name,
+            request.dispatch_mode,
+            request.trigger_type,
+            restore_from_run_id,
+            request.reset_state,
+        )
         run_metadata = dict(request.metadata)
 
         sequence_no = await self._next_sequence_no(db_session, session_id)
@@ -117,6 +128,13 @@ class RunController:
             }),
         )
 
+        logger.info(
+            "Run queued run_id={} session_id={} sequence_no={} dispatch_mode={}",
+            run_id,
+            session_id,
+            sequence_no,
+            request.dispatch_mode,
+        )
         return run_detail_from_record(run_record)
 
     async def get(
@@ -128,6 +146,12 @@ class RunController:
         include_state: bool,
         include_message: bool,
     ) -> RunGetResponse:
+        logger.debug(
+            "Fetching run detail run_id={} include_state={} include_message={}",
+            run_id,
+            include_state,
+            include_message,
+        )
         run_record = await db_session.get(RunRecord, run_id)
         if not isinstance(run_record, RunRecord):
             raise HTTPException(status_code=404, detail=f"Run '{run_id}' was not found.")
@@ -184,6 +208,12 @@ class RunController:
             max_item_chars=normalized_item_chars,
             max_total_chars=normalized_total_chars,
         )
+        logger.debug(
+            "Built run trace run_id={} item_count={} truncated={}",
+            run_id,
+            len(trace),
+            truncated,
+        )
         return RunTraceResponse(
             run_id=run_record.id,
             session_id=run_record.session_id,
@@ -233,6 +263,7 @@ class RunController:
         run_id: str,
         request: SteerRequest,
     ) -> ControlResponse:
+        logger.debug("Steering run run_id={} input_parts={}", run_id, len(request.input_parts))
         run_record = await db_session.get(RunRecord, run_id)
         if not isinstance(run_record, RunRecord):
             raise HTTPException(status_code=404, detail=f"Run '{run_id}' was not found.")
@@ -272,6 +303,7 @@ class RunController:
         event_type: str,
         termination_reason: TerminationReason,
     ) -> RunDetail:
+        logger.info("Stopping run run_id={} termination_reason={}", run_id, termination_reason)
         run_record = await db_session.get(RunRecord, run_id)
         if not isinstance(run_record, RunRecord):
             raise HTTPException(status_code=404, detail=f"Run '{run_id}' was not found.")
@@ -289,6 +321,13 @@ class RunController:
                 cancel_run(session_record, run_record)
             await db_session.commit()
             await db_session.refresh(run_record)
+            logger.info(
+                "Run stopped run_id={} session_id={} status={} termination_reason={}",
+                run_id,
+                run_record.session_id,
+                run_record.status,
+                run_record.termination_reason,
+            )
 
         await self._emit_terminal_event(runtime_state, run_record, event_type)
 

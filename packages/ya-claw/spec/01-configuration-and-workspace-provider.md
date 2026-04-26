@@ -23,40 +23,41 @@ flowchart TB
 
 ### Environment Variables
 
-| Variable                                  | Purpose                                                            |
-| ----------------------------------------- | ------------------------------------------------------------------ |
-| `YA_CLAW_HOST`                            | bind host                                                          |
-| `YA_CLAW_PORT`                            | bind port                                                          |
-| `YA_CLAW_PUBLIC_BASE_URL`                 | public base URL                                                    |
-| `YA_CLAW_INSTANCE_ID`                     | runtime instance identity used for run ownership and heartbeat     |
-| `YA_CLAW_API_TOKEN`                       | shared bearer token required for HTTP access                       |
-| `YA_CLAW_ENVIRONMENT`                     | runtime environment label                                          |
-| `YA_CLAW_DATABASE_URL`                    | SQLite or PostgreSQL connection string                             |
-| `YA_CLAW_AUTO_MIGRATE`                    | startup schema migration switch                                    |
-| `YA_CLAW_WEB_DIST_DIR`                    | bundled web shell directory                                        |
-| `YA_CLAW_DATA_DIR`                        | runtime data root for run store and runtime records                |
-| `YA_CLAW_WORKSPACE_DIR`                   | single workspace directory exposed to agent environments           |
-| `YA_CLAW_DATABASE_ECHO`                   | SQL logging                                                        |
-| `YA_CLAW_DATABASE_POOL_SIZE`              | pool size                                                          |
-| `YA_CLAW_DATABASE_MAX_OVERFLOW`           | pool overflow                                                      |
-| `YA_CLAW_DATABASE_POOL_RECYCLE_SECONDS`   | connection recycle interval                                        |
-| `YA_CLAW_DEFAULT_PROFILE`                 | bootstrap profile name used when a request omits `profile_name`    |
-| `YA_CLAW_PROFILE_SEED_FILE`               | optional YAML seed file for profiles                               |
-| `YA_CLAW_AUTO_SEED_PROFILES`              | create or refresh matching seeded profiles from YAML on startup    |
-| `YA_CLAW_WORKSPACE_PROVIDER_BACKEND`      | bootstrap workspace backend hint for local development or fallback |
-| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE` | Docker image for Docker-backed environment construction            |
-| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID`   | UID used inside auto-started Docker workspace containers           |
-| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID`   | GID used inside auto-started Docker workspace containers           |
-| `YA_CLAW_MCP_CONFIG_FILE`                 | global MCP JSON file injected into every runtime                   |
-| `YA_CLAW_WORKSPACE_MCP_CONFIG_PATH`       | workspace MCP JSON path with workspace-level priority              |
-| `YA_CLAW_SCHEDULE_DISPATCH_ENABLED`       | enable schedule dispatcher                                         |
-| `YA_CLAW_SCHEDULE_TICK_SECONDS`           | schedule dispatcher scan interval                                  |
-| `YA_CLAW_SCHEDULE_MAX_DUE_PER_TICK`       | maximum due schedules handled per scan                             |
-| `YA_CLAW_HEARTBEAT_ENABLED`               | enable heartbeat dispatcher                                        |
-| `YA_CLAW_HEARTBEAT_INTERVAL_SECONDS`      | heartbeat interval                                                 |
-| `YA_CLAW_HEARTBEAT_PROFILE`               | heartbeat profile name                                             |
-| `YA_CLAW_HEARTBEAT_PROMPT`                | heartbeat input prompt                                             |
-| `YA_CLAW_HEARTBEAT_ON_ACTIVE`             | heartbeat active-run policy                                        |
+| Variable                                               | Purpose                                                                     |
+| ------------------------------------------------------ | --------------------------------------------------------------------------- |
+| `YA_CLAW_HOST`                                         | bind host                                                                   |
+| `YA_CLAW_PORT`                                         | bind port                                                                   |
+| `YA_CLAW_PUBLIC_BASE_URL`                              | public base URL                                                             |
+| `YA_CLAW_INSTANCE_ID`                                  | runtime instance identity used for run ownership and heartbeat              |
+| `YA_CLAW_API_TOKEN`                                    | shared bearer token required for HTTP access                                |
+| `YA_CLAW_ENVIRONMENT`                                  | runtime environment label                                                   |
+| `YA_CLAW_DATABASE_URL`                                 | SQLite or PostgreSQL connection string                                      |
+| `YA_CLAW_AUTO_MIGRATE`                                 | startup schema migration switch                                             |
+| `YA_CLAW_WEB_DIST_DIR`                                 | bundled web shell directory                                                 |
+| `YA_CLAW_DATA_DIR`                                     | runtime data root for run store and runtime records                         |
+| `YA_CLAW_WORKSPACE_DIR`                                | single workspace directory exposed to agent environments                    |
+| `YA_CLAW_DATABASE_ECHO`                                | SQL logging                                                                 |
+| `YA_CLAW_DATABASE_POOL_SIZE`                           | pool size                                                                   |
+| `YA_CLAW_DATABASE_MAX_OVERFLOW`                        | pool overflow                                                               |
+| `YA_CLAW_DATABASE_POOL_RECYCLE_SECONDS`                | connection recycle interval                                                 |
+| `YA_CLAW_DEFAULT_PROFILE`                              | bootstrap profile name used when a request omits `profile_name`             |
+| `YA_CLAW_PROFILE_SEED_FILE`                            | optional YAML seed file for profiles                                        |
+| `YA_CLAW_AUTO_SEED_PROFILES`                           | create or refresh matching seeded profiles from YAML on startup             |
+| `YA_CLAW_WORKSPACE_PROVIDER_BACKEND`                   | bootstrap workspace backend hint for local development or fallback          |
+| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE`              | Docker image for Docker-backed environment construction                     |
+| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOST_WORKSPACE_DIR` | Docker daemon-visible host workspace path for service-in-Docker deployments |
+| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID`                | UID used inside auto-started Docker workspace containers                    |
+| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID`                | GID used inside auto-started Docker workspace containers                    |
+| `YA_CLAW_MCP_CONFIG_FILE`                              | global MCP JSON file injected into every runtime                            |
+| `YA_CLAW_WORKSPACE_MCP_CONFIG_PATH`                    | workspace MCP JSON path with workspace-level priority                       |
+| `YA_CLAW_SCHEDULE_DISPATCH_ENABLED`                    | enable schedule dispatcher                                                  |
+| `YA_CLAW_SCHEDULE_TICK_SECONDS`                        | schedule dispatcher scan interval                                           |
+| `YA_CLAW_SCHEDULE_MAX_DUE_PER_TICK`                    | maximum due schedules handled per scan                                      |
+| `YA_CLAW_HEARTBEAT_ENABLED`                            | enable heartbeat dispatcher                                                 |
+| `YA_CLAW_HEARTBEAT_INTERVAL_SECONDS`                   | heartbeat interval                                                          |
+| `YA_CLAW_HEARTBEAT_PROFILE`                            | heartbeat profile name                                                      |
+| `YA_CLAW_HEARTBEAT_PROMPT`                             | heartbeat input prompt                                                      |
+| `YA_CLAW_HEARTBEAT_ON_ACTIVE`                          | heartbeat active-run policy                                                 |
 
 LLM provider keys and tool API keys stay in environment variables and follow `ya-agent-sdk` conventions.
 
@@ -108,7 +109,7 @@ Important built-in YA Claw toolsets:
 - `session`: read-only current-session inspection tools
 - `schedule`: agent-owned schedule management tools
 
-The `schedule` toolset uses the same internal-client resource pattern as the `session` toolset. The runtime injects current `session_id`, `run_id`, current profile, and bearer token into the resource layer. Agent-facing schedule tools accept a plain text prompt, simple timing fields, and boolean session behavior flags.
+The `schedule` toolset uses the same internal-client resource pattern as the `session` toolset. The runtime injects current `session_id`, `run_id`, current profile, and bearer token into the resource layer. Agent-facing schedule tools accept a plain text prompt, a cron expression, and boolean session behavior flags.
 
 ### Runtime-Wide MCP Configuration
 
@@ -138,10 +139,16 @@ Recommended behavior:
 
 YA Claw uses one configured workspace directory.
 
-Workspace mapping:
+Workspace mapping has two path modes:
 
-- host path: `YA_CLAW_WORKSPACE_DIR` or the default runtime workspace directory
-- virtual path: `/workspace`
+- local backend: service path, file-ops path, shell cwd, readable paths, and writable paths all use the real `YA_CLAW_WORKSPACE_DIR` path
+- Docker backend: service-side file operations use `YA_CLAW_WORKSPACE_DIR`, Docker shell sees `/workspace`, and Docker daemon mounts `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOST_WORKSPACE_DIR` when configured
+
+Docker workspace defaults:
+
+- service workspace path: `YA_CLAW_WORKSPACE_DIR` or the default runtime workspace directory
+- daemon-visible host mount: `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOST_WORKSPACE_DIR` or the service workspace path
+- container path: `/workspace`
 - default cwd: `/workspace`
 - skill path: `/workspace/.agents/skills/`
 - workspace guidance: `/workspace/AGENTS.md`
@@ -190,21 +197,27 @@ The configured workspace path defines `cwd`, readable paths, and writable paths.
 
 ### LocalWorkspaceProvider
 
-Suggested shape:
+Shape:
 
 - host path from the configured workspace directory
-- virtual path `/workspace`
+- virtual path equal to the real workspace path
+- cwd equal to the real workspace path
 - path policy restricted to the workspace root
 - backend hint `local`
 
+`LocalEnvironmentFactory` builds local file operations and a local shell over the same real path space.
+
 ### DockerWorkspaceProvider
 
-Suggested shape:
+Shape:
 
-- host workspace path mounted into the container
-- virtual path `/workspace` shared by shell and file operations
+- service workspace path from `YA_CLAW_WORKSPACE_DIR`
+- daemon-visible host workspace path from `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOST_WORKSPACE_DIR` or the service workspace path
+- virtual/container path `/workspace` shared by Docker shell and file operations
 - backend hint `docker`
 - optional image hint from profile or service bootstrap config
+
+`DockerEnvironmentFactory` builds virtual file operations over the service path and a Docker shell over `/workspace`. The reusable workspace container bind mount uses the daemon-visible host path.
 
 ## EnvironmentFactory
 
@@ -220,7 +233,15 @@ Responsibilities:
 - instantiate the concrete environment class
 - enforce path policy from the binding
 - carry environment overrides into shell or resources
-- keep file operations and shell execution in the same virtual path space
+- keep file operations and shell execution in one coherent path space
+
+### Supported Workspace Combinations
+
+| Service placement        | Shell backend | File operations                                                                            | Shell cwd           | Docker mount source                                    |
+| ------------------------ | ------------- | ------------------------------------------------------------------------------------------ | ------------------- | ------------------------------------------------------ |
+| Host/local process       | local shell   | `LocalFileOperator` over `YA_CLAW_WORKSPACE_DIR`                                           | real workspace path | n/a                                                    |
+| Host/local process       | Docker shell  | `VirtualLocalFileOperator` mapping `YA_CLAW_WORKSPACE_DIR` to `/workspace`                 | `/workspace`        | `YA_CLAW_WORKSPACE_DIR`                                |
+| Docker service container | Docker shell  | `VirtualLocalFileOperator` mapping service-visible `YA_CLAW_WORKSPACE_DIR` to `/workspace` | `/workspace`        | `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOST_WORKSPACE_DIR` |
 
 ## ClawAgentContext
 

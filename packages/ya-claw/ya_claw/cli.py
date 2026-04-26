@@ -7,11 +7,13 @@ import click
 import uvicorn
 from alembic import command
 from alembic.config import Config
+from loguru import logger
 
 from ya_claw.bridge.cli import bridge
 from ya_claw.config import ClawSettings, get_settings
 from ya_claw.db.engine import create_engine, create_session_factory
 from ya_claw.execution.profile import ProfileResolver
+from ya_claw.logging import configure_claw_logging
 
 
 class ClawCliApplication:
@@ -83,6 +85,8 @@ class ClawCliApplication:
         migrate: bool | None,
     ) -> None:
         settings = self.settings()
+        configure_claw_logging(settings.log_level)
+        logger.info("YA Claw serve requested")
 
         try:
             settings.require_api_token()
@@ -94,16 +98,28 @@ class ClawCliApplication:
         resolved_reload = settings.reload if reload is None else reload
         resolved_migrate = settings.auto_migrate if migrate is None else migrate
 
+        logger.info(
+            "Resolved serve options host={} port={} reload={} migrate={} log_level={}",
+            resolved_host,
+            resolved_port,
+            resolved_reload,
+            resolved_migrate,
+            settings.log_level,
+        )
+
         if resolved_migrate:
+            logger.info("Applying database migrations before serving")
             self.upgrade_database()
             click.echo("Database migrations applied.")
 
+        logger.info("Starting uvicorn server")
         uvicorn.run(
             "ya_claw.app:create_app",
             factory=True,
             host=resolved_host,
             port=resolved_port,
             reload=resolved_reload,
+            log_level=settings.log_level.lower(),
         )
 
 

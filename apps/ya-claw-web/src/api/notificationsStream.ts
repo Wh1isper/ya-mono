@@ -3,7 +3,12 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 
 import { useConnectionStore } from '../stores/connectionStore'
-import type { NotificationEvent } from '../types'
+import type {
+  NotificationEvent,
+  RunStatus,
+  SessionGetResponse,
+  SessionSummary,
+} from '../types'
 import { queryKeys } from './queryKeys'
 
 export type NotificationStatus = 'idle' | 'connecting' | 'connected' | 'error'
@@ -67,22 +72,91 @@ export function useNotificationStream() {
   return status
 }
 
+function stringPayloadField(
+  payload: Record<string, unknown>,
+  ...names: string[]
+) {
+  for (const name of names) {
+    const value = payload[name]
+    if (typeof value === 'string' && value.trim()) return value
+  }
+  return null
+}
+
+function runStatusFromNotification(event: NotificationEvent) {
+  const status = stringPayloadField(event.payload, 'status')
+  return isRunStatus(status) ? status : null
+}
+
+function sessionStatusFromRunStatus(status: RunStatus) {
+  return status === 'queued' || status === 'running' ? status : 'idle'
+}
+
+function isRunStatus(value: string | null): value is RunStatus {
+  return (
+    value === 'queued' ||
+    value === 'running' ||
+    value === 'completed' ||
+    value === 'failed' ||
+    value === 'cancelled'
+  )
+}
+
+function patchSessionStatusFromNotification(
+  queryClient: ReturnType<typeof useQueryClient>,
+  event: NotificationEvent,
+  sessionId: string | null,
+  runId: string | null,
+) {
+  if (!sessionId) return
+  const runStatus = event.type.startsWith('run.')
+    ? runStatusFromNotification(event)
+    : null
+  if (!runStatus) return
+  const sessionStatus = sessionStatusFromRunStatus(runStatus)
+
+  queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions, (previous) =>
+    previous?.map((session) =>
+      session.id === sessionId
+        ? { ...session, status: sessionStatus }
+        : session,
+    ),
+  )
+  queryClient.setQueryData<SessionGetResponse>(
+    queryKeys.session(sessionId),
+    (previous) =>
+      previous
+        ? {
+            ...previous,
+            session: { ...previous.session, status: sessionStatus },
+          }
+        : previous,
+  )
+  if (runId) {
+    queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions, (previous) =>
+      previous?.map((session) => {
+        if (session.id !== sessionId || session.latest_run?.id !== runId) {
+          return session
+        }
+        return {
+          ...session,
+          latest_run: { ...session.latest_run, status: runStatus },
+        }
+      }),
+    )
+  }
+}
+
 function invalidateForNotification(
   queryClient: ReturnType<typeof useQueryClient>,
   event: NotificationEvent,
 ) {
-  const sessionId =
-    typeof event.payload.session_id === 'string'
-      ? event.payload.session_id
-      : null
-  const runId =
-    typeof event.payload.run_id === 'string' ? event.payload.run_id : null
-  const profileName =
-    typeof event.payload.profile_name === 'string'
-      ? event.payload.profile_name
-      : null
+  const sessionId = stringPayloadField(event.payload, 'session_id')
+  const runId = stringPayloadField(event.payload, 'run_id', 'id')
+  const profileName = stringPayloadField(event.payload, 'profile_name', 'name')
 
   if (event.type.startsWith('session.') || event.type.startsWith('run.')) {
+    patchSessionStatusFromNotification(queryClient, event, sessionId, runId)
     void queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
     if (sessionId)
       void queryClient.invalidateQueries({

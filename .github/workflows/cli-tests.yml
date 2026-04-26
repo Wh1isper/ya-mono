@@ -7,6 +7,10 @@ on:
     paths:
       - "packages/yaacli/**"
       - "packages/ya-agent-sdk/**"
+      - "skills/**"
+      - "scripts/sync-skills.sh"
+      - "scripts/check-skills-sync.sh"
+      - "scripts/build-skill-zips.py"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/cli-tests.yml"
@@ -16,6 +20,10 @@ on:
     paths:
       - "packages/yaacli/**"
       - "packages/ya-agent-sdk/**"
+      - "skills/**"
+      - "scripts/sync-skills.sh"
+      - "scripts/check-skills-sync.sh"
+      - "scripts/build-skill-zips.py"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/cli-tests.yml"
@@ -42,6 +50,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           extras: "all"
+
+      - name: Check bundled skills sync
+        run: ./scripts/check-skills-sync.sh
+
+      - name: Check release skill zip build
+        run: python scripts/build-skill-zips.py --check
 
       - name: Run CLI tests
         run: uv run python -m pytest packages/yaacli/tests -n auto

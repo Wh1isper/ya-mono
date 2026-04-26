@@ -105,6 +105,7 @@ def test_serve_skips_auto_migrate_when_disabled(monkeypatch, tmp_path) -> None:
                 "host": "127.0.0.1",
                 "port": 9042,
                 "reload": False,
+                "log_level": "info",
             },
         )
     ]

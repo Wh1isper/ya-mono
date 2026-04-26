@@ -48,28 +48,14 @@ jobs:
           tag: ${{ github.ref }}
           overwrite: true
 
-      - name: Create SKILL.zip
-        run: |
-          mkdir -p dist
-          python - <<'PY'
-          from pathlib import Path
-          import zipfile
+      - name: Create skill zip archives
+        run: python scripts/build-skill-zips.py
 
-          source_dir = Path("packages/yaacli/yaacli/skills/building-agents")
-          output_path = Path("dist/SKILL.zip")
-          archive_root = Path("ya-agent-sdk")
-
-          with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-              for path in sorted(source_dir.rglob("*")):
-                  if path.is_file():
-                      arcname = archive_root / path.relative_to(source_dir)
-                      zf.write(path, arcname)
-          PY
-
-      - name: Upload SKILL.zip to release
+      - name: Upload skill zip archives to release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: dist/SKILL.zip
+          file: dist/*SKILL.zip
+          file_glob: true
           tag: ${{ github.ref }}
           overwrite: true

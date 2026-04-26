@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from loguru import logger
 from pydantic import BaseModel
 
 from ya_claw.controller.models import DispatchMode
@@ -18,13 +19,21 @@ class RunDispatcher:
         self._supervisor = supervisor
 
     def dispatch(self, run_id: str, mode: DispatchMode) -> RunDispatchResult:
+        logger.debug("Dispatching run run_id={} mode={}", run_id, mode)
         if mode == DispatchMode.QUEUE:
+            logger.info("Run kept queued run_id={} mode={} reason=queued_only", run_id, mode)
             return RunDispatchResult(run_id=run_id, mode=mode, submitted=False, reason="queued_only")
         if self._supervisor is None:
+            logger.warning("Run dispatch skipped run_id={} mode={} reason=supervisor_unavailable", run_id, mode)
             return RunDispatchResult(run_id=run_id, mode=mode, submitted=False, reason="supervisor_unavailable")
-        if not self._supervisor.execution_enabled:
-            return RunDispatchResult(run_id=run_id, mode=mode, submitted=False, reason="execution_profile_unconfigured")
         submitted = self._supervisor.submit_run(run_id)
+        logger.info(
+            "Run dispatch result run_id={} mode={} submitted={} reason={}",
+            run_id,
+            mode,
+            submitted,
+            None if submitted else "already_submitted",
+        )
         return RunDispatchResult(
             run_id=run_id,
             mode=mode,

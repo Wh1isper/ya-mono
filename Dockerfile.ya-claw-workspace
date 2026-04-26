@@ -91,5 +91,8 @@ RUN chmod +x /usr/local/bin/ya-claw-workspace-entrypoint
 
 WORKDIR /workspace
 
+HEALTHCHECK --interval=1s --timeout=1s --start-period=2s --retries=60 \
+    CMD test -f "${YA_CLAW_WORKSPACE_STARTUP_DIR:-/workspace}/.agents/.bundled-skills-ready" || exit 1
+
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/ya-claw-workspace-entrypoint"]
 CMD ["sleep", "infinity"]

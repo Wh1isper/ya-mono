@@ -63,7 +63,7 @@ Shows runtime-owned heartbeat configuration and fire history.
 Important fields:
 
 - enabled state
-- interval
+- cron expression and timezone
 - profile
 - prompt
 - `HEARTBEAT.md` path and existence

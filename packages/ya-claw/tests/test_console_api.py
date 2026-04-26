@@ -22,7 +22,6 @@ def clear_claw_settings(monkeypatch, tmp_path: Path) -> None:
         "YA_CLAW_WORKSPACE_DIR",
         "YA_CLAW_PROFILE_SEED_FILE",
         "YA_CLAW_AUTO_SEED_PROFILES",
-        "YA_CLAW_EXECUTION_MODEL",
     ):
         monkeypatch.delenv(env_name, raising=False)
 
@@ -115,10 +114,12 @@ def test_console_notifications_capture_session_run_and_profile_events() -> None:
 
         events = _notification_hub(client).events
         event_types = [event.type for event in events]
-        assert event_types[:3] == ["session.created", "run.created", "profile.created"]
+        assert event_types[0] == "session.created"
+        assert event_types[1] == "run.created"
+        profile_event_index = event_types.index("profile.created")
         assert events[0].payload["session_id"] == session_payload["id"]
         assert events[1].payload["run_id"] == run_payload["id"]
-        assert events[2].payload["profile_name"] == "general"
+        assert events[profile_event_index].payload["profile_name"] == "general"
 
 
 def test_profile_delete_emits_console_notification() -> None:

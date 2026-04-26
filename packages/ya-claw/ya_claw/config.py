@@ -59,6 +59,7 @@ class ClawSettings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 9042
     reload: bool = False
+    log_level: str = "INFO"
     public_base_url: str = "http://127.0.0.1:9042"
     instance_id: str = Field(default_factory=_default_instance_id)
     web_dist_dir: Path | None = None
@@ -75,6 +76,7 @@ class ClawSettings(BaseSettings):
 
     workspace_provider_backend: Literal["local", "docker"] = "docker"
     workspace_provider_docker_image: str = _DEFAULT_WORKSPACE_DOCKER_IMAGE
+    workspace_provider_docker_host_workspace_dir: Path | None = None
     workspace_provider_docker_uid: int | None = None
     workspace_provider_docker_gid: int | None = None
     workspace_provider_docker_container_cache_dir: Path | None = None
@@ -92,9 +94,6 @@ class ClawSettings(BaseSettings):
     default_profile: str = "default"
     profile_seed_file: Path | None = None
     auto_seed_profiles: bool = False
-    execution_model: str | None = None
-    execution_model_settings_preset: str | None = None
-    execution_model_config_preset: str | None = None
 
     auto_migrate: bool = True
 
@@ -121,6 +120,12 @@ class ClawSettings(BaseSettings):
     @property
     def run_store_dir(self) -> Path:
         return self.runtime_data_dir / _DEFAULT_RUN_STORE_DIRNAME
+
+    @property
+    def resolved_workspace_provider_docker_host_workspace_dir(self) -> Path:
+        if self.workspace_provider_docker_host_workspace_dir is not None:
+            return self.workspace_provider_docker_host_workspace_dir.expanduser()
+        return self.resolved_workspace_dir
 
     @property
     def resolved_workspace_provider_docker_uid(self) -> int:

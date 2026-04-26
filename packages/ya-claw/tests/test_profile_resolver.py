@@ -292,7 +292,7 @@ profiles:
     assert resolved_profile.builtin_toolsets == []
 
 
-async def test_bootstrap_profile_has_no_default_subagents(
+async def test_missing_default_profile_raises_clear_error(
     tmp_path: Path,
     db_engine: AsyncEngine,
 ) -> None:
@@ -300,18 +300,13 @@ async def test_bootstrap_profile_has_no_default_subagents(
         api_token="test-token",  # noqa: S106
         data_dir=tmp_path / "runtime-data",
         workspace_dir=tmp_path / "workspace",
-        execution_model="test",
     )
     session_factory = create_session_factory(db_engine)
     resolver = ProfileResolver(settings=settings, session_factory=session_factory)
 
-    resolved_profile = await resolver.resolve(None)
-
-    assert resolved_profile.system_prompt is None
-    assert resolved_profile.builtin_toolsets == ["core"]
-    assert resolved_profile.mcp_servers == {}
-    assert resolved_profile.enabled_mcps == []
-    assert resolved_profile.disabled_mcps == []
-    assert resolved_profile.workspace_backend_hint is None
-    assert resolved_profile.unified_subagents is False
-    assert resolved_profile.subagent_configs == []
+    try:
+        await resolver.resolve(None)
+    except ValueError as exc:
+        assert str(exc) == "Execution profile 'default' could not be resolved."
+    else:
+        raise AssertionError("Expected missing default profile to raise ValueError")

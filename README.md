@@ -27,9 +27,10 @@
 - [`scripts/`](scripts/) — repository automation scripts
 - [`.github/`](.github/) — CI and release workflows
 
-## Primary Skill Source
+## Primary Skill Sources
 
-- [`skills/agent-builder/`](skills/agent-builder/) — source of truth for the `agent-builder` skill bundled into YAACLI
+- [`skills/agent-builder/`](skills/agent-builder/) — source of truth for the `agent-builder` skill bundled into YAACLI as `building-agents`
+- [`skills/ya-claw-deploy/`](skills/ya-claw-deploy/) — source of truth for the YA Claw deployment skill published as `YA_CLAW_DEPLOY_SKILL.zip`
 
 ## Installation
 
@@ -48,7 +49,7 @@ cd ya-mono
 make install
 ```
 
-Install the bundled `agent-builder` skill into `~/.agents/skills`:
+Install the bundled agent-builder skill into `~/.agents/skills`:
 
 ```bash
 make install-skills
@@ -69,8 +70,10 @@ Recommended starting points:
 
 ### YA Claw
 
-Read the runtime design docs:
+Read the deployment and runtime docs:
 
+- [`skills/ya-claw-deploy/SKILL.md`](skills/ya-claw-deploy/SKILL.md)
+- [`skills/ya-claw-deploy/references/docker.md`](skills/ya-claw-deploy/references/docker.md)
 - [`packages/ya-claw/spec/README.md`](packages/ya-claw/spec/README.md)
 - [`packages/ya-claw/spec/00-overview.md`](packages/ya-claw/spec/00-overview.md)
 - [`packages/ya-claw/spec/01-configuration-and-workspace-provider.md`](packages/ya-claw/spec/01-configuration-and-workspace-provider.md)
@@ -102,6 +105,7 @@ Build the images:
 
 ```bash
 make docker-build-claw
+make docker-build-claw-workspace
 make docker-build-platform
 ```
 
@@ -128,6 +132,7 @@ make test
 - [ya-claw README](packages/ya-claw/README.md)
 - [ya-agent-platform README](packages/ya-agent-platform/README.md)
 - [agent-builder skill](skills/agent-builder/SKILL.md)
+- [YA Claw deployment skill](skills/ya-claw-deploy/SKILL.md)
 - [Contributing Guide](CONTRIBUTING.md)
 
 ## Workspace Commands
@@ -135,7 +140,7 @@ make test
 | Command                            | Description                                                         |
 | ---------------------------------- | ------------------------------------------------------------------- |
 | `make install`                     | Install Python dependencies, web dependencies, and pre-commit hooks |
-| `make install-skills`              | Install the `agent-builder` skill bundle into `~/.agents/skills`    |
+| `make install-skills`              | Install the bundled agent-builder skill into `~/.agents/skills`     |
 | `make lint`                        | Check lock consistency and run pre-commit hooks                     |
 | `make check`                       | Run lock validation, lint, pyright, deptry, and web checks          |
 | `make test`                        | Run SDK, CLI, and YA Claw tests                                     |

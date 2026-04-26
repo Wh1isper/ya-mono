@@ -77,26 +77,33 @@ ensure_workspace_user() {
 copy_bundled_skills() {
   local bundled_skills_root="/opt/ya-claw/skills"
   local startup_dir="${YA_CLAW_WORKSPACE_STARTUP_DIR:-${PWD}}"
-  local skills_root="${startup_dir}/.agents/skills"
+  local agents_root="${startup_dir}/.agents"
+  local skills_root="${agents_root}/skills"
+  local ready_file="${agents_root}/.bundled-skills-ready"
+  local ready_tmp="${agents_root}/.bundled-skills-ready.tmp.$$"
 
-  if [[ ! -d "${bundled_skills_root}" ]]; then
-    return 0
+  mkdir -p "${agents_root}"
+  rm -f "${ready_file}" "${ready_tmp}"
+
+  if [[ -d "${bundled_skills_root}" ]]; then
+    mkdir -p "${skills_root}"
+
+    shopt -s nullglob dotglob
+    local bundled_skill_dir
+    for bundled_skill_dir in "${bundled_skills_root}"/*; do
+      if [[ ! -d "${bundled_skill_dir}" ]]; then
+        continue
+      fi
+
+      local skill_name
+      skill_name="$(basename "${bundled_skill_dir}")"
+      mkdir -p "${skills_root}/${skill_name}"
+      cp -R "${bundled_skill_dir}/." "${skills_root}/${skill_name}/"
+    done
   fi
 
-  mkdir -p "${skills_root}"
-
-  shopt -s nullglob dotglob
-  local bundled_skill_dir
-  for bundled_skill_dir in "${bundled_skills_root}"/*; do
-    if [[ ! -d "${bundled_skill_dir}" ]]; then
-      continue
-    fi
-
-    local skill_name
-    skill_name="$(basename "${bundled_skill_dir}")"
-    mkdir -p "${skills_root}/${skill_name}"
-    cp -R "${bundled_skill_dir}/." "${skills_root}/${skill_name}/"
-  done
+  printf 'ready\n' > "${ready_tmp}"
+  mv "${ready_tmp}" "${ready_file}"
 }
 
 run_as_workspace_user() {

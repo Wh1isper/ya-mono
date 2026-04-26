@@ -5,13 +5,21 @@ import contextlib
 import hashlib
 import json
 import tempfile
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
 from y_agent_environment import Environment, ResourceFactory, ResourceRegistryState
-from ya_agent_sdk.environment import LocalShell, SandboxEnvironment, VirtualLocalFileOperator, VirtualMount
+from ya_agent_sdk.environment import (
+    LocalFileOperator,
+    LocalShell,
+    SandboxEnvironment,
+    VirtualLocalFileOperator,
+    VirtualMount,
+)
 from ya_agent_sdk.environment.sandbox import DockerShell
 
 _DOCKER_SANDBOX_METADATA_KEY = "sandbox"
@@ -30,6 +38,7 @@ class WorkspaceBinding:
     cwd: Path
     readable_paths: list[Path]
     writable_paths: list[Path]
+    docker_host_path: Path | None = None
     environment_overrides: dict[str, str] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     backend_hint: str | None = None
@@ -74,12 +83,18 @@ class MappedLocalEnvironment(Environment):
             )
             tmp_dir_path = Path(self._tmp_dir_obj.name)
 
-        self._file_operator = VirtualLocalFileOperator(
-            mounts=self._mounts,
-            default_virtual_path=self._mounts[0].virtual_path,
+        allowed_paths = [mount.host_path.resolve() for mount in self._mounts]
+        logger.debug(
+            "Setting up local workspace environment cwd={} allowed_paths={} tmp_dir={}",
+            self._host_cwd,
+            allowed_paths,
+            tmp_dir_path,
+        )
+        self._file_operator = LocalFileOperator(
+            default_path=self._host_cwd,
+            allowed_paths=allowed_paths,
             tmp_dir=tmp_dir_path,
         )
-        allowed_paths = [mount.host_path.resolve() for mount in self._mounts]
         if tmp_dir_path is not None:
             allowed_paths.append(tmp_dir_path.resolve())
         self._shell = WorkspaceLocalShell(
@@ -136,6 +151,7 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
         shell_timeout: float = 30.0,
         cleanup_on_exit: bool = False,
         container_cache_path: Path | None = None,
+        docker_host_paths: list[Path] | None = None,
     ) -> None:
         super().__init__(
             mounts=mounts,
@@ -150,6 +166,9 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
         self._workspace_gid = workspace_gid
         self._workspace_environment = dict(workspace_environment or {})
         self._container_cache_path = container_cache_path.expanduser() if container_cache_path is not None else None
+        self._docker_host_paths = (
+            [path.expanduser() for path in docker_host_paths] if docker_host_paths is not None else []
+        )
 
     @property
     def container_ref(self) -> str:
@@ -171,6 +190,15 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
         for mount in self._mounts:
             mount.host_path.resolve().mkdir(parents=True, exist_ok=True)
 
+        logger.debug(
+            "Setting up Docker workspace environment ref={} image={} work_dir={} mounts={} docker_host_paths={} cache={}",
+            self._container_ref,
+            self._image,
+            self._work_dir,
+            [(str(mount.host_path), str(mount.virtual_path)) for mount in self._mounts],
+            [str(path) for path in self._docker_host_paths],
+            self._container_cache_path,
+        )
         if self._custom_shell is None:
             lock_key = str(self._container_cache_path or self._container_ref)
             lock = _DOCKER_CONTAINER_LOCKS.setdefault(lock_key, asyncio.Lock())
@@ -181,6 +209,9 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
             mounts=self._mounts,
             default_virtual_path=Path(self._work_dir),
             tmp_dir=tmp_dir_path,
+        )
+        logger.info(
+            "Docker workspace environment ready ref={} container_id={}", self._container_ref, self._container_id
         )
 
         if self._custom_shell is not None:
@@ -200,7 +231,13 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
             self._container_id = cached_container_id
             try:
                 await self._verify_container()
+                await self._wait_for_container_ready(cached_container_id)
                 await self._write_cached_container_id(cached_container_id)
+                logger.info(
+                    "Reusing cached Docker workspace container ref={} id={}",
+                    self._container_ref,
+                    cached_container_id,
+                )
                 return
             except RuntimeError:
                 await self._clear_cached_container_id(cached_container_id)
@@ -212,7 +249,13 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
             self._container_id = discovered_container_id
             try:
                 await self._verify_container()
+                await self._wait_for_container_ready(discovered_container_id)
                 await self._write_cached_container_id(discovered_container_id)
+                logger.info(
+                    "Reusing discovered Docker workspace container ref={} id={}",
+                    self._container_ref,
+                    discovered_container_id,
+                )
                 return
             except RuntimeError:
                 await self._clear_cached_container_id(discovered_container_id)
@@ -221,6 +264,7 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
 
         self._container_id = await self._create_container()
         self._created_container = True
+        await self._wait_for_container_ready(self._container_id)
         await self._write_cached_container_id(self._container_id)
 
     async def _teardown(self) -> None:
@@ -247,10 +291,23 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
 
         def _run_container() -> str:
             try:
-                volumes = {str(m.host_path.resolve()): {"bind": str(m.virtual_path), "mode": "rw"} for m in mounts}
+                volumes = {
+                    str(_resolve_docker_mount_host_path(mounts, self._docker_host_paths, index).resolve()): {
+                        "bind": str(mount.virtual_path),
+                        "mode": "rw",
+                    }
+                    for index, mount in enumerate(mounts)
+                }
                 if tmp_dir is not None:
                     volumes[str(tmp_dir)] = {"bind": str(tmp_dir), "mode": "rw"}
                 environment = {**workspace_environment, "YA_CLAW_WORKSPACE_STARTUP_DIR": work_dir}
+                logger.info(
+                    "Starting reusable Docker workspace container ref={} image={} work_dir={} volumes={}",
+                    container_ref,
+                    image,
+                    work_dir,
+                    volumes,
+                )
                 if isinstance(workspace_uid, int):
                     environment["YA_CLAW_WORKSPACE_UID"] = str(workspace_uid)
                     environment["YA_CLAW_HOST_UID"] = str(workspace_uid)
@@ -270,6 +327,7 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
                 container_id = container.id
                 if container_id is None:
                     raise RuntimeError("Container was created but has no ID")
+                logger.info("Started Docker workspace container ref={} id={}", container_ref, container_id)
                 return container_id
             except Exception as exc:
                 raise RuntimeError(f"Failed to start reusable container '{container_ref}': {exc}") from exc
@@ -288,7 +346,6 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
                 container.reload()
                 status = _normalize_optional_str(getattr(container, "status", None))
                 if status == "running":
-                    _raise_for_unhealthy_container(container_id, container)
                     return
                 if status in ("exited", "created", "paused"):
                     container.start()
@@ -296,7 +353,6 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
                     next_status = _normalize_optional_str(getattr(container, "status", None))
                     if next_status != "running":
                         raise RuntimeError(f"Container {container_id} failed to start (status: {next_status})")
-                    _raise_for_unhealthy_container(container_id, container)
                     return
                 raise RuntimeError(f"Container {container_id} is in unrecoverable state: {status}")
             except RuntimeError:
@@ -308,6 +364,27 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
 
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, _check_and_start_container)
+
+    async def _wait_for_container_ready(self, container_id: str) -> None:
+        timeout_seconds = 60.0
+        poll_interval_seconds = 0.25
+
+        def _wait() -> None:
+            deadline = time.monotonic() + timeout_seconds
+            while True:
+                health_status = _inspect_container_health_status(self.client, container_id)
+                if health_status is None or health_status == "healthy":
+                    return
+                if health_status == "unhealthy":
+                    raise RuntimeError(f"Container {container_id} is unhealthy")
+                if health_status != "starting":
+                    raise RuntimeError(f"Container {container_id} has unexpected health status: {health_status}")
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(f"Container {container_id} did not become healthy within {timeout_seconds}s")
+                time.sleep(poll_interval_seconds)
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _wait)
 
     async def _resolve_container_id_from_ref(self) -> str | None:
         container_ref = self._container_ref
@@ -419,6 +496,14 @@ class LocalEnvironmentFactory(EnvironmentFactory):
         self._workspace_environment = dict(workspace_environment or {})
 
     def build(self, binding: WorkspaceBinding) -> Environment:
+        logger.debug(
+            "Building local environment provider={} host_path={} cwd={} readable={} writable={}",
+            binding.metadata.get("provider"),
+            binding.host_path,
+            binding.cwd,
+            binding.readable_paths,
+            binding.writable_paths,
+        )
         return MappedLocalEnvironment(
             mounts=_virtual_mounts_from_binding(binding),
             host_cwd=binding.host_path,
@@ -453,10 +538,22 @@ class DockerEnvironmentFactory(EnvironmentFactory):
         preferred_container_id = _normalize_optional_str(sandbox_metadata.get("container_id"))
         container_ref = _normalize_optional_str(sandbox_metadata.get("container_ref")) or build_workspace_container_ref(
             image=self._image,
-            workspace_dir=binding.host_path,
+            workspace_dir=_resolve_binding_docker_host_path(binding),
         )
         mounts = _virtual_mounts_from_binding(binding)
+        docker_host_paths = [_resolve_binding_docker_host_path(binding)]
         workspace_environment = {**self._workspace_environment, **binding.environment_overrides}
+        logger.info(
+            "Building Docker environment provider={} service_path={} docker_host_path={} virtual_path={} cwd={} image={} container_ref={} preferred_container_id={}",
+            binding.metadata.get("provider"),
+            binding.host_path,
+            _resolve_binding_docker_host_path(binding),
+            binding.virtual_path,
+            binding.cwd,
+            self._image,
+            container_ref,
+            preferred_container_id,
+        )
         if isinstance(self._workspace_uid, int):
             binding.metadata["workspace_uid"] = self._workspace_uid
         if isinstance(self._workspace_gid, int):
@@ -479,6 +576,7 @@ class DockerEnvironmentFactory(EnvironmentFactory):
             cleanup_on_exit=self._cleanup_on_exit,
             shell_timeout=self._shell_timeout,
             container_cache_path=_build_container_cache_path(self._container_cache_dir),
+            docker_host_paths=docker_host_paths,
         )
 
 
@@ -512,6 +610,11 @@ class DefaultEnvironmentFactory(EnvironmentFactory):
 
     def build(self, binding: WorkspaceBinding) -> Environment:
         backend = (binding.backend_hint or "local").strip().lower()
+        logger.debug(
+            "Default environment factory selected backend={} provider={}",
+            backend,
+            binding.metadata.get("provider"),
+        )
         if backend == "docker":
             return self._docker_factory.build(binding)
         return self._local_factory.build(binding)
@@ -522,12 +625,17 @@ class LocalWorkspaceProvider(WorkspaceProvider):
         self,
         workspace_dir: Path,
         *,
-        virtual_workspace_path: Path = _DEFAULT_VIRTUAL_WORKSPACE_PATH,
+        virtual_workspace_path: Path | None = None,
     ) -> None:
         self._workspace_dir = workspace_dir.expanduser().resolve()
-        self._virtual_workspace_path = virtual_workspace_path
+        self._virtual_workspace_path = virtual_workspace_path or self._workspace_dir
 
     def resolve(self, metadata: dict[str, Any] | None = None) -> WorkspaceBinding:
+        logger.debug(
+            "Resolving local workspace binding workspace_dir={} metadata_keys={}",
+            self._workspace_dir,
+            sorted((metadata or {}).keys()),
+        )
         return _build_workspace_binding(
             workspace_dir=self._workspace_dir,
             virtual_workspace_path=self._virtual_workspace_path,
@@ -536,7 +644,7 @@ class LocalWorkspaceProvider(WorkspaceProvider):
             backend_hint="local",
             extra_metadata={
                 "shell_backend": "local",
-                "file_operator": "virtual-local",
+                "file_operator": "local",
                 "host_cwd": str(self._workspace_dir),
             },
         )
@@ -548,9 +656,15 @@ class DockerWorkspaceProvider(WorkspaceProvider):
         workspace_dir: Path,
         *,
         image: str,
+        docker_host_workspace_dir: Path | None = None,
         virtual_workspace_path: Path = _DEFAULT_VIRTUAL_WORKSPACE_PATH,
     ) -> None:
         self._workspace_dir = workspace_dir.expanduser().resolve()
+        self._docker_host_workspace_dir = (
+            docker_host_workspace_dir.expanduser().resolve()
+            if docker_host_workspace_dir is not None
+            else self._workspace_dir
+        )
         self._image = image
         self._virtual_workspace_path = virtual_workspace_path
 
@@ -559,7 +673,7 @@ class DockerWorkspaceProvider(WorkspaceProvider):
         sandbox_metadata = extract_workspace_sandbox_metadata(resolved_metadata) or {}
         container_ref = _normalize_optional_str(sandbox_metadata.get("container_ref")) or build_workspace_container_ref(
             image=self._image,
-            workspace_dir=self._workspace_dir,
+            workspace_dir=self._docker_host_workspace_dir,
         )
         sandbox_metadata = {
             **sandbox_metadata,
@@ -568,8 +682,18 @@ class DockerWorkspaceProvider(WorkspaceProvider):
             "image": _normalize_optional_str(sandbox_metadata.get("image")) or self._image,
         }
         resolved_metadata[_DOCKER_SANDBOX_METADATA_KEY] = sandbox_metadata
+        logger.info(
+            "Resolving Docker workspace binding service_workspace_dir={} docker_host_workspace_dir={} virtual_path={} image={} container_ref={} metadata_keys={}",
+            self._workspace_dir,
+            self._docker_host_workspace_dir,
+            self._virtual_workspace_path,
+            self._image,
+            container_ref,
+            sorted(resolved_metadata.keys()),
+        )
         return _build_workspace_binding(
             workspace_dir=self._workspace_dir,
+            docker_host_workspace_dir=self._docker_host_workspace_dir,
             virtual_workspace_path=self._virtual_workspace_path,
             metadata=resolved_metadata,
             provider="docker",
@@ -578,7 +702,8 @@ class DockerWorkspaceProvider(WorkspaceProvider):
                 "shell_backend": "docker",
                 "file_operator": "virtual-local",
                 "docker_image": self._image,
-                "host_mount": str(self._workspace_dir),
+                "host_mount": str(self._docker_host_workspace_dir),
+                "service_mount": str(self._workspace_dir),
                 "container_mount": str(self._virtual_workspace_path),
             },
         )
@@ -589,6 +714,7 @@ def _build_workspace_binding(
     workspace_dir: Path,
     virtual_workspace_path: Path,
     metadata: dict[str, Any],
+    docker_host_workspace_dir: Path | None = None,
     provider: str,
     backend_hint: str,
     extra_metadata: dict[str, Any],
@@ -597,6 +723,7 @@ def _build_workspace_binding(
     return WorkspaceBinding(
         host_path=workspace_dir,
         virtual_path=virtual_workspace_path,
+        docker_host_path=docker_host_workspace_dir,
         cwd=virtual_workspace_path,
         readable_paths=[virtual_workspace_path],
         writable_paths=[virtual_workspace_path],
@@ -611,6 +738,18 @@ def _build_workspace_binding(
 
 def _virtual_mounts_from_binding(binding: WorkspaceBinding) -> list[VirtualMount]:
     return [VirtualMount(host_path=binding.host_path, virtual_path=binding.virtual_path)]
+
+
+def _resolve_binding_docker_host_path(binding: WorkspaceBinding) -> Path:
+    if binding.docker_host_path is not None:
+        return binding.docker_host_path
+    return binding.host_path
+
+
+def _resolve_docker_mount_host_path(mounts: list[VirtualMount], docker_host_paths: list[Path], index: int) -> Path:
+    if index < len(docker_host_paths):
+        return docker_host_paths[index]
+    return mounts[index].host_path
 
 
 def build_workspace_container_ref(*, image: str, workspace_dir: Path) -> str:
@@ -648,7 +787,8 @@ def build_workspace_sandbox_metadata(*, binding: WorkspaceBinding, environment: 
         or _normalize_optional_str(binding.metadata.get("docker_image")),
         "workspace_uid": _first_optional_int(existing.get("workspace_uid"), binding.metadata.get("workspace_uid")),
         "workspace_gid": _first_optional_int(existing.get("workspace_gid"), binding.metadata.get("workspace_gid")),
-        "host_mount": str(binding.host_path),
+        "host_mount": str(_resolve_binding_docker_host_path(binding)),
+        "service_mount": str(binding.host_path),
         "container_mount": str(binding.virtual_path),
         "cwd": str(binding.cwd),
     }
@@ -660,17 +800,22 @@ def remove_workspace_sandbox_metadata(metadata: dict[str, Any] | None) -> dict[s
     return normalized
 
 
-def _raise_for_unhealthy_container(container_id: str, container: Any) -> None:
+def _inspect_container_health_status(client: Any, container_id: str) -> str | None:
+    try:
+        container = client.containers.get(container_id)
+        container.reload()
+    except Exception as exc:
+        if exc.__class__.__name__ == "NotFound":
+            raise RuntimeError(f"Container not found: {container_id}") from exc
+        raise RuntimeError(f"Failed to inspect container health: {exc}") from exc
+
     state = getattr(container, "attrs", {}).get("State")
     if not isinstance(state, dict):
-        return
+        return None
     health = state.get("Health")
     if not isinstance(health, dict):
-        return
-    health_status = _normalize_optional_str(health.get("Status"))
-    if health_status in (None, "healthy", "starting"):
-        return
-    raise RuntimeError(f"Container {container_id} is unhealthy (health: {health_status})")
+        return None
+    return _normalize_optional_str(health.get("Status"))
 
 
 def _build_container_cache_path(cache_dir: Path | None) -> Path | None:

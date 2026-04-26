@@ -71,12 +71,13 @@ Most architecture work in this repository targets `packages/ya-agent-sdk` and `p
 - successful run records store final `output_text` directly in the database and keep `output_summary` for compact displays
 - foundational execution modules live under `ya_claw/execution/`
 - workspace provider modules live under `ya_claw/workspace/`
-- `LocalWorkspaceProvider` uses `VirtualLocalFileOperator` plus `LocalShell`
-- `DockerWorkspaceProvider` uses Docker mounts through `SandboxEnvironment`
+- `LocalWorkspaceProvider` uses `LocalFileOperator` plus `LocalShell` over the real workspace path
+- `DockerWorkspaceProvider` uses Docker mounts through `SandboxEnvironment`; file operations map the service-visible workspace path to `/workspace`, and Docker shell uses `/workspace`
+- `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOST_WORKSPACE_DIR` provides the Docker daemon-visible host mount path when the YA Claw service itself runs in Docker
 - Docker workspace containers receive UID/GID envs (`YA_CLAW_WORKSPACE_UID`, `YA_CLAW_WORKSPACE_GID`, `YA_CLAW_HOST_UID`, `YA_CLAW_HOST_GID`) from the service process by default or from `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID/GID`
 - `Dockerfile.ya-claw` can drop service execution privileges through `YA_CLAW_RUN_UID` and `YA_CLAW_RUN_GID`; the official workspace image defaults to UID/GID 1000 through build args
 - built-in run orchestration lives in `ya_claw/execution/coordinator.py`
-- built-in coordinator auto-dispatches only when `YA_CLAW_EXECUTION_MODEL` is configured
+- built-in coordinator dispatch resolves model/runtime behavior from AgentProfile rows; `YA_CLAW_DEFAULT_PROFILE` defaults to `default`
 - bridge adapter types are enumerated through `BridgeAdapterType`; current built-in adapter is `lark`
 - bridge deployment dispatch uses `BridgeDispatchMode` (`embedded`, `manual`) and stays separate from run execution dispatch (`queue`, `async`, `stream`)
 - `embedded` is the default bridge dispatch mode and runs adapter tasks under `BridgeSupervisor` in the same HTTP server lifespan as `ExecutionSupervisor`; `manual` starts the HTTP server without `BridgeSupervisor`

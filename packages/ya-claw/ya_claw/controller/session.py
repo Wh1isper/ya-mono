@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 from fastapi import HTTPException
+from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,6 +54,14 @@ class SessionController:
         request: SessionCreateRequest,
     ) -> SessionCreateResponse:
         session_id = uuid4().hex
+        logger.debug(
+            "Creating session session_id={} profile={} trigger_type={} initial_input_parts={} dispatch_mode={}",
+            session_id,
+            request.profile_name,
+            request.trigger_type,
+            len(request.input_parts),
+            request.dispatch_mode,
+        )
         record = SessionRecord(
             id=session_id,
             profile_name=request.profile_name,
@@ -82,6 +91,12 @@ class SessionController:
                 record = refreshed_record
 
         summary = await self._build_summary(db_session, record)
+        logger.info(
+            "Session created session_id={} profile={} initial_run_id={}",
+            session_id,
+            record.profile_name,
+            created_run.id if created_run is not None else None,
+        )
         return SessionCreateResponse(session=summary, run=created_run)
 
     async def create_run(
@@ -92,6 +107,13 @@ class SessionController:
         session_id: str,
         request: SessionRunCreateRequest,
     ) -> RunDetail:
+        logger.debug(
+            "Creating session run session_id={} reset_state={} restore_from_run_id={} dispatch_mode={}",
+            session_id,
+            request.reset_state,
+            request.restore_from_run_id,
+            request.dispatch_mode,
+        )
         record = await db_session.get(SessionRecord, session_id)
         if not isinstance(record, SessionRecord):
             raise HTTPException(status_code=404, detail=f"Session '{session_id}' was not found.")
@@ -117,6 +139,7 @@ class SessionController:
         )
 
     async def list(self, db_session: AsyncSession) -> list[SessionSummary]:
+        logger.debug("Listing sessions")
         statement: Select[tuple[SessionRecord]] = select(SessionRecord).order_by(SessionRecord.updated_at.desc())
         result = await db_session.execute(statement)
         records = list(result.scalars().all())
@@ -133,6 +156,14 @@ class SessionController:
         include_message: bool = False,
         include_input_parts: bool = False,
     ) -> SessionGetResponse:
+        logger.debug(
+            "Fetching session session_id={} runs_limit={} before_sequence_no={} include_message={} include_input_parts={}",
+            session_id,
+            runs_limit,
+            before_sequence_no,
+            include_message,
+            include_input_parts,
+        )
         record = await db_session.get(SessionRecord, session_id)
         if not isinstance(record, SessionRecord):
             raise HTTPException(status_code=404, detail=f"Session '{session_id}' was not found.")
@@ -177,6 +208,14 @@ class SessionController:
         include_message: bool = False,
         include_input_parts: bool = False,
     ) -> _SessionRunPage:
+        logger.debug(
+            "Listing session runs session_id={} limit={} before_sequence_no={} include_message={} include_input_parts={}",
+            session_id,
+            limit,
+            before_sequence_no,
+            include_message,
+            include_input_parts,
+        )
         record = await db_session.get(SessionRecord, session_id)
         if not isinstance(record, SessionRecord):
             raise HTTPException(status_code=404, detail=f"Session '{session_id}' was not found.")
@@ -216,6 +255,9 @@ class SessionController:
         limit: int = _DEFAULT_SESSION_RUNS_LIMIT,
         before_sequence_no: int | None = None,
     ) -> SessionTurnsResponse:
+        logger.debug(
+            "Listing session turns session_id={} limit={} before_sequence_no={}", session_id, limit, before_sequence_no
+        )
         record = await db_session.get(SessionRecord, session_id)
         if not isinstance(record, SessionRecord):
             raise HTTPException(status_code=404, detail=f"Session '{session_id}' was not found.")
@@ -243,6 +285,12 @@ class SessionController:
         )
 
     async def fork(self, db_session: AsyncSession, session_id: str, request: SessionForkRequest) -> SessionSummary:
+        logger.debug(
+            "Forking session source_session_id={} restore_from_run_id={} profile={}",
+            session_id,
+            request.restore_from_run_id,
+            request.profile_name,
+        )
         source_record = await db_session.get(SessionRecord, session_id)
         if not isinstance(source_record, SessionRecord):
             raise HTTPException(status_code=404, detail=f"Session '{session_id}' was not found.")
@@ -273,9 +321,16 @@ class SessionController:
         db_session.add(fork_record)
         await db_session.commit()
         await db_session.refresh(fork_record)
+        logger.info(
+            "Session forked source_session_id={} fork_session_id={} restore_from_run_id={}",
+            session_id,
+            fork_record.id,
+            restore_record.id,
+        )
         return await self._build_summary(db_session, fork_record)
 
     async def resolve_active_run_id(self, db_session: AsyncSession, session_id: str) -> str:
+        logger.debug("Resolving active run session_id={}", session_id)
         record = await db_session.get(SessionRecord, session_id)
         if not isinstance(record, SessionRecord):
             raise HTTPException(status_code=404, detail=f"Session '{session_id}' was not found.")
