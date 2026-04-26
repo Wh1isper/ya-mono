@@ -460,10 +460,9 @@ class ScheduleController:
                 dispatch_mode=DispatchMode.ASYNC,
             ),
         )
-        fire_record.status = "submitted"
+        self._apply_dispatch_result(fire_record, dispatcher.dispatch(run.id, DispatchMode.ASYNC))
         fire_record.created_session_id = run.session_id
         fire_record.run_id = run.id
-        dispatcher.dispatch(run.id, DispatchMode.ASYNC)
 
     async def _dispatch_fork_session(
         self,
@@ -500,10 +499,9 @@ class ScheduleController:
                 dispatch_mode=DispatchMode.ASYNC,
             ),
         )
-        fire_record.status = "submitted"
+        self._apply_dispatch_result(fire_record, dispatcher.dispatch(run.id, DispatchMode.ASYNC))
         fire_record.created_session_id = fork_session.id
         fire_record.run_id = run.id
-        dispatcher.dispatch(run.id, DispatchMode.ASYNC)
 
     async def _dispatch_isolate_session(
         self,
@@ -528,10 +526,17 @@ class ScheduleController:
                 dispatch_mode=DispatchMode.ASYNC,
             ),
         )
-        fire_record.status = "submitted"
+        self._apply_dispatch_result(fire_record, dispatcher.dispatch(run.id, DispatchMode.ASYNC))
         fire_record.created_session_id = run.session_id
         fire_record.run_id = run.id
-        dispatcher.dispatch(run.id, DispatchMode.ASYNC)
+
+    def _apply_dispatch_result(self, fire_record: ScheduleFireRecord, dispatch_result: object) -> None:
+        if getattr(dispatch_result, "submitted", False):
+            fire_record.status = "submitted"
+            fire_record.error_message = None
+            return
+        fire_record.status = "pending"
+        fire_record.error_message = f"Dispatch skipped: {getattr(dispatch_result, 'reason', None)}"
 
     async def _create_fire(
         self,

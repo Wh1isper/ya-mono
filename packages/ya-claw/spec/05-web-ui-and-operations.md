@@ -154,6 +154,20 @@ The runtime should emit structured logs for:
 - event delivery failures
 - shutdown and cleanup
 
+## Shutdown Flow
+
+On process shutdown, YA Claw stops ingress sources first, then waits for already active run tasks to finish before runtime state and database resources close:
+
+1. stop heartbeat dispatcher
+2. stop schedule dispatcher
+3. stop embedded bridge adapters
+4. stop accepting new execution supervisor submissions
+5. wait for active execution supervisor run tasks to complete
+6. mark the runtime instance stopped
+7. close runtime state, notification hub, and database engine
+
+`YA_CLAW_SHUTDOWN_TIMEOUT_SECONDS` maps to Uvicorn graceful shutdown timeout. Leave it unset for an unlimited application shutdown wait, and configure orchestrator stop windows such as Docker Compose `stop_grace_period` or systemd `TimeoutStopSec` to cover the longest expected run.
+
 ## Local Deployment Baseline
 
 Recommended local deployment shapes:

@@ -186,10 +186,11 @@ class HeartbeatController:
                     dispatch_mode=DispatchMode.ASYNC,
                 ),
             )
-            record.status = "submitted"
+            dispatch_result = dispatcher.dispatch(run.id, DispatchMode.ASYNC)
+            record.status = "submitted" if dispatch_result.submitted else "pending"
+            record.error_message = None if dispatch_result.submitted else f"Dispatch skipped: {dispatch_result.reason}"
             record.session_id = run.session_id
             record.run_id = run.id
-            dispatcher.dispatch(run.id, DispatchMode.ASYNC)
         except HTTPException as exc:
             record.status = "failed"
             record.error_message = str(exc.detail)

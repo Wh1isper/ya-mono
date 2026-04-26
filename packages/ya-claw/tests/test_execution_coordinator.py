@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -287,7 +288,47 @@ async def test_run_dispatcher_submits_with_profile_model_only(
 
     assert result.submitted is True
     assert result.reason is None
-    assert runtime_state.get_background_task("run-profile-model") is not None
+    task = runtime_state.get_background_task("run-profile-model")
+    assert task is not None
+    task.cancel()
+    await runtime_state.aclose()
+
+
+async def test_execution_supervisor_shutdown_waits_for_active_tasks(
+    db_engine: AsyncEngine,
+    settings: ClawSettings,
+    runtime_state: InMemoryRuntimeState,
+) -> None:
+    supervisor = ExecutionSupervisor(
+        settings=settings,
+        session_factory=create_session_factory(db_engine),
+        runtime_state=runtime_state,
+        workspace_provider=StubWorkspaceProvider(settings.resolved_workspace_dir),
+        environment_factory=StubEnvironmentFactory(),
+        profile_resolver=StubProfileResolver(),
+        runtime_builder=StubRuntimeBuilder(),
+    )
+    release = asyncio.Event()
+    completed = False
+
+    async def active_run() -> None:
+        nonlocal completed
+        await release.wait()
+        completed = True
+
+    task = asyncio.create_task(active_run())
+    runtime_state.register_background_task("run-active", task)
+    shutdown_task = asyncio.create_task(supervisor.shutdown())
+
+    await asyncio.sleep(0)
+    assert shutdown_task.done() is False
+    assert supervisor.submit_run("run-new") is False
+
+    release.set()
+    await shutdown_task
+
+    assert completed is True
+    assert task.done() is True
 
 
 async def test_execution_supervisor_claims_queued_run(

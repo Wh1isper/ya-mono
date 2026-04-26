@@ -216,6 +216,7 @@ class ClawApplication:
             bridge_supervisor = app.state.bridge_supervisor
             schedule_dispatcher = app.state.schedule_dispatcher
             heartbeat_dispatcher = app.state.heartbeat_dispatcher
+            execution_supervisor = app.state.execution_supervisor
 
             app.state.db_session_factory = None
             app.state.workspace_provider = None
@@ -238,6 +239,9 @@ class ClawApplication:
 
             if isinstance(bridge_supervisor, BridgeSupervisor):
                 await bridge_supervisor.shutdown()
+
+            if isinstance(execution_supervisor, ExecutionSupervisor):
+                await execution_supervisor.shutdown()
 
             if isinstance(runtime_instance_manager, RuntimeInstanceManager):
                 await runtime_instance_manager.mark_stopped()
