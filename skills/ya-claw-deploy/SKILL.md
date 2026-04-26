@@ -36,6 +36,7 @@ Choose the deployment path:
 - Profile seeding: read [`references/profiles.md`](references/profiles.md)
 - Bridge deployment: read [`references/bridge/overview.md`](references/bridge/overview.md) and [`references/bridge/lark.md`](references/bridge/lark.md)
 - Schedules and heartbeat: read [`references/schedules-heartbeat.md`](references/schedules-heartbeat.md)
+- Session/run pruning: read [`references/operations.md#session-and-run-pruning`](references/operations.md#session-and-run-pruning)
 - Health checks, backup, restore, upgrades, and troubleshooting: read [`references/operations.md`](references/operations.md)
 
 ## Required Baseline
@@ -58,6 +59,7 @@ Every deployment needs:
 - SQLite path: `~/.ya-claw/ya_claw.sqlite3`
 - run store: `~/.ya-claw/data/run-store`
 - workspace dir: `~/.ya-claw/data/workspace`
+- session prune: disabled by default; safe disk-only mode keeps latest 10 runs per session when enabled
 - default profile: `default`
 - Docker workspace image: `ghcr.io/wh1isper/ya-claw-workspace:latest`
 - Docker service host bind: `0.0.0.0`
@@ -90,6 +92,6 @@ Every deployment needs:
 | Lark bridge               | [`references/bridge/lark.md`](references/bridge/lark.md)                                 | You connect Lark/Feishu events to YA Claw                                                                       |
 | Bridge operations         | [`references/bridge/operations.md`](references/bridge/operations.md)                     | You verify embedded bridge startup, Lark ingress, dedupe, profiles, and workspace replies                       |
 | Schedules and heartbeat   | [`references/schedules-heartbeat.md`](references/schedules-heartbeat.md)                 | You configure cron schedules, heartbeat guidance, timer dispatchers, and timer operations                       |
-| Operations                | [`references/operations.md`](references/operations.md)                                   | You need health checks, logs, upgrades, backup, restore, or troubleshooting                                     |
+| Operations                | [`references/operations.md`](references/operations.md)                                   | You need health checks, logs, pruning, upgrades, backup, restore, or troubleshooting                            |
 
 When editing this skill inside the repository, keep `scripts/build-skill-zips.py` aligned so release artifacts include the canonical skill contents.

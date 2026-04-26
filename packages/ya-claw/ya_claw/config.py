@@ -141,6 +141,19 @@ class ClawSettings(BaseSettings):
     heartbeat_profile: str | None = None
     heartbeat_prompt: str = "Run heartbeat according to HEARTBEAT.md."
     heartbeat_on_active: Literal["skip", "queue"] = "skip"
+    session_prune_enabled: bool = False
+    session_prune_interval_seconds: int = 86400
+    session_prune_startup_delay_seconds: int = 300
+    session_prune_batch_size: int = 1000
+    session_prune_run_keep_recent: int = 10
+    session_prune_run_older_than_days: int = 0
+    session_prune_generated_sessions_enabled: bool = False
+    session_prune_schedule_keep_recent: int = 10
+    session_prune_schedule_older_than_days: int = 30
+    session_prune_heartbeat_keep_recent: int = 10
+    session_prune_heartbeat_older_than_days: int = 7
+    session_prune_fire_records_older_than_days: int = 0
+    session_prune_orphans_enabled: bool = True
     shutdown_timeout_seconds: PositiveInt | None = None
 
     auto_migrate: bool = True
