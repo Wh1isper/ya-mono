@@ -38,7 +38,7 @@ YA_CLAW_BRIDGE_LARK_APP_ID=cli_xxx
 YA_CLAW_BRIDGE_LARK_APP_SECRET=replace-with-app-secret
 ```
 
-The workspace needs `lark-cli` reply credentials. YA Claw injects `LARK_APP_ID` and `LARK_APP_SECRET` into workspace environments from explicit process env values or from the Lark bridge settings.
+The workspace needs `lark-cli` reply credentials. YA Claw injects built-in `LARK_APP_ID` and `LARK_APP_SECRET` aliases into workspace environments from explicit process env values or from the Lark bridge settings. Additional process env values are forwarded by listing names in `YA_CLAW_WORKSPACE_ENV_VARS`.
 
 For Docker shell shapes, these values are passed when the reusable workspace container is created. Check the workspace container:
 

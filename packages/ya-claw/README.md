@@ -79,6 +79,8 @@ Profile, MCP, and coordinator settings:
 - `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID=<service process UID>`
 - `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID=<service process GID>`
 - `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_CONTAINER_CACHE_DIR=~/.ya-claw/data/docker-workspace-containers`
+- `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_EXTRA_MOUNTS=/srv/ya-claw/home:/home/claw:rw,/srv/ya-claw/cache:/cache:ro`
+- `YA_CLAW_WORKSPACE_ENV_VARS=MY_TOOL_API_KEY,MY_TOOL_ENDPOINT`
 - `YA_CLAW_BRIDGE_DISPATCH_MODE=embedded|manual`
 - `YA_CLAW_BRIDGE_ENABLED_ADAPTERS=lark`
 - `YA_CLAW_BRIDGE_LARK_APP_ID=cli_xxx`
@@ -93,7 +95,9 @@ Profiles store model, prompt, model context config, builtin tool groups, subagen
 
 Session and run requests use the shared workspace configured by `YA_CLAW_WORKSPACE_DIR`. YA Claw maps that host directory to `/workspace` for file operations and shell execution. Workspace guidance loads from `/workspace/AGENTS.md`, and workspace skills are discovered from `/workspace/.agents/skills/`.
 
-The default Docker workspace image is `ghcr.io/wh1isper/ya-claw-workspace:latest`. It is based on Debian stable and includes Python, Node.js, Debian Chromium, the `agent-browser` CLI, and an `agent-browser` discovery skill copied into mounted workspaces at container start. Auto-started workspace containers receive `YA_CLAW_WORKSPACE_UID`, `YA_CLAW_WORKSPACE_GID`, `YA_CLAW_HOST_UID`, and `YA_CLAW_HOST_GID`; the default values come from the YA Claw service process UID/GID and can be overridden with `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID` and `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID`. Docker workspace containers reuse one stable container for the configured workspace, cache the container ID under `~/.ya-claw/data/docker-workspace-containers`, check running and Docker health status before each reuse, start stopped containers, and refresh the cache after container recreation. Use `agent-browser skills get core` inside a workspace session for the version-matched browser automation workflow.
+Workspace environments receive built-in `LARK_APP_ID` and `LARK_APP_SECRET` aliases from explicit process environment values or from the configured Lark bridge app settings. `YA_CLAW_WORKSPACE_ENV_VARS` forwards additional comma-separated process environment variable names into workspace environments. For Docker workspaces, forwarded values are passed at reusable workspace container creation time.
+
+The default Docker workspace image is `ghcr.io/wh1isper/ya-claw-workspace:latest`. It is based on Debian stable and includes Python, Node.js, Debian Chromium, the `agent-browser` CLI, and an `agent-browser` discovery skill copied into mounted workspaces at container start. Auto-started workspace containers receive `YA_CLAW_WORKSPACE_UID`, `YA_CLAW_WORKSPACE_GID`, `YA_CLAW_HOST_UID`, and `YA_CLAW_HOST_GID`; the default values come from the YA Claw service process UID/GID and can be overridden with `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID` and `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID`. `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_EXTRA_MOUNTS` adds comma-separated `host_path:container_path[:mode]` mounts to Docker workspace containers, with `rw` and `ro` modes. Docker workspace containers reuse one stable container for the configured workspace, cache the container ID under `~/.ya-claw/data/docker-workspace-containers`, check running and Docker health status before each reuse, start stopped containers, and refresh the cache after container recreation. Use `agent-browser skills get core` inside a workspace session for the version-matched browser automation workflow.
 
 Profiles can be managed through:
 

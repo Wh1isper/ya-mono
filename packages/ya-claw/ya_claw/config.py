@@ -12,6 +12,7 @@ from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ya_claw.bridge.models import BridgeAdapterType, BridgeDispatchMode
+from ya_claw.workspace import DockerExtraMount
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_DATABASE_FILENAME = "ya_claw.sqlite3"
@@ -24,6 +25,40 @@ _DEFAULT_WORKSPACE_DOCKER_IMAGE = "ghcr.io/wh1isper/ya-claw-workspace:latest"
 def _default_instance_id() -> str:
     hostname = socket.gethostname().split(".", 1)[0] or "host"
     return f"{hostname}-{os.getpid()}-{uuid4().hex[:8]}"
+
+
+def _parse_env_var_names(value: str) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for raw_name in value.split(","):
+        name = raw_name.strip()
+        if name == "" or name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+    return names
+
+
+def _parse_docker_extra_mounts(value: str) -> list[DockerExtraMount]:
+    mounts: list[DockerExtraMount] = []
+    for raw_item in value.split(","):
+        item = raw_item.strip()
+        if item == "":
+            continue
+        parts = item.split(":")
+        if len(parts) not in (2, 3):
+            raise ValueError("Docker extra mounts must use host_path:container_path[:mode] entries")
+        host_path = Path(parts[0]).expanduser()
+        container_path = Path(parts[1])
+        mode = parts[2].strip() if len(parts) == 3 else "rw"
+        if str(host_path).strip() == "":
+            raise ValueError("Docker extra mount host_path must not be empty")
+        if not container_path.is_absolute():
+            raise ValueError(f"Docker extra mount container_path must be absolute: {container_path}")
+        if mode not in {"rw", "ro"}:
+            raise ValueError(f"Docker extra mount mode must be 'rw' or 'ro': {mode}")
+        mounts.append(DockerExtraMount(host_path=host_path, container_path=container_path, mode=mode))
+    return mounts
 
 
 def load_runtime_environment() -> dict[str, str]:
@@ -80,6 +115,8 @@ class ClawSettings(BaseSettings):
     workspace_provider_docker_uid: int | None = None
     workspace_provider_docker_gid: int | None = None
     workspace_provider_docker_container_cache_dir: Path | None = None
+    workspace_provider_docker_extra_mounts: str = ""
+    workspace_env_vars: str = ""
     bridge_dispatch_mode: BridgeDispatchMode = BridgeDispatchMode.EMBEDDED
     bridge_enabled_adapters: str = ""
     bridge_lark_enabled: bool = False
@@ -146,6 +183,10 @@ class ClawSettings(BaseSettings):
         return self.runtime_data_dir / "docker-workspace-containers"
 
     @property
+    def resolved_workspace_provider_docker_extra_mounts(self) -> list[DockerExtraMount]:
+        return _parse_docker_extra_mounts(self.workspace_provider_docker_extra_mounts)
+
+    @property
     def resolved_bridge_enabled_adapters(self) -> set[BridgeAdapterType]:
         raw_adapters = [item.strip() for item in self.bridge_enabled_adapters.split(",") if item.strip()]
         resolved_adapters = {BridgeAdapterType(adapter) for adapter in raw_adapters}
@@ -180,6 +221,22 @@ class ClawSettings(BaseSettings):
         if isinstance(app_secret, str) and app_secret.strip() != "":
             environment["LARK_APP_SECRET"] = app_secret.strip()
         return environment
+
+    @property
+    def resolved_forwarded_workspace_environment(self) -> dict[str, str]:
+        environment: dict[str, str] = {}
+        for name in _parse_env_var_names(self.workspace_env_vars):
+            value = os.environ.get(name)
+            if isinstance(value, str):
+                environment[name] = value
+        return environment
+
+    @property
+    def resolved_workspace_environment(self) -> dict[str, str]:
+        return {
+            **self.resolved_lark_cli_environment,
+            **self.resolved_forwarded_workspace_environment,
+        }
 
     @property
     def api_token_value(self) -> str | None:

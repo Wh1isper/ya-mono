@@ -8,6 +8,7 @@ from ya_claw.workspace.guidance import (
 from ya_claw.workspace.provider import (
     DefaultEnvironmentFactory,
     DockerEnvironmentFactory,
+    DockerExtraMount,
     DockerWorkspaceProvider,
     EnvironmentFactory,
     LocalEnvironmentFactory,
@@ -28,6 +29,7 @@ __all__ = [
     "WORKSPACE_GUIDANCE_TAG",
     "DefaultEnvironmentFactory",
     "DockerEnvironmentFactory",
+    "DockerExtraMount",
     "DockerWorkspaceProvider",
     "EnvironmentFactory",
     "LocalEnvironmentFactory",

@@ -181,6 +181,10 @@ def test_settings_resolves_bridge_and_lark_cli_environment(monkeypatch) -> None:
         "LARK_APP_ID": "cli_test",
         "LARK_APP_SECRET": "secret-value",
     }
+    assert settings.resolved_workspace_environment == {
+        "LARK_APP_ID": "cli_test",
+        "LARK_APP_SECRET": "secret-value",
+    }
 
 
 def test_settings_lark_cli_environment_prefers_process_environment(monkeypatch) -> None:
@@ -196,4 +200,75 @@ def test_settings_lark_cli_environment_prefers_process_environment(monkeypatch) 
     assert settings.resolved_lark_cli_environment == {
         "LARK_APP_ID": "process-cli",
         "LARK_APP_SECRET": "process-secret",
+    }
+
+
+def test_settings_resolves_docker_extra_mounts(tmp_path: Path) -> None:
+    home_dir = tmp_path / "home"
+    cache_dir = tmp_path / "cache"
+    settings = ClawSettings(
+        api_token="test-token",  # noqa: S106
+        workspace_provider_docker_extra_mounts=f"{home_dir}:/home/claw:rw,{cache_dir}:/cache:ro",
+        _env_file=None,
+    )
+
+    mounts = settings.resolved_workspace_provider_docker_extra_mounts
+
+    assert [(mount.host_path, mount.container_path, mount.mode) for mount in mounts] == [
+        (home_dir, Path("/home/claw"), "rw"),
+        (cache_dir, Path("/cache"), "ro"),
+    ]
+
+
+def test_settings_rejects_invalid_docker_extra_mounts() -> None:
+    settings = ClawSettings(
+        api_token="test-token",  # noqa: S106
+        workspace_provider_docker_extra_mounts="relative-host:relative-container:rw",
+        _env_file=None,
+    )
+
+    try:
+        _ = settings.resolved_workspace_provider_docker_extra_mounts
+    except ValueError as exc:
+        assert "container_path must be absolute" in str(exc)
+    else:
+        raise AssertionError("Expected invalid Docker extra mount to raise ValueError")
+
+
+def test_settings_resolves_explicit_workspace_environment(monkeypatch) -> None:
+    monkeypatch.setenv("MY_TOOL_API_KEY", "tool-secret")
+    monkeypatch.setenv("MY_TOOL_ENDPOINT", "https://tool.example.test")
+    monkeypatch.delenv("MISSING_TOOL_ENV", raising=False)
+    settings = ClawSettings(
+        api_token="test-token",  # noqa: S106
+        workspace_env_vars=" MY_TOOL_API_KEY,MY_TOOL_ENDPOINT,MY_TOOL_API_KEY,MISSING_TOOL_ENV ",
+        _env_file=None,
+    )
+
+    assert settings.resolved_forwarded_workspace_environment == {
+        "MY_TOOL_API_KEY": "tool-secret",
+        "MY_TOOL_ENDPOINT": "https://tool.example.test",
+    }
+    assert settings.resolved_workspace_environment == {
+        "MY_TOOL_API_KEY": "tool-secret",
+        "MY_TOOL_ENDPOINT": "https://tool.example.test",
+    }
+
+
+def test_settings_workspace_environment_combines_lark_alias_and_explicit_forwarding(monkeypatch) -> None:
+    monkeypatch.setenv("MY_TOOL_API_KEY", "tool-secret")
+    monkeypatch.delenv("LARK_APP_ID", raising=False)
+    monkeypatch.delenv("LARK_APP_SECRET", raising=False)
+    settings = ClawSettings(
+        api_token="test-token",  # noqa: S106
+        bridge_lark_app_id="cli_test",
+        bridge_lark_app_secret="secret-value",  # noqa: S106
+        workspace_env_vars="MY_TOOL_API_KEY,LARK_APP_ID",
+        _env_file=None,
+    )
+
+    assert settings.resolved_workspace_environment == {
+        "LARK_APP_ID": "cli_test",
+        "LARK_APP_SECRET": "secret-value",
+        "MY_TOOL_API_KEY": "tool-secret",
     }

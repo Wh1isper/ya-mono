@@ -47,14 +47,16 @@ YA Claw loads settings from process environment and `.env` files. `YA_CLAW_*` va
 
 ## Workspace Provider Settings
 
-| Variable                                                | Purpose                                                                |
-| ------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `YA_CLAW_WORKSPACE_PROVIDER_BACKEND`                    | `docker` for Docker shell execution, `local` for local shell execution |
-| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE`               | Workspace image, default `ghcr.io/wh1isper/ya-claw-workspace:latest`   |
-| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOST_WORKSPACE_DIR`  | Docker daemon-visible workspace path for service Docker + Docker shell |
-| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID`                 | UID inside auto-started workspace containers                           |
-| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID`                 | GID inside auto-started workspace containers                           |
-| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_CONTAINER_CACHE_DIR` | Stable workspace container ID cache directory                          |
+| Variable                                                | Purpose                                                                   |
+| ------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `YA_CLAW_WORKSPACE_PROVIDER_BACKEND`                    | `docker` for Docker shell execution, `local` for local shell execution    |
+| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE`               | Workspace image, default `ghcr.io/wh1isper/ya-claw-workspace:latest`      |
+| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOST_WORKSPACE_DIR`  | Docker daemon-visible workspace path for service Docker + Docker shell    |
+| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID`                 | UID inside auto-started workspace containers                              |
+| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID`                 | GID inside auto-started workspace containers                              |
+| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_CONTAINER_CACHE_DIR` | Stable workspace container ID cache directory                             |
+| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_EXTRA_MOUNTS`        | Comma-separated Docker extra mounts using host_path:container_path[:mode] |
+| `YA_CLAW_WORKSPACE_ENV_VARS`                            | Comma-separated process env names forwarded into workspace environments   |
 
 ## Bridge Settings
 
@@ -72,7 +74,16 @@ YA Claw loads settings from process environment and `.env` files. `YA_CLAW_*` va
 | `LARK_APP_ID`                         | Workspace `lark-cli` app ID; overrides bridge-derived workspace value         |
 | `LARK_APP_SECRET`                     | Workspace `lark-cli` app secret; overrides bridge-derived workspace value     |
 
-For Docker shell shapes, YA Claw passes `LARK_APP_ID` and `LARK_APP_SECRET` to the reusable workspace container at container creation time. Recreate the workspace container after changing these values.
+For Docker shell shapes, YA Claw passes workspace environment values to the reusable workspace container at container creation time. Built-in `LARK_APP_ID` and `LARK_APP_SECRET` aliases come from explicit process env values or the Lark bridge app settings. Additional values are forwarded by listing process env names in `YA_CLAW_WORKSPACE_ENV_VARS`. Additional host directories are mounted by listing `host_path:container_path[:mode]` entries in `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_EXTRA_MOUNTS`; supported modes are `rw` and `ro`.
+
+```env
+MY_TOOL_API_KEY=replace-with-tool-key
+MY_TOOL_ENDPOINT=https://tool.example.com
+YA_CLAW_WORKSPACE_ENV_VARS=MY_TOOL_API_KEY,MY_TOOL_ENDPOINT
+YA_CLAW_WORKSPACE_PROVIDER_DOCKER_EXTRA_MOUNTS=/srv/ya-claw/home:/home/claw:rw,/srv/ya-claw/cache:/cache:ro
+```
+
+Recreate the workspace container after changing values passed to Docker container creation.
 
 See [`bridge/overview.md`](bridge/overview.md), [`bridge/lark.md`](bridge/lark.md), and [`bridge/operations.md`](bridge/operations.md) for deployment shape and operations details.
 
@@ -101,6 +112,8 @@ YA_CLAW_BRIDGE_LARK_APP_SECRET=replace-with-app-secret
 YA_CLAW_BRIDGE_LARK_DEFAULT_PROFILE=default
 LARK_APP_ID=cli_xxx
 LARK_APP_SECRET=replace-with-workspace-lark-secret
+MY_TOOL_API_KEY=replace-with-tool-key
+YA_CLAW_WORKSPACE_ENV_VARS=MY_TOOL_API_KEY
 GATEWAY_API_KEY=replace-with-provider-key
 GATEWAY_BASE_URL=https://gateway.example.com
 ```

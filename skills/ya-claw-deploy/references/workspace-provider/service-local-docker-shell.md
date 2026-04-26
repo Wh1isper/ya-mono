@@ -25,6 +25,12 @@ YA_CLAW_WORKSPACE_PROVIDER_DOCKER_CONTAINER_CACHE_DIR=/var/lib/ya-claw/data/dock
 
 `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOST_WORKSPACE_DIR` can stay unset because the service process and Docker daemon see the same host path.
 
+Use extra mounts for independent persistent directories such as `/home/claw`:
+
+```env
+YA_CLAW_WORKSPACE_PROVIDER_DOCKER_EXTRA_MOUNTS=/var/lib/ya-claw/home:/home/claw:rw
+```
+
 ## Path Semantics
 
 | Binding field                            | Value                        |
