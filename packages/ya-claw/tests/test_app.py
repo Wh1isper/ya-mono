@@ -23,6 +23,7 @@ def clear_claw_settings(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("YA_CLAW_API_TOKEN", "test-token")
     monkeypatch.setenv("YA_CLAW_DATA_DIR", str(tmp_path / "runtime-data"))
     monkeypatch.setenv("YA_CLAW_WORKSPACE_DIR", str(tmp_path / "workspace"))
+    monkeypatch.setenv("YA_CLAW_WORKSPACE_PROVIDER_BACKEND", "local")
     monkeypatch.setenv("YA_CLAW_AUTO_SEED_PROFILES", "false")
 
     get_settings.cache_clear()
