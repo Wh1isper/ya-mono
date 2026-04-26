@@ -254,12 +254,12 @@ class ClawSettings(BaseSettings):
         has_lark_cli_credentials = False
         if isinstance(app_id, str) and app_id.strip() != "":
             has_lark_cli_credentials = True
-            environment["LARKSUITE_CLI_APP_ID"] = app_id.strip()
             environment["LARK_APP_ID"] = app_id.strip()
+            environment["LARKSUITE_CLI_APP_ID"] = ""
         if isinstance(app_secret, str) and app_secret.strip() != "":
             has_lark_cli_credentials = True
-            environment["LARKSUITE_CLI_APP_SECRET"] = app_secret.strip()
             environment["LARK_APP_SECRET"] = app_secret.strip()
+            environment["LARKSUITE_CLI_APP_SECRET"] = ""
         if has_lark_cli_credentials and brand.strip() != "":
             environment["LARKSUITE_CLI_BRAND"] = brand.strip()
         if has_lark_cli_credentials and default_as.strip() != "":

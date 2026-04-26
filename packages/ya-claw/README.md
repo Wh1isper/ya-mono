@@ -90,19 +90,17 @@ Profile, MCP, and coordinator settings:
 - `YA_CLAW_BRIDGE_LARK_DEFAULT_PROFILE=default`
 - `YA_CLAW_BRIDGE_LARK_EVENT_TYPES=im.chat.member.bot.added_v1,im.chat.member.user.added_v1,im.message.receive_v1,drive.notice.comment_add_v1`
 - `YA_CLAW_BRIDGE_LARK_REPLY_IDENTITY=bot`
-- `LARKSUITE_CLI_APP_ID=cli_xxx`
-- `LARKSUITE_CLI_APP_SECRET=...`
+- `LARK_APP_ID=cli_xxx`
+- `LARK_APP_SECRET=...`
 - `LARKSUITE_CLI_BRAND=feishu`
 - `LARKSUITE_CLI_DEFAULT_AS=bot`
 - `LARKSUITE_CLI_STRICT_MODE=bot`
-- `LARK_APP_ID=cli_xxx`
-- `LARK_APP_SECRET=...`
 
 Profiles store model, prompt, model context config, builtin tool groups, subagents, approval policy, MCP server definitions, and MCP namespace filters. YA Claw accepts profile MCP servers with `streamable_http` transport. Every YA Claw agent runtime receives the profile MCP configuration through `ToolProxyToolset`, and each profile can narrow that surface with `enabled_mcps` and `disabled_mcps`.
 
 Session and run requests use the shared workspace configured by `YA_CLAW_WORKSPACE_DIR`. YA Claw maps that host directory to `/workspace` for file operations and shell execution. Workspace guidance loads from `/workspace/AGENTS.md`, and workspace skills are discovered from `/workspace/.agents/skills/`.
 
-Workspace environments receive official `lark-cli` credential variables (`LARKSUITE_CLI_APP_ID`, `LARKSUITE_CLI_APP_SECRET`, `LARKSUITE_CLI_BRAND`, `LARKSUITE_CLI_DEFAULT_AS`, `LARKSUITE_CLI_STRICT_MODE`) from explicit process environment values or from the configured Lark bridge app settings. YA Claw also injects legacy `LARK_APP_ID` and `LARK_APP_SECRET` aliases for compatibility with other tooling. `YA_CLAW_WORKSPACE_ENV_VARS` forwards additional comma-separated process environment variable names into workspace environments. For Docker workspaces, forwarded values are passed at reusable workspace container creation time.
+Workspace environments receive `LARK_APP_ID` and `LARK_APP_SECRET` from explicit process environment values or from the configured Lark bridge app settings. The official Docker workspace entrypoint writes these values into `/home/claw/.lark-cli/config.json` for `lark-cli` bot commands, and clears `LARKSUITE_CLI_APP_ID` / `LARKSUITE_CLI_APP_SECRET` in the container runtime environment so `lark-cli` uses the generated config profile. `LARKSUITE_CLI_BRAND`, `LARKSUITE_CLI_DEFAULT_AS`, and `LARKSUITE_CLI_STRICT_MODE` tune that generated profile. `YA_CLAW_WORKSPACE_ENV_VARS` forwards additional comma-separated process environment variable names into workspace environments. For Docker workspaces, forwarded values are passed at reusable workspace container creation time.
 
 The default Docker workspace image is `ghcr.io/wh1isper/ya-claw-workspace:latest`. It is based on Debian stable and includes Python, Node.js, Debian Chromium, the `agent-browser` CLI, and an `agent-browser` discovery skill copied into mounted workspaces at container start. Auto-started workspace containers receive `YA_CLAW_WORKSPACE_UID`, `YA_CLAW_WORKSPACE_GID`, `YA_CLAW_HOST_UID`, and `YA_CLAW_HOST_GID`; the default values come from the YA Claw service process UID/GID and can be overridden with `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID` and `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID`. Docker exec uses `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_EXEC_USER=auto` by default, which resolves to the configured workspace UID:GID, and sets `HOME` from `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOME` with default `/home/claw`. `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_EXTRA_MOUNTS` adds comma-separated `host_path:container_path[:mode]` mounts to Docker workspace containers, with `rw` and `ro` modes. Docker workspace containers reuse one stable container for the configured workspace, cache the container ID under `~/.ya-claw/data/docker-workspace-containers`, check running and Docker health status before each reuse, start stopped containers, and refresh the cache after container recreation. Use `agent-browser skills get core` inside a workspace session for the version-matched browser automation workflow.
 
