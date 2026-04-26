@@ -4,6 +4,7 @@ import {
   HeartPulse,
   Home,
   LogOut,
+  MessageSquareMore,
   Settings,
   SlidersHorizontal,
 } from 'lucide-react'
@@ -13,6 +14,7 @@ import { useNotificationStream } from '../api/notificationsStream'
 import { cn } from '../lib/utils'
 import { useConnectionStore } from '../stores/connectionStore'
 import { type AppRoute, useLayoutStore } from '../stores/layoutStore'
+import { BridgesPage } from '../features/bridges/BridgesPage'
 import { ChatPage } from '../features/chat/ChatPage'
 import { HeartbeatPage } from '../features/heartbeat/HeartbeatPage'
 import { OverviewPage } from '../features/overview/OverviewPage'
@@ -24,6 +26,7 @@ const navItems: Array<{ route: AppRoute; label: string; icon: typeof Home }> = [
   { route: 'overview', label: 'Overview', icon: Home },
   { route: 'chat', label: 'Chat', icon: Bot },
   { route: 'schedules', label: 'Schedules', icon: CalendarClock },
+  { route: 'bridges', label: 'Bridges', icon: MessageSquareMore },
   { route: 'heartbeat', label: 'Heartbeat', icon: HeartPulse },
   { route: 'profiles', label: 'Profiles', icon: SlidersHorizontal },
   { route: 'settings', label: 'Settings', icon: Settings },
@@ -119,6 +122,7 @@ export function AppShell() {
           {route === 'overview' ? <OverviewPage /> : null}
           {route === 'chat' ? <ChatPage /> : null}
           {route === 'schedules' ? <SchedulesPage /> : null}
+          {route === 'bridges' ? <BridgesPage /> : null}
           {route === 'heartbeat' ? <HeartbeatPage /> : null}
           {route === 'profiles' ? <ProfilesPage /> : null}
           {route === 'settings' ? <SettingsPage /> : null}

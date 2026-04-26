@@ -11,7 +11,7 @@ from ya_claw.config import ClawSettings
 from ya_claw.db.engine import create_engine, create_session_factory
 from ya_claw.execution.dispatcher import RunDispatcher
 from ya_claw.orm.base import Base
-from ya_claw.orm.tables import BridgeConversationRecord, BridgeEventRecord, RunRecord
+from ya_claw.orm.tables import BridgeConversationRecord, BridgeEventRecord, RunRecord, SessionRecord
 from ya_claw.runtime_state import create_runtime_state
 
 
@@ -177,3 +177,66 @@ async def test_bridge_controller_reuses_chat_session(db_session: AsyncSession) -
     run_record = await db_session.get(RunRecord, second.run_id)
     assert isinstance(run_record, RunRecord)
     assert run_record.trigger_type == "bridge"
+
+
+async def test_bridge_controller_steers_active_conversation_session(db_session: AsyncSession) -> None:
+    runtime_state = create_runtime_state()
+    controller = BridgeController()
+    settings = ClawSettings(api_token="test-token", _env_file=None)  # noqa: S106
+
+    first = await controller.handle_inbound_message(
+        db_session,
+        settings,
+        runtime_state,
+        RunDispatcher(None),
+        BridgeInboundMessage(
+            adapter=BridgeAdapterType.LARK,
+            tenant_key="tenant-1",
+            event_id="event-1",
+            message_id="om_1",
+            chat_id="oc_1",
+            content_text="first",
+        ),
+    )
+    assert first.run_id is not None
+    session = await db_session.get(SessionRecord, first.session_id)
+    assert isinstance(session, SessionRecord)
+    session.active_run_id = first.run_id
+    run = await db_session.get(RunRecord, first.run_id)
+    assert isinstance(run, RunRecord)
+    run.status = "running"
+    await db_session.commit()
+
+    second = await controller.handle_inbound_message(
+        db_session,
+        settings,
+        runtime_state,
+        RunDispatcher(None),
+        BridgeInboundMessage(
+            adapter=BridgeAdapterType.LARK,
+            tenant_key="tenant-1",
+            event_id="event-2",
+            message_id="om_2",
+            chat_id="oc_1",
+            content_text="second",
+        ),
+    )
+
+    handle = runtime_state.get_run_handle(first.run_id)
+    event_record_result = await db_session.execute(
+        select(BridgeEventRecord).where(BridgeEventRecord.event_id == "event-2")
+    )
+    event_record = event_record_result.scalar_one()
+    run_count = len((await db_session.execute(select(RunRecord))).scalars().all())
+
+    assert second.status == BridgeEventStatus.STEERED
+    assert second.session_id == first.session_id
+    assert second.run_id == first.run_id
+    assert isinstance(handle, object)
+    assert handle is not None
+    assert len(handle.steering_inputs) == 1
+    steered_prompt = handle.steering_inputs[0][0]["text"]
+    assert "<content>second</content>" in steered_prompt
+    assert event_record.status == BridgeEventStatus.STEERED
+    assert event_record.run_id == first.run_id
+    assert run_count == 1

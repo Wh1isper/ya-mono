@@ -127,6 +127,58 @@ export type ScheduleUpdateRequest = Partial<{
   metadata: Record<string, unknown>
 }>
 
+export type BridgeEventStatus =
+  | 'received'
+  | 'queued'
+  | 'submitted'
+  | 'steered'
+  | 'duplicate'
+  | 'failed'
+
+export type BridgeConversationSummary = {
+  id: string
+  adapter: 'lark'
+  tenant_key: string
+  external_chat_id: string
+  session_id: string
+  profile_name?: string | null
+  metadata: Record<string, unknown>
+  active_run_id?: string | null
+  event_count: number
+  latest_event_status?: BridgeEventStatus | null
+  created_at: string
+  updated_at: string
+  last_event_at?: string | null
+}
+
+export type BridgeConversationListResponse = {
+  conversations: BridgeConversationSummary[]
+}
+
+export type BridgeEventSummary = {
+  id: string
+  adapter: 'lark'
+  tenant_key: string
+  event_id: string
+  external_message_id?: string | null
+  external_chat_id?: string | null
+  conversation_id?: string | null
+  session_id?: string | null
+  run_id?: string | null
+  run_status?: FireRunStatus | null
+  event_type: string
+  status: BridgeEventStatus
+  error_message?: string | null
+  raw_event: Record<string, unknown>
+  normalized_event: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export type BridgeEventListResponse = {
+  events: BridgeEventSummary[]
+}
+
 export type HeartbeatFireSummary = {
   id: string
   scheduled_at: string

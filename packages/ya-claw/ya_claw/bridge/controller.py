@@ -14,15 +14,25 @@ from ya_claw.bridge.models import (
     BridgeInboundMessage,
 )
 from ya_claw.config import ClawSettings
-from ya_claw.controller.models import DispatchMode, SessionCreateRequest, SessionRunCreateRequest, TextPart, TriggerType
+from ya_claw.controller.models import (
+    DispatchMode,
+    InputPart,
+    SessionCreateRequest,
+    SessionRunCreateRequest,
+    SteerRequest,
+    TextPart,
+    TriggerType,
+)
+from ya_claw.controller.run import RunController
 from ya_claw.controller.session import SessionController
 from ya_claw.execution.dispatcher import RunDispatcher
-from ya_claw.orm.tables import BridgeConversationRecord, BridgeEventRecord
+from ya_claw.orm.tables import BridgeConversationRecord, BridgeEventRecord, SessionRecord
 from ya_claw.runtime_state import InMemoryRuntimeState
 
 
 class BridgeController:
     def __init__(self) -> None:
+        self._run_controller = RunController()
         self._session_controller = SessionController()
 
     async def handle_inbound_message(
@@ -64,13 +74,41 @@ class BridgeController:
 
         try:
             conversation = await self._resolve_conversation(db_session, settings, runtime_state, message)
+            session_record = await db_session.get(SessionRecord, conversation.session_id)
+            if not isinstance(session_record, SessionRecord):
+                raise TypeError(f"Bridge conversation session '{conversation.session_id}' was not found.")
+            input_parts: list[InputPart] = [TextPart(type="text", text=self._build_agent_prompt(message))]
+            if isinstance(session_record.active_run_id, str):
+                await self._run_controller.steer(
+                    db_session,
+                    runtime_state,
+                    session_record.active_run_id,
+                    SteerRequest(input_parts=input_parts),
+                )
+                event_record.conversation_id = conversation.id
+                event_record.session_id = conversation.session_id
+                event_record.run_id = session_record.active_run_id
+                event_record.status = BridgeEventStatus.STEERED
+                conversation.last_event_at = datetime.now(UTC)
+                conversation.updated_at = datetime.now(UTC)
+                await db_session.commit()
+                return BridgeDispatchResult(
+                    status=BridgeEventStatus.STEERED,
+                    adapter=message.adapter,
+                    event_id=message.event_id,
+                    message_id=message.message_id,
+                    chat_id=message.chat_id,
+                    session_id=conversation.session_id,
+                    run_id=session_record.active_run_id,
+                )
+
             run = await self._session_controller.create_run(
                 db_session,
                 settings,
                 runtime_state,
                 conversation.session_id,
                 SessionRunCreateRequest(
-                    input_parts=[TextPart(type="text", text=self._build_agent_prompt(message))],
+                    input_parts=input_parts,
                     metadata={"bridge": self._bridge_metadata(message)},
                     dispatch_mode=DispatchMode.ASYNC,
                     trigger_type=TriggerType.BRIDGE,

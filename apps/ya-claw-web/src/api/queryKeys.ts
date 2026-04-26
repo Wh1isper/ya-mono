@@ -1,6 +1,9 @@
 export const queryKeys = {
   health: ['health'] as const,
   clawInfo: ['claw-info'] as const,
+  bridgeConversations: ['bridge-conversations'] as const,
+  bridgeEvents: (conversationId?: string | null, status?: string | null) =>
+    ['bridge-events', conversationId ?? 'all', status ?? 'all'] as const,
   sessions: ['sessions'] as const,
   session: (sessionId: string) => ['session', sessionId] as const,
   run: (runId: string) => ['run', runId] as const,
