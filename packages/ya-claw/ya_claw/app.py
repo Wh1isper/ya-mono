@@ -13,8 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from ya_claw.api.claw import router as claw_router
 from ya_claw.api.health import router as health_router
+from ya_claw.api.heartbeat import router as heartbeat_router
 from ya_claw.api.profiles import router as profiles_router
 from ya_claw.api.runs import router as runs_router
+from ya_claw.api.schedules import router as schedules_router
 from ya_claw.api.sessions import router as sessions_router
 from ya_claw.bridge import BridgeDispatchMode
 from ya_claw.bridge.service import BridgeSupervisor, build_bridge_supervisor
@@ -27,6 +29,8 @@ from ya_claw.execution import (
     RunDispatcher,
     RuntimeInstanceManager,
 )
+from ya_claw.execution.heartbeat import HeartbeatDispatcher
+from ya_claw.execution.schedule import ScheduleDispatcher
 from ya_claw.logging import configure_claw_logging, redact_url
 from ya_claw.notifications import NotificationHub, create_notification_hub
 from ya_claw.runtime_state import InMemoryRuntimeState, create_runtime_state
@@ -68,6 +72,8 @@ class ClawApplication:
         app.state.execution_supervisor = None
         app.state.runtime_instance_manager = None
         app.state.bridge_supervisor = None
+        app.state.schedule_dispatcher = None
+        app.state.heartbeat_dispatcher = None
 
         self.register_api_token_middleware(app)
         app.add_middleware(
@@ -82,6 +88,8 @@ class ClawApplication:
         app.include_router(profiles_router, prefix="/api/v1")
         app.include_router(sessions_router, prefix="/api/v1")
         app.include_router(runs_router, prefix="/api/v1")
+        app.include_router(schedules_router, prefix="/api/v1")
+        app.include_router(heartbeat_router, prefix="/api/v1")
 
         frontend_registered = self.register_frontend(app)
         if not frontend_registered:
@@ -90,7 +98,7 @@ class ClawApplication:
         return app
 
     @asynccontextmanager
-    async def lifespan(self, app: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(self, app: FastAPI) -> AsyncIterator[None]:  # noqa: C901
         logger.info(
             "Starting YA Claw app environment={} instance_id={} host={} port={} public_base_url={}",
             self.settings.environment,
@@ -166,6 +174,24 @@ class ClawApplication:
             logger.info("Runtime instance registered instance_id={}", self.settings.instance_id)
             recovery_result = await supervisor.startup_recover()
             logger.info("Execution supervisor startup recovery completed result={}", recovery_result)
+            schedule_dispatcher = ScheduleDispatcher(
+                settings=self.settings,
+                session_factory=app.state.db_session_factory,
+                runtime_state=app.state.runtime_state,
+                run_dispatcher=RunDispatcher(supervisor),
+                notification_hub=app.state.notification_hub,
+            )
+            app.state.schedule_dispatcher = schedule_dispatcher
+            await schedule_dispatcher.startup()
+            heartbeat_dispatcher = HeartbeatDispatcher(
+                settings=self.settings,
+                session_factory=app.state.db_session_factory,
+                runtime_state=app.state.runtime_state,
+                run_dispatcher=RunDispatcher(supervisor),
+                notification_hub=app.state.notification_hub,
+            )
+            app.state.heartbeat_dispatcher = heartbeat_dispatcher
+            await heartbeat_dispatcher.startup()
             if self.settings.bridge_dispatch_mode == BridgeDispatchMode.EMBEDDED:
                 bridge_supervisor = build_bridge_supervisor(
                     settings=self.settings,
@@ -188,6 +214,8 @@ class ClawApplication:
             runtime_state = app.state.runtime_state
             notification_hub = app.state.notification_hub
             bridge_supervisor = app.state.bridge_supervisor
+            schedule_dispatcher = app.state.schedule_dispatcher
+            heartbeat_dispatcher = app.state.heartbeat_dispatcher
 
             app.state.db_session_factory = None
             app.state.workspace_provider = None
@@ -199,6 +227,14 @@ class ClawApplication:
             app.state.execution_supervisor = None
             app.state.runtime_instance_manager = None
             app.state.bridge_supervisor = None
+            app.state.schedule_dispatcher = None
+            app.state.heartbeat_dispatcher = None
+
+            if isinstance(heartbeat_dispatcher, HeartbeatDispatcher):
+                await heartbeat_dispatcher.shutdown()
+
+            if isinstance(schedule_dispatcher, ScheduleDispatcher):
+                await schedule_dispatcher.shutdown()
 
             if isinstance(bridge_supervisor, BridgeSupervisor):
                 await bridge_supervisor.shutdown()

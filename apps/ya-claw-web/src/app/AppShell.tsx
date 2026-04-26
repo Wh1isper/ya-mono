@@ -1,4 +1,12 @@
-import { Bot, Home, LogOut, Settings, SlidersHorizontal } from 'lucide-react'
+import {
+  Bot,
+  CalendarClock,
+  HeartPulse,
+  Home,
+  LogOut,
+  Settings,
+  SlidersHorizontal,
+} from 'lucide-react'
 
 import { useHealthQuery } from '../api/hooks'
 import { useNotificationStream } from '../api/notificationsStream'
@@ -6,13 +14,17 @@ import { cn } from '../lib/utils'
 import { useConnectionStore } from '../stores/connectionStore'
 import { type AppRoute, useLayoutStore } from '../stores/layoutStore'
 import { ChatPage } from '../features/chat/ChatPage'
+import { HeartbeatPage } from '../features/heartbeat/HeartbeatPage'
 import { OverviewPage } from '../features/overview/OverviewPage'
 import { ProfilesPage } from '../features/profiles/ProfilesPage'
+import { SchedulesPage } from '../features/schedules/SchedulesPage'
 import { SettingsPage } from '../features/settings/SettingsPage'
 
 const navItems: Array<{ route: AppRoute; label: string; icon: typeof Home }> = [
   { route: 'overview', label: 'Overview', icon: Home },
   { route: 'chat', label: 'Chat', icon: Bot },
+  { route: 'schedules', label: 'Schedules', icon: CalendarClock },
+  { route: 'heartbeat', label: 'Heartbeat', icon: HeartPulse },
   { route: 'profiles', label: 'Profiles', icon: SlidersHorizontal },
   { route: 'settings', label: 'Settings', icon: Settings },
 ]
@@ -106,6 +118,8 @@ export function AppShell() {
         <main className="min-h-0 flex-1 overflow-hidden">
           {route === 'overview' ? <OverviewPage /> : null}
           {route === 'chat' ? <ChatPage /> : null}
+          {route === 'schedules' ? <SchedulesPage /> : null}
+          {route === 'heartbeat' ? <HeartbeatPage /> : null}
           {route === 'profiles' ? <ProfilesPage /> : null}
           {route === 'settings' ? <SettingsPage /> : null}
         </main>

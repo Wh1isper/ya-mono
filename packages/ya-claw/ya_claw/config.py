@@ -133,6 +133,14 @@ class ClawSettings(BaseSettings):
     default_profile: str = "default"
     profile_seed_file: Path | None = None
     auto_seed_profiles: bool = False
+    schedule_dispatch_enabled: bool = True
+    schedule_tick_seconds: int = 5
+    schedule_max_due_per_tick: int = 20
+    heartbeat_enabled: bool = False
+    heartbeat_interval_seconds: int = 300
+    heartbeat_profile: str | None = None
+    heartbeat_prompt: str = "Run heartbeat according to HEARTBEAT.md."
+    heartbeat_on_active: Literal["skip", "queue"] = "skip"
 
     auto_migrate: bool = True
 
@@ -215,6 +223,16 @@ class ClawSettings(BaseSettings):
         return self.default_profile
 
     @property
+    def resolved_heartbeat_profile(self) -> str:
+        if isinstance(self.heartbeat_profile, str) and self.heartbeat_profile.strip() != "":
+            return self.heartbeat_profile.strip()
+        return self.default_profile
+
+    @property
+    def heartbeat_guidance_path(self) -> Path:
+        return self.resolved_workspace_dir / "HEARTBEAT.md"
+
+    @property
     def bridge_lark_app_secret_value(self) -> str | None:
         if self.bridge_lark_app_secret is None:
             return None
@@ -224,12 +242,30 @@ class ClawSettings(BaseSettings):
     @property
     def resolved_lark_cli_environment(self) -> dict[str, str]:
         environment: dict[str, str] = {}
-        app_id = os.environ.get("LARK_APP_ID") or self.bridge_lark_app_id
-        app_secret = os.environ.get("LARK_APP_SECRET") or self.bridge_lark_app_secret_value
+        app_id = os.environ.get("LARKSUITE_CLI_APP_ID") or os.environ.get("LARK_APP_ID") or self.bridge_lark_app_id
+        app_secret = (
+            os.environ.get("LARKSUITE_CLI_APP_SECRET")
+            or os.environ.get("LARK_APP_SECRET")
+            or self.bridge_lark_app_secret_value
+        )
+        brand = os.environ.get("LARKSUITE_CLI_BRAND") or "feishu"
+        default_as = os.environ.get("LARKSUITE_CLI_DEFAULT_AS") or self.bridge_lark_reply_identity
+        strict_mode = os.environ.get("LARKSUITE_CLI_STRICT_MODE") or self.bridge_lark_reply_identity
+        has_lark_cli_credentials = False
         if isinstance(app_id, str) and app_id.strip() != "":
+            has_lark_cli_credentials = True
+            environment["LARKSUITE_CLI_APP_ID"] = app_id.strip()
             environment["LARK_APP_ID"] = app_id.strip()
         if isinstance(app_secret, str) and app_secret.strip() != "":
+            has_lark_cli_credentials = True
+            environment["LARKSUITE_CLI_APP_SECRET"] = app_secret.strip()
             environment["LARK_APP_SECRET"] = app_secret.strip()
+        if has_lark_cli_credentials and brand.strip() != "":
+            environment["LARKSUITE_CLI_BRAND"] = brand.strip()
+        if has_lark_cli_credentials and default_as.strip() != "":
+            environment["LARKSUITE_CLI_DEFAULT_AS"] = default_as.strip()
+        if has_lark_cli_credentials and strict_mode.strip() != "":
+            environment["LARKSUITE_CLI_STRICT_MODE"] = strict_mode.strip()
         return environment
 
     @property

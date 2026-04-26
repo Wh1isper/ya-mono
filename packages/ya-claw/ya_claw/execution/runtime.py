@@ -21,11 +21,20 @@ from ya_claw.context import ClawAgentContext, ClawWorkspaceBindingSnapshot
 from ya_claw.execution.profile import ResolvedProfile
 from ya_claw.mcp import build_profile_mcp_config
 from ya_claw.toolsets.background import SpawnDelegateTool, SteerSubagentTool
+from ya_claw.toolsets.schedule import (
+    CreateScheduleTool,
+    DeleteScheduleTool,
+    ListSchedulesTool,
+    TriggerScheduleTool,
+    UpdateScheduleTool,
+)
 from ya_claw.toolsets.session import GetRunTraceTool, ListSessionTurnsTool
 from ya_claw.workspace import (
     WorkspaceBinding,
     extract_workspace_sandbox_metadata,
+    format_heartbeat_guidance,
     format_workspace_guidance,
+    load_heartbeat_guidance,
     load_workspace_guidance,
 )
 
@@ -47,9 +56,10 @@ _BUILTIN_TOOL_REGISTRY: dict[str, list[type[BaseTool]]] = {
     "document": list(document_tools),
     "background": [SpawnDelegateTool, SteerSubagentTool],
     "session": [ListSessionTurnsTool, GetRunTraceTool],
+    "schedule": [ListSchedulesTool, CreateScheduleTool, UpdateScheduleTool, DeleteScheduleTool, TriggerScheduleTool],
 }
 _BUILTIN_TOOLSET_ALIASES: dict[str, list[str]] = {
-    "core": ["filesystem", "shell", "background", "session"],
+    "core": ["filesystem", "shell", "background", "session", "schedule"],
 }
 
 
@@ -104,7 +114,7 @@ class ClawRuntimeBuilder:
             subagent_configs=profile.subagent_configs,
             include_builtin_subagents=profile.include_builtin_subagents,
             unified_subagents=profile.unified_subagents,
-            system_prompt=self._build_system_prompt(profile=profile, binding=binding),
+            system_prompt=self._build_system_prompt(profile=profile, binding=binding, source_kind=source_kind),
         )
 
     def _build_model_config(self, profile: ResolvedProfile) -> ModelConfig:
@@ -166,6 +176,7 @@ class ClawRuntimeBuilder:
         *,
         profile: ResolvedProfile,
         binding: WorkspaceBinding,
+        source_kind: str | None = None,
     ) -> str:
         prompt_lines = [profile.system_prompt or _DEFAULT_SYSTEM_PROMPT]
         prompt_lines.append(f"Workspace virtual root: {binding.virtual_path}")
@@ -176,5 +187,9 @@ class ClawRuntimeBuilder:
         guidance = load_workspace_guidance(binding)
         if guidance is not None:
             prompt_lines.append(format_workspace_guidance(guidance))
+        if source_kind == "heartbeat":
+            heartbeat_guidance = load_heartbeat_guidance(binding)
+            if heartbeat_guidance is not None:
+                prompt_lines.append(format_heartbeat_guidance(heartbeat_guidance))
         prompt_lines.append(f"Profile: {profile.name}")
         return "\n".join(prompt_lines)

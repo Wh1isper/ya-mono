@@ -84,6 +84,23 @@ async def test_bridge_controller_maps_chat_to_session_and_dedupes(db_session: As
     assert event_record.conversation_id == conversation.id
     assert event_record.session_id == result.session_id
     assert event_record.run_id == result.run_id
+    assert result.run_id is not None
+    run_record = await db_session.get(RunRecord, result.run_id)
+    assert isinstance(run_record, RunRecord)
+    assert len(run_record.input_parts) == 1
+    prompt = run_record.input_parts[0]["text"]
+    assert prompt.startswith("<lark_bridge_event>")
+    assert "<metadata>" in prompt
+    assert "<tenant_key>tenant-1</tenant_key>" in prompt
+    assert "<chat_id>oc_1</chat_id>" in prompt
+    assert "<message_id>om_1</message_id>" in prompt
+    assert "<sender_id>ou_1</sender_id>" in prompt
+    assert "<message>" in prompt
+    assert "<content>hello</content>" in prompt
+    assert "<output>" in prompt
+    assert "<idempotency_key>bridge-lark-event-1</idempotency_key>" in prompt
+    assert "<recommended_command>" in prompt
+    assert "&lt;reply&gt;" in prompt
 
     duplicate = await controller.handle_inbound_message(
         db_session,
@@ -97,6 +114,27 @@ async def test_bridge_controller_maps_chat_to_session_and_dedupes(db_session: As
     assert duplicate.duplicate is True
     assert duplicate.session_id == result.session_id
     assert duplicate.run_id == result.run_id
+
+
+async def test_bridge_controller_escapes_xml_prompt_values(db_session: AsyncSession) -> None:
+    controller = BridgeController()
+    message = BridgeInboundMessage(
+        adapter=BridgeAdapterType.LARK,
+        tenant_key="tenant<&1",
+        event_id="event'1",
+        message_id='om_"1',
+        chat_id="oc_1",
+        sender_id="ou_1",
+        content_text="hello <world> & friends",
+    )
+
+    prompt = controller._build_agent_prompt(message)
+
+    assert "<tenant_key>tenant&lt;&amp;1</tenant_key>" in prompt
+    assert "<message_id>om_&quot;1</message_id>" in prompt
+    assert "<event_id>event&apos;1</event_id>" in prompt
+    assert "<content>hello &lt;world&gt; &amp; friends</content>" in prompt
+    assert "&lt;reply&gt;" in prompt
 
 
 async def test_bridge_controller_reuses_chat_session(db_session: AsyncSession) -> None:

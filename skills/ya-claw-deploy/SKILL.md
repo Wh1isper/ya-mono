@@ -35,6 +35,7 @@ Choose the deployment path:
 - SQLite or PostgreSQL storage: read [`references/database.md`](references/database.md)
 - Profile seeding: read [`references/profiles.md`](references/profiles.md)
 - Bridge deployment: read [`references/bridge/overview.md`](references/bridge/overview.md) and [`references/bridge/lark.md`](references/bridge/lark.md)
+- Schedules and heartbeat: read [`references/schedules-heartbeat.md`](references/schedules-heartbeat.md)
 - Health checks, backup, restore, upgrades, and troubleshooting: read [`references/operations.md`](references/operations.md)
 
 ## Required Baseline
@@ -88,6 +89,7 @@ Every deployment needs:
 | Bridge overview           | [`references/bridge/overview.md`](references/bridge/overview.md)                         | You configure bridge dispatch, adapter enablement, and event-to-run routing                                     |
 | Lark bridge               | [`references/bridge/lark.md`](references/bridge/lark.md)                                 | You connect Lark/Feishu events to YA Claw                                                                       |
 | Bridge operations         | [`references/bridge/operations.md`](references/bridge/operations.md)                     | You verify embedded bridge startup, Lark ingress, dedupe, profiles, and workspace replies                       |
+| Schedules and heartbeat   | [`references/schedules-heartbeat.md`](references/schedules-heartbeat.md)                 | You configure cron schedules, heartbeat guidance, timer dispatchers, and timer operations                       |
 | Operations                | [`references/operations.md`](references/operations.md)                                   | You need health checks, logs, upgrades, backup, restore, or troubleshooting                                     |
 
 When editing this skill inside the repository, keep `scripts/build-skill-zips.py` aligned so release artifacts include the canonical skill contents.

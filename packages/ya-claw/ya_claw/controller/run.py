@@ -375,12 +375,21 @@ class RunController:
         restore_record = await db_session.get(RunRecord, restore_from_run_id)
         if not isinstance(restore_record, RunRecord):
             raise HTTPException(status_code=404, detail=f"Run '{restore_from_run_id}' was not found.")
-        if restore_record.session_id != session_id:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Run '{restore_from_run_id}' does not belong to session '{session_id}'.",
+        if restore_record.session_id == session_id:
+            return restore_record
+        session_record = await db_session.get(SessionRecord, session_id)
+        ancestor_session_id = session_record.parent_session_id if isinstance(session_record, SessionRecord) else None
+        while isinstance(ancestor_session_id, str):
+            if restore_record.session_id == ancestor_session_id:
+                return restore_record
+            ancestor_record = await db_session.get(SessionRecord, ancestor_session_id)
+            ancestor_session_id = (
+                ancestor_record.parent_session_id if isinstance(ancestor_record, SessionRecord) else None
             )
-        return restore_record
+        raise HTTPException(
+            status_code=422,
+            detail=f"Run '{restore_from_run_id}' is not a valid restore source for session '{session_id}'.",
+        )
 
     async def _build_session_summary(
         self,

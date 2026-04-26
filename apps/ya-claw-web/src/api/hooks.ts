@@ -11,6 +11,8 @@ import { useConnectionStore } from '../stores/connectionStore'
 import type {
   InputPart,
   ProfileUpsertRequest,
+  ScheduleCreateRequest,
+  ScheduleUpdateRequest,
   SessionRunCreateRequest,
 } from '../types'
 import { ClawApiClient } from './client'
@@ -221,6 +223,158 @@ export function useSeedProfilesMutation() {
     onSuccess: async (response) => {
       toast.success(`Seeded ${response.seeded_names.length} profiles`)
       await queryClient.invalidateQueries({ queryKey: queryKeys.profiles })
+    },
+  })
+}
+
+export function useSchedulesQuery() {
+  const api = useApiClient()
+  return useQuery({
+    queryKey: queryKeys.schedules,
+    queryFn: () => api.listSchedules(),
+    placeholderData: keepPreviousData,
+    staleTime: 10_000,
+  })
+}
+
+export function useScheduleQuery(scheduleId: string | null) {
+  const api = useApiClient()
+  return useQuery({
+    queryKey: scheduleId
+      ? queryKeys.schedule(scheduleId)
+      : ['schedule', 'none'],
+    queryFn: () => api.getSchedule(scheduleId ?? ''),
+    enabled: Boolean(scheduleId),
+    placeholderData: keepPreviousData,
+    staleTime: 10_000,
+  })
+}
+
+export function useScheduleFiresQuery(scheduleId: string | null) {
+  const api = useApiClient()
+  return useQuery({
+    queryKey: scheduleId
+      ? queryKeys.scheduleFires(scheduleId)
+      : ['schedule-fires', 'none'],
+    queryFn: () => api.listScheduleFires(scheduleId ?? ''),
+    enabled: Boolean(scheduleId),
+    placeholderData: keepPreviousData,
+    staleTime: 10_000,
+  })
+}
+
+export function useCreateScheduleMutation() {
+  const api = useApiClient()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: ScheduleCreateRequest) => api.createSchedule(payload),
+    onSuccess: async (schedule) => {
+      toast.success(`Created schedule ${schedule.name}`)
+      await queryClient.invalidateQueries({ queryKey: queryKeys.schedules })
+    },
+  })
+}
+
+export function useUpdateScheduleMutation() {
+  const api = useApiClient()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      scheduleId,
+      payload,
+    }: {
+      scheduleId: string
+      payload: ScheduleUpdateRequest
+    }) => api.updateSchedule(scheduleId, payload),
+    onSuccess: async (schedule) => {
+      toast.success(`Saved schedule ${schedule.name}`)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.schedules }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.schedule(schedule.id),
+        }),
+      ])
+    },
+  })
+}
+
+export function useDeleteScheduleMutation() {
+  const api = useApiClient()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (scheduleId: string) => api.deleteSchedule(scheduleId),
+    onSuccess: async (schedule) => {
+      toast.success(`Deleted schedule ${schedule.name}`)
+      await queryClient.invalidateQueries({ queryKey: queryKeys.schedules })
+    },
+  })
+}
+
+export function useTriggerScheduleMutation() {
+  const api = useApiClient()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      scheduleId,
+      promptOverride,
+    }: {
+      scheduleId: string
+      promptOverride?: string | null
+    }) => api.triggerSchedule(scheduleId, promptOverride),
+    onSuccess: async (fire) => {
+      toast.success(`Triggered schedule ${fire.schedule_id.slice(0, 8)}`)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.schedules }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.scheduleFires(fire.schedule_id),
+        }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+      ])
+    },
+  })
+}
+
+export function useHeartbeatConfigQuery() {
+  const api = useApiClient()
+  return useQuery({
+    queryKey: queryKeys.heartbeatConfig,
+    queryFn: () => api.getHeartbeatConfig(),
+    staleTime: 10_000,
+  })
+}
+
+export function useHeartbeatStatusQuery() {
+  const api = useApiClient()
+  return useQuery({
+    queryKey: queryKeys.heartbeatStatus,
+    queryFn: () => api.getHeartbeatStatus(),
+    refetchInterval: 15_000,
+    staleTime: 10_000,
+  })
+}
+
+export function useHeartbeatFiresQuery() {
+  const api = useApiClient()
+  return useQuery({
+    queryKey: queryKeys.heartbeatFires,
+    queryFn: () => api.listHeartbeatFires(),
+    placeholderData: keepPreviousData,
+    staleTime: 10_000,
+  })
+}
+
+export function useTriggerHeartbeatMutation() {
+  const api = useApiClient()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.triggerHeartbeat(),
+    onSuccess: async () => {
+      toast.success('Triggered heartbeat')
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.heartbeatStatus }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.heartbeatFires }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+      ])
     },
   })
 }

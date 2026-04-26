@@ -27,7 +27,132 @@ export type ClawInfo = {
     run_events: boolean
     notifications: boolean
     profiles: boolean
+    schedules?: boolean
+    heartbeat?: boolean
   }
+}
+
+export type ScheduleFireSummary = {
+  id: string
+  schedule_id: string
+  scheduled_at: string
+  fired_at?: string | null
+  status: 'pending' | 'submitted' | 'steered' | 'skipped' | 'failed'
+  target_session_id?: string | null
+  source_session_id?: string | null
+  created_session_id?: string | null
+  run_id?: string | null
+  active_run_id?: string | null
+  input_preview?: string | null
+  error_message?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type ScheduleSummary = {
+  id: string
+  name: string
+  description?: string | null
+  enabled: boolean
+  status: 'active' | 'paused' | 'deleted'
+  prompt: string
+  cron: {
+    expr: string
+    timezone: string
+    next_fire_at?: string | null
+  }
+  mode: {
+    continue_current_session: boolean
+    start_from_current_session: boolean
+    steer_when_running: boolean
+  }
+  execution_mode: 'continue_session' | 'fork_session' | 'isolate_session'
+  owner_kind: string
+  owner_session_id?: string | null
+  owner_run_id?: string | null
+  profile_name?: string | null
+  target_session_id?: string | null
+  source_session_id?: string | null
+  last_fire?: ScheduleFireSummary | null
+  fire_count: number
+  failure_count: number
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export type ScheduleListResponse = {
+  schedules: ScheduleSummary[]
+}
+
+export type ScheduleFireListResponse = {
+  fires: ScheduleFireSummary[]
+}
+
+export type ScheduleCreateRequest = {
+  name: string
+  description?: string | null
+  prompt: string
+  cron: string
+  timezone: string
+  enabled: boolean
+  continue_current_session: boolean
+  start_from_current_session: boolean
+  steer_when_running: boolean
+  owner_kind?: 'api' | 'user' | 'agent'
+  owner_session_id?: string | null
+  owner_run_id?: string | null
+  profile_name?: string | null
+  metadata?: Record<string, unknown>
+}
+
+export type ScheduleUpdateRequest = Partial<{
+  name: string
+  description: string | null
+  prompt: string
+  cron: string
+  timezone: string
+  enabled: boolean
+  continue_current_session: boolean
+  start_from_current_session: boolean
+  steer_when_running: boolean
+  metadata: Record<string, unknown>
+}>
+
+export type HeartbeatFireSummary = {
+  id: string
+  scheduled_at: string
+  fired_at?: string | null
+  status: 'pending' | 'submitted' | 'skipped' | 'failed'
+  session_id?: string | null
+  run_id?: string | null
+  error_message?: string | null
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export type HeartbeatConfig = {
+  enabled: boolean
+  interval_seconds: number
+  profile_name: string
+  prompt: string
+  on_active: string
+  guidance_file: {
+    path: string
+    exists: boolean
+  }
+  next_fire_at?: string | null
+}
+
+export type HeartbeatStatus = {
+  enabled: boolean
+  next_fire_at?: string | null
+  last_fire?: HeartbeatFireSummary | null
+}
+
+export type HeartbeatFireListResponse = {
+  fires: HeartbeatFireSummary[]
 }
 
 export type InputPart =

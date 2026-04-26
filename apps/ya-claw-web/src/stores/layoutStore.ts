@@ -1,7 +1,13 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-export type AppRoute = 'overview' | 'chat' | 'profiles' | 'settings'
+export type AppRoute =
+  | 'overview'
+  | 'chat'
+  | 'schedules'
+  | 'heartbeat'
+  | 'profiles'
+  | 'settings'
 
 export type LayoutState = {
   route: AppRoute

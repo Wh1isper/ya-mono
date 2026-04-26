@@ -21,6 +21,11 @@ from ya_claw.orm.base import Base
 
 _ALLOWED_RUN_STATUSES = ("queued", "running", "completed", "failed", "cancelled")
 _ALLOWED_BRIDGE_EVENT_STATUSES = ("received", "queued", "submitted", "duplicate", "failed")
+_ALLOWED_SCHEDULE_STATUSES = ("active", "paused", "deleted")
+_ALLOWED_SCHEDULE_EXECUTION_MODES = ("continue_session", "fork_session", "isolate_session")
+_ALLOWED_SCHEDULE_ACTIVE_POLICIES = ("steer", "queue")
+_ALLOWED_SCHEDULE_FIRE_STATUSES = ("pending", "submitted", "steered", "skipped", "failed")
+_ALLOWED_HEARTBEAT_FIRE_STATUSES = ("pending", "submitted", "skipped", "failed")
 
 
 def utc_now() -> datetime:
@@ -107,6 +112,110 @@ class RunRecord(Base):
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     session: Mapped[SessionRecord] = relationship(back_populates="runs")
+
+
+class ScheduleRecord(Base):
+    __tablename__ = "schedules"
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN {_ALLOWED_SCHEDULE_STATUSES!s}",
+            name="ck_schedules_status",
+        ),
+        CheckConstraint(
+            f"execution_mode IN {_ALLOWED_SCHEDULE_EXECUTION_MODES!s}",
+            name="ck_schedules_execution_mode",
+        ),
+        CheckConstraint(
+            f"on_active IN {_ALLOWED_SCHEDULE_ACTIVE_POLICIES!s}",
+            name="ck_schedules_on_active",
+        ),
+        Index("ix_schedules_due", "status", "next_fire_at"),
+        Index("ix_schedules_owner_session", "owner_session_id"),
+        Index("ix_schedules_target_session", "target_session_id"),
+        Index("ix_schedules_source_session", "source_session_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    owner_kind: Mapped[str] = mapped_column(String(32), default="api")
+    owner_session_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    owner_run_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    profile_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    cron_expr: Mapped[str] = mapped_column(String(255), nullable=False)
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC")
+    next_fire_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    execution_mode: Mapped[str] = mapped_column(String(32), default="isolate_session")
+    target_session_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_session_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    on_active: Mapped[str] = mapped_column(String(32), default="queue")
+    input_parts_template: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    schedule_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    last_fire_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_fire_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_session_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_run_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    fire_count: Mapped[int] = mapped_column(Integer, default=0)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class ScheduleFireRecord(Base):
+    __tablename__ = "schedule_fires"
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN {_ALLOWED_SCHEDULE_FIRE_STATUSES!s}",
+            name="ck_schedule_fires_status",
+        ),
+        UniqueConstraint("schedule_id", "dedupe_key", name="uq_schedule_fires_dedupe"),
+        Index("ix_schedule_fires_schedule_created", "schedule_id", "created_at"),
+        Index("ix_schedule_fires_status_scheduled", "status", "scheduled_at"),
+        Index("ix_schedule_fires_run", "run_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    schedule_id: Mapped[str] = mapped_column(ForeignKey("schedules.id", ondelete="CASCADE"), nullable=False)
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    dedupe_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    target_session_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_session_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_session_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    active_run_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    input_parts: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fire_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class HeartbeatFireRecord(Base):
+    __tablename__ = "heartbeat_fires"
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN {_ALLOWED_HEARTBEAT_FIRE_STATUSES!s}",
+            name="ck_heartbeat_fires_status",
+        ),
+        UniqueConstraint("dedupe_key", name="uq_heartbeat_fires_dedupe"),
+        Index("ix_heartbeat_fires_status_scheduled", "status", "scheduled_at"),
+        Index("ix_heartbeat_fires_run", "run_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    dedupe_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    session_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fire_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
 
 class BridgeConversationRecord(Base):

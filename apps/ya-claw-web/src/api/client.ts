@@ -1,6 +1,10 @@
 import type {
   ClawInfo,
   HealthStatus,
+  HeartbeatConfig,
+  HeartbeatFireListResponse,
+  HeartbeatFireSummary,
+  HeartbeatStatus,
   InputPart,
   ProfileDetail,
   ProfileSeedResponse,
@@ -9,6 +13,12 @@ import type {
   RunDetail,
   RunGetResponse,
   RunTraceResponse,
+  ScheduleCreateRequest,
+  ScheduleFireListResponse,
+  ScheduleFireSummary,
+  ScheduleListResponse,
+  ScheduleSummary,
+  ScheduleUpdateRequest,
   SessionCreateResponse,
   SessionGetResponse,
   SessionRunCreateRequest,
@@ -178,6 +188,74 @@ export class ClawApiClient {
     return this.request<ProfileSeedResponse>('/api/v1/profiles/seed', {
       method: 'POST',
       body: JSON.stringify({ prune_missing: pruneMissing }),
+    })
+  }
+
+  listSchedules() {
+    return this.request<ScheduleListResponse>('/api/v1/schedules')
+  }
+
+  getSchedule(scheduleId: string) {
+    return this.request<ScheduleSummary>(
+      `/api/v1/schedules/${encodeURIComponent(scheduleId)}`,
+    )
+  }
+
+  createSchedule(payload: ScheduleCreateRequest) {
+    return this.request<ScheduleSummary>('/api/v1/schedules', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  }
+
+  updateSchedule(scheduleId: string, payload: ScheduleUpdateRequest) {
+    return this.request<ScheduleSummary>(
+      `/api/v1/schedules/${encodeURIComponent(scheduleId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      },
+    )
+  }
+
+  deleteSchedule(scheduleId: string) {
+    return this.request<ScheduleSummary>(
+      `/api/v1/schedules/${encodeURIComponent(scheduleId)}`,
+      { method: 'DELETE' },
+    )
+  }
+
+  triggerSchedule(scheduleId: string, promptOverride?: string | null) {
+    return this.request<ScheduleFireSummary>(
+      `/api/v1/schedules/${encodeURIComponent(scheduleId)}:trigger`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ prompt_override: promptOverride ?? null }),
+      },
+    )
+  }
+
+  listScheduleFires(scheduleId: string) {
+    return this.request<ScheduleFireListResponse>(
+      `/api/v1/schedules/${encodeURIComponent(scheduleId)}/fires`,
+    )
+  }
+
+  getHeartbeatConfig() {
+    return this.request<HeartbeatConfig>('/api/v1/heartbeat/config')
+  }
+
+  getHeartbeatStatus() {
+    return this.request<HeartbeatStatus>('/api/v1/heartbeat/status')
+  }
+
+  listHeartbeatFires() {
+    return this.request<HeartbeatFireListResponse>('/api/v1/heartbeat/fires')
+  }
+
+  triggerHeartbeat() {
+    return this.request<HeartbeatFireSummary>('/api/v1/heartbeat:trigger', {
+      method: 'POST',
     })
   }
 }
