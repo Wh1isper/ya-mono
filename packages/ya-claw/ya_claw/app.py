@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from ya_claw.api.bridges import router as bridges_router
 from ya_claw.api.claw import router as claw_router
 from ya_claw.api.health import router as health_router
 from ya_claw.api.heartbeat import router as heartbeat_router
@@ -92,6 +93,7 @@ class ClawApplication:
         app.include_router(runs_router, prefix="/api/v1")
         app.include_router(schedules_router, prefix="/api/v1")
         app.include_router(heartbeat_router, prefix="/api/v1")
+        app.include_router(bridges_router, prefix="/api/v1")
 
         frontend_registered = self.register_frontend(app)
         if not frontend_registered:

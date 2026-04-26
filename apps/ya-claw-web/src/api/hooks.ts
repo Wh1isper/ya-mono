@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 
 import { useConnectionStore } from '../stores/connectionStore'
 import type {
+  BridgeEventStatus,
   InputPart,
   ProfileUpsertRequest,
   ScheduleCreateRequest,
@@ -44,6 +45,31 @@ export function useClawInfoQuery() {
     queryFn: () => api.clawInfo(),
     staleTime: 60_000,
     retry: 1,
+  })
+}
+
+export function useBridgeConversationsQuery() {
+  const api = useApiClient()
+  return useQuery({
+    queryKey: queryKeys.bridgeConversations,
+    queryFn: () => api.listBridgeConversations(),
+    placeholderData: keepPreviousData,
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+  })
+}
+
+export function useBridgeEventsQuery(filters: {
+  conversationId?: string | null
+  status?: BridgeEventStatus | 'all'
+}) {
+  const api = useApiClient()
+  return useQuery({
+    queryKey: queryKeys.bridgeEvents(filters.conversationId, filters.status),
+    queryFn: () => api.listBridgeEvents(filters),
+    placeholderData: keepPreviousData,
+    refetchInterval: 10_000,
+    staleTime: 5_000,
   })
 }
 

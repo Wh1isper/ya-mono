@@ -20,6 +20,7 @@ class BridgeEventStatus(StrEnum):
     RECEIVED = "received"
     QUEUED = "queued"
     SUBMITTED = "submitted"
+    STEERED = "steered"
     DUPLICATE = "duplicate"
     FAILED = "failed"
 
@@ -61,9 +62,17 @@ class BridgeConversationSummary(BaseModel):
     external_chat_id: str
     session_id: str
     profile_name: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    active_run_id: str | None = None
+    event_count: int = 0
+    latest_event_status: BridgeEventStatus | None = None
     created_at: datetime
     updated_at: datetime
     last_event_at: datetime | None = None
+
+
+class BridgeConversationListResponse(BaseModel):
+    conversations: list[BridgeConversationSummary] = Field(default_factory=list)
 
 
 class BridgeEventSummary(BaseModel):
@@ -73,10 +82,18 @@ class BridgeEventSummary(BaseModel):
     event_id: str
     external_message_id: str | None = None
     external_chat_id: str | None = None
+    conversation_id: str | None = None
     session_id: str | None = None
     run_id: str | None = None
+    run_status: str | None = None
     event_type: str
     status: BridgeEventStatus
     error_message: str | None = None
+    raw_event: dict[str, Any] = Field(default_factory=dict)
+    normalized_event: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
+
+
+class BridgeEventListResponse(BaseModel):
+    events: list[BridgeEventSummary] = Field(default_factory=list)

@@ -5,6 +5,7 @@ export type AppRoute =
   | 'overview'
   | 'chat'
   | 'schedules'
+  | 'bridges'
   | 'heartbeat'
   | 'profiles'
   | 'settings'

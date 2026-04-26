@@ -1,4 +1,7 @@
 import type {
+  BridgeConversationListResponse,
+  BridgeEventListResponse,
+  BridgeEventStatus,
   ClawInfo,
   HealthStatus,
   HeartbeatConfig,
@@ -96,6 +99,31 @@ export class ClawApiClient {
 
   clawInfo() {
     return this.request<ClawInfo>('/api/v1/claw/info')
+  }
+
+  listBridgeConversations() {
+    return this.request<BridgeConversationListResponse>(
+      '/api/v1/bridges/conversations',
+    )
+  }
+
+  listBridgeEvents(
+    filters: {
+      conversationId?: string | null
+      status?: BridgeEventStatus | 'all'
+    } = {},
+  ) {
+    const params = new URLSearchParams()
+    if (filters.conversationId) {
+      params.set('conversation_id', filters.conversationId)
+    }
+    if (filters.status && filters.status !== 'all') {
+      params.set('status', filters.status)
+    }
+    const query = params.toString()
+    return this.request<BridgeEventListResponse>(
+      `/api/v1/bridges/events${query ? `?${query}` : ''}`,
+    )
   }
 
   listSessions() {
