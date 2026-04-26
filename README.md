@@ -49,11 +49,13 @@ cd ya-mono
 make install
 ```
 
-Install the bundled agent-builder skill into `~/.agents/skills`:
+Install the canonical skills into `~/.agents/skills`:
 
 ```bash
 make install-skills
 ```
+
+This installs `agent-builder` and `ya-claw-deploy` for local agent use.
 
 ## Getting Started
 
@@ -140,7 +142,7 @@ make test
 | Command                            | Description                                                         |
 | ---------------------------------- | ------------------------------------------------------------------- |
 | `make install`                     | Install Python dependencies, web dependencies, and pre-commit hooks |
-| `make install-skills`              | Install the bundled agent-builder skill into `~/.agents/skills`     |
+| `make install-skills`              | Install canonical skills into `~/.agents/skills`                    |
 | `make lint`                        | Check lock consistency and run pre-commit hooks                     |
 | `make check`                       | Run lock validation, lint, pyright, deptry, and web checks          |
 | `make test`                        | Run SDK, CLI, and YA Claw tests                                     |

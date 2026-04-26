@@ -7,7 +7,7 @@ install: ## Install Python, web dependencies, and pre-commit hooks
 	@uv run pre-commit install
 
 .PHONY: install-skills
-install-skills: ## Install bundled skills into ~/.agents/skills
+install-skills: ## Install canonical skills into ~/.agents/skills
 	@echo "Installing skills into $$HOME/.agents/skills"
 	@rm -rf "$$HOME/.agents/skills/agent-builder"
 	@mkdir -p "$$HOME/.agents/skills/agent-builder"
@@ -15,6 +15,9 @@ install-skills: ## Install bundled skills into ~/.agents/skills
 	@mkdir -p "$$HOME/.agents/skills/agent-builder/examples"
 	@cp -R examples/* "$$HOME/.agents/skills/agent-builder/examples/"
 	@cp examples/.env.example "$$HOME/.agents/skills/agent-builder/examples/"
+	@rm -rf "$$HOME/.agents/skills/ya-claw-deploy"
+	@mkdir -p "$$HOME/.agents/skills/ya-claw-deploy"
+	@cp -R skills/ya-claw-deploy/. "$$HOME/.agents/skills/ya-claw-deploy/"
 
 .PHONY: lint
 lint: ## Lint the code
