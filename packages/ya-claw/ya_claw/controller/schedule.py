@@ -23,13 +23,14 @@ from ya_claw.controller.models import (
 from ya_claw.controller.run import RunController
 from ya_claw.controller.session import SessionController
 from ya_claw.execution.dispatcher import RunDispatcher
-from ya_claw.orm.tables import ScheduleFireRecord, ScheduleRecord, SessionRecord, utc_now
+from ya_claw.orm.tables import RunRecord, ScheduleFireRecord, ScheduleRecord, SessionRecord, utc_now
 from ya_claw.runtime_state import InMemoryRuntimeState
 
 ScheduleStatus = Literal["active", "paused", "deleted"]
 ScheduleExecutionMode = Literal["continue_session", "fork_session", "isolate_session"]
 ScheduleActivePolicy = Literal["steer", "queue"]
 ScheduleFireStatus = Literal["pending", "submitted", "steered", "skipped", "failed"]
+ScheduleRunStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 
 
 class ScheduleCreateRequest(BaseModel):
@@ -87,6 +88,7 @@ class ScheduleFireSummary(BaseModel):
     created_session_id: str | None = None
     run_id: str | None = None
     active_run_id: str | None = None
+    run_status: ScheduleRunStatus | None = None
     input_preview: str | None = None
     error_message: str | None = None
     created_at: datetime
@@ -277,13 +279,20 @@ class ScheduleController:
         await self._get_schedule_record(db_session, schedule_id)
         normalized_limit = min(max(limit, 1), 200)
         statement = (
-            select(ScheduleFireRecord)
+            select(ScheduleFireRecord, RunRecord.status)
+            .outerjoin(RunRecord, ScheduleFireRecord.run_id == RunRecord.id)
             .where(ScheduleFireRecord.schedule_id == schedule_id)
             .order_by(ScheduleFireRecord.created_at.desc())
             .limit(normalized_limit)
         )
         result = await db_session.execute(statement)
-        return ScheduleFireListResponse(fires=[fire_summary_from_record(record) for record in result.scalars().all()])
+        return ScheduleFireListResponse(
+            fires=[
+                fire_summary_from_record(record, run_status=run_status)
+                for record, run_status in result.all()
+                if isinstance(record, ScheduleFireRecord)
+            ]
+        )
 
     async def trigger(
         self,
@@ -635,7 +644,11 @@ def _as_utc_aware(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
-def fire_summary_from_record(record: ScheduleFireRecord) -> ScheduleFireSummary:
+def fire_summary_from_record(
+    record: ScheduleFireRecord,
+    *,
+    run_status: str | None = None,
+) -> ScheduleFireSummary:
     return ScheduleFireSummary(
         id=record.id,
         schedule_id=record.schedule_id,
@@ -647,6 +660,7 @@ def fire_summary_from_record(record: ScheduleFireRecord) -> ScheduleFireSummary:
         created_session_id=record.created_session_id,
         run_id=record.run_id,
         active_run_id=record.active_run_id,
+        run_status=cast(ScheduleRunStatus, run_status) if run_status is not None else None,
         input_preview=_prompt_from_input_parts(record.input_parts),
         error_message=record.error_message,
         created_at=record.created_at,

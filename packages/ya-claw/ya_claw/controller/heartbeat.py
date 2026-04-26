@@ -13,17 +13,20 @@ from ya_claw.config import ClawSettings
 from ya_claw.controller.models import DispatchMode, RunCreateRequest, TextPart, TriggerType
 from ya_claw.controller.run import RunController
 from ya_claw.execution.dispatcher import RunDispatcher
-from ya_claw.orm.tables import HeartbeatFireRecord, utc_now
+from ya_claw.orm.tables import HeartbeatFireRecord, RunRecord, utc_now
 from ya_claw.runtime_state import InMemoryRuntimeState
 
 HeartbeatFireStatus = Literal["pending", "submitted", "skipped", "failed"]
+HeartbeatRunStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 
 
 class HeartbeatConfigResponse(BaseModel):
     enabled: bool
     interval_seconds: int
     profile_name: str
+    profile_source: Literal["heartbeat", "default"]
     prompt: str
+    prompt_source: Literal["heartbeat_setting"]
     on_active: str
     guidance_file: dict[str, Any]
     next_fire_at: datetime | None = None
@@ -42,6 +45,7 @@ class HeartbeatFireSummary(BaseModel):
     status: HeartbeatFireStatus
     session_id: str | None = None
     run_id: str | None = None
+    run_status: HeartbeatRunStatus | None = None
     error_message: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
@@ -57,11 +61,18 @@ class HeartbeatController:
         self._run_controller = RunController()
 
     async def config(self, db_session: AsyncSession, settings: ClawSettings) -> HeartbeatConfigResponse:
+        profile_source: Literal["heartbeat", "default"] = (
+            "heartbeat"
+            if isinstance(settings.heartbeat_profile, str) and settings.heartbeat_profile.strip() != ""
+            else "default"
+        )
         return HeartbeatConfigResponse(
             enabled=settings.heartbeat_enabled,
             interval_seconds=settings.heartbeat_interval_seconds,
             profile_name=settings.resolved_heartbeat_profile,
+            profile_source=profile_source,
             prompt=settings.heartbeat_prompt,
+            prompt_source="heartbeat_setting",
             on_active=settings.heartbeat_on_active,
             guidance_file={
                 "path": str(settings.heartbeat_guidance_path),
@@ -80,18 +91,35 @@ class HeartbeatController:
     async def list_fires(self, db_session: AsyncSession, *, limit: int = 50) -> HeartbeatFireListResponse:
         normalized_limit = min(max(limit, 1), 200)
         result = await db_session.execute(
-            select(HeartbeatFireRecord).order_by(HeartbeatFireRecord.created_at.desc()).limit(normalized_limit)
+            select(HeartbeatFireRecord, RunRecord.status)
+            .outerjoin(RunRecord, HeartbeatFireRecord.run_id == RunRecord.id)
+            .order_by(HeartbeatFireRecord.created_at.desc())
+            .limit(normalized_limit)
         )
         return HeartbeatFireListResponse(
-            fires=[heartbeat_fire_summary_from_record(record) for record in result.scalars().all()]
+            fires=[
+                heartbeat_fire_summary_from_record(record, run_status=run_status)
+                for record, run_status in result.all()
+                if isinstance(record, HeartbeatFireRecord)
+            ]
         )
 
     async def last_fire(self, db_session: AsyncSession) -> HeartbeatFireSummary | None:
         result = await db_session.execute(
-            select(HeartbeatFireRecord).order_by(HeartbeatFireRecord.created_at.desc()).limit(1)
+            select(HeartbeatFireRecord, RunRecord.status)
+            .outerjoin(RunRecord, HeartbeatFireRecord.run_id == RunRecord.id)
+            .order_by(HeartbeatFireRecord.created_at.desc())
+            .limit(1)
         )
-        record = result.scalar_one_or_none()
-        return heartbeat_fire_summary_from_record(record) if isinstance(record, HeartbeatFireRecord) else None
+        row = result.one_or_none()
+        if row is None:
+            return None
+        record, run_status = row
+        return (
+            heartbeat_fire_summary_from_record(record, run_status=run_status)
+            if isinstance(record, HeartbeatFireRecord)
+            else None
+        )
 
     async def next_fire_at(self, db_session: AsyncSession, settings: ClawSettings) -> datetime | None:
         if not settings.heartbeat_enabled:
@@ -179,7 +207,11 @@ def _as_utc_aware(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
-def heartbeat_fire_summary_from_record(record: HeartbeatFireRecord) -> HeartbeatFireSummary:
+def heartbeat_fire_summary_from_record(
+    record: HeartbeatFireRecord,
+    *,
+    run_status: str | None = None,
+) -> HeartbeatFireSummary:
     return HeartbeatFireSummary(
         id=record.id,
         scheduled_at=record.scheduled_at,
@@ -187,6 +219,7 @@ def heartbeat_fire_summary_from_record(record: HeartbeatFireRecord) -> Heartbeat
         status=cast(HeartbeatFireStatus, record.status),
         session_id=record.session_id,
         run_id=record.run_id,
+        run_status=cast(HeartbeatRunStatus, run_status) if run_status is not None else None,
         error_message=record.error_message,
         metadata=dict(record.fire_metadata),
         created_at=record.created_at,
