@@ -30,6 +30,8 @@ def test_docker_shell_initialization() -> None:
     assert shell._container_id == "test123"
     assert shell._container_workdir == "/app"
     assert shell._default_timeout == 60.0
+    assert shell._exec_user is None
+    assert shell._default_env == {}
 
 
 async def test_docker_shell_execute_empty_command() -> None:
@@ -123,6 +125,67 @@ async def test_docker_shell_execute_with_env() -> None:
     assert call_kwargs["environment"] == {"FOO": "bar"}
 
 
+async def test_docker_shell_execute_with_exec_user_and_default_env() -> None:
+    """Should pass docker exec user and merge default environment variables."""
+    shell = DockerShell(
+        container_id="test123",
+        exec_user="1000:1000",
+        default_env={"HOME": "/home/claw", "USER": "claw", "FOO": "default"},
+    )
+
+    mock_container = MagicMock()
+    mock_container.exec_run.return_value = MagicMock(
+        exit_code=0,
+        output=(b"", b""),
+    )
+
+    mock_client = MagicMock()
+    mock_client.containers.get.return_value = mock_container
+    shell._client = mock_client
+
+    await shell.execute("env", env={"FOO": "override", "BAR": "baz"})
+
+    call_kwargs = mock_container.exec_run.call_args[1]
+    assert call_kwargs["user"] == "1000:1000"
+    assert call_kwargs["environment"] == {
+        "HOME": "/home/claw",
+        "USER": "claw",
+        "FOO": "override",
+        "BAR": "baz",
+    }
+
+
+def test_docker_shell_builds_background_exec_args_with_user_and_default_env() -> None:
+    shell = DockerShell(
+        container_id="test123",
+        container_workdir="/workspace",
+        exec_user="1000:1000",
+        default_env={"HOME": "/home/claw", "USER": "claw"},
+    )
+
+    args = shell._build_docker_exec_args("echo hello", env={"FOO": "bar"}, cwd="subdir")
+
+    assert args == [
+        "docker",
+        "exec",
+        "-i",
+        "--user",
+        "1000:1000",
+        "-e",
+        "HOME=/home/claw",
+        "-e",
+        "USER=claw",
+        "-e",
+        "FOO=bar",
+        "-w",
+        "/workspace/subdir",
+        "test123",
+        "/bin/sh",
+        "-c",
+        "echo hello",
+    ]
+
+
 async def test_docker_shell_get_context_instructions() -> None:
     """Should return docker-specific instructions."""
     shell = DockerShell(
@@ -183,6 +246,8 @@ def test_sandbox_environment_initialization_with_container_id(tmp_path: Path) ->
     assert env._container_id == "existing123"
     assert env._work_dir == "/app"
     assert env._cleanup_on_exit is False
+    assert env._docker_exec_user is None
+    assert env._docker_exec_default_env == {}
 
 
 def test_sandbox_environment_initialization_with_image(tmp_path: Path) -> None:
@@ -292,6 +357,27 @@ async def test_sandbox_environment_enter_creates_new_container(tmp_path: Path) -
     # Verify container was stopped and removed (cleanup_on_exit=True)
     mock_container.stop.assert_called_once()
     mock_container.remove.assert_called_once()
+
+
+async def test_sandbox_environment_passes_docker_exec_options_to_shell(tmp_path: Path) -> None:
+    """Should pass docker exec options to created DockerShell."""
+    env = SandboxEnvironment(
+        mounts=[VirtualMount(tmp_path, Path("/workspace"))],
+        container_id="test123",
+        docker_exec_user="1000:1000",
+        docker_exec_default_env={"HOME": "/home/claw"},
+    )
+
+    mock_container = MagicMock()
+    mock_container.status = "running"
+
+    mock_client = MagicMock()
+    mock_client.containers.get.return_value = mock_container
+    env._client = mock_client
+
+    async with env:
+        assert env._shell._exec_user == "1000:1000"
+        assert env._shell._default_env == {"HOME": "/home/claw"}
 
 
 async def test_sandbox_environment_file_operator_uses_virtual_paths(tmp_path: Path) -> None:

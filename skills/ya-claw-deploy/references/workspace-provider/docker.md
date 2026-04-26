@@ -100,12 +100,16 @@ YA_CLAW_RUN_UID=1000
 YA_CLAW_RUN_GID=1000
 ```
 
-The workspace container user can be set through:
+The workspace container user and Docker exec identity can be set through:
 
 ```env
 YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID=1000
 YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID=1000
+YA_CLAW_WORKSPACE_PROVIDER_DOCKER_EXEC_USER=auto
+YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOME=/home/claw
 ```
+
+`auto` resolves Docker exec to the configured workspace UID:GID. Use `root` for maintenance sessions that should execute commands as root.
 
 ## Workspace Image Contents
 

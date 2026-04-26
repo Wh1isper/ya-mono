@@ -134,6 +134,25 @@ def test_settings_workspace_docker_identity_can_be_configured() -> None:
     assert settings.resolved_workspace_provider_docker_gid == 4567
 
 
+def test_settings_default_workspace_docker_exec_user_and_home() -> None:
+    settings = ClawSettings(api_token="test-token", _env_file=None)  # noqa: S106
+
+    assert settings.resolved_workspace_provider_docker_exec_user == "auto"
+    assert settings.resolved_workspace_provider_docker_exec_default_env == {"HOME": "/home/claw", "USER": "claw"}
+
+
+def test_settings_workspace_docker_exec_user_and_home_can_be_configured() -> None:
+    settings = ClawSettings(
+        api_token="test-token",  # noqa: S106
+        workspace_provider_docker_exec_user="root",
+        workspace_provider_docker_home="/custom-home",
+        _env_file=None,
+    )
+
+    assert settings.resolved_workspace_provider_docker_exec_user == "root"
+    assert settings.resolved_workspace_provider_docker_exec_default_env == {"HOME": "/custom-home", "USER": "claw"}
+
+
 def test_settings_default_workspace_docker_container_cache_dir(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     settings = ClawSettings(

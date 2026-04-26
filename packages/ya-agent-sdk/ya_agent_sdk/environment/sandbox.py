@@ -67,6 +67,8 @@ class DockerShell(Shell):
         container_id: str,
         container_workdir: str = "/workspace",
         default_timeout: float = 30.0,
+        exec_user: str | None = None,
+        default_env: dict[str, str] | None = None,
     ):
         """Initialize DockerShell.
 
@@ -74,6 +76,8 @@ class DockerShell(Shell):
             container_id: Docker container ID to execute commands in.
             container_workdir: Working directory inside the container.
             default_timeout: Default timeout in seconds.
+            exec_user: Docker exec user, such as "1000:1000" or "root".
+            default_env: Default environment variables for every docker exec.
         """
         # DockerShell doesn't use allowed_paths or default_cwd from base Shell
         # since path validation happens inside the container
@@ -84,6 +88,8 @@ class DockerShell(Shell):
         )
         self._container_id = container_id
         self._container_workdir = container_workdir
+        self._exec_user = exec_user.strip() if isinstance(exec_user, str) and exec_user.strip() != "" else None
+        self._default_env = dict(default_env or {})
         self._client: docker.DockerClient | None = None
 
     @property
@@ -126,14 +132,17 @@ class DockerShell(Shell):
         def _exec_command() -> tuple[int, str, str]:
             try:
                 container = self.client.containers.get(self._container_id)
-                result = container.exec_run(
-                    cmd=["/bin/sh", "-c", command],
-                    stdout=True,
-                    stderr=True,
-                    demux=True,
-                    workdir=workdir,
-                    environment=env,
-                )
+                exec_kwargs: dict[str, Any] = {
+                    "cmd": ["/bin/sh", "-c", command],
+                    "stdout": True,
+                    "stderr": True,
+                    "demux": True,
+                    "workdir": workdir,
+                    "environment": self._build_exec_env(env),
+                }
+                if self._exec_user is not None:
+                    exec_kwargs["user"] = self._exec_user
+                result = container.exec_run(**exec_kwargs)
 
                 exit_code = result.exit_code if isinstance(result.exit_code, int) else 0
                 stdout_bytes, stderr_bytes = _coerce_docker_exec_output(result.output)
@@ -164,10 +173,11 @@ class DockerShell(Shell):
 
     async def get_context_instructions(self) -> str | None:
         """Return instructions for the agent about shell capabilities."""
+        exec_user_line = f"\n  <exec-user>{self._exec_user}</exec-user>" if self._exec_user is not None else ""
         return f"""<shell-execution>
   <type>docker-exec</type>
   <container-id>{self._container_id}</container-id>
-  <container-workdir>{self._container_workdir}</container-workdir>
+  <container-workdir>{self._container_workdir}</container-workdir>{exec_user_line}
   <default-timeout>{self._default_timeout}s</default-timeout>
   <note>Commands are executed inside the Docker container via docker exec.</note>
 </shell-execution>"""
@@ -186,11 +196,18 @@ class DockerShell(Shell):
             workdir = self._container_workdir
 
         args: list[str] = ["docker", "exec", "-i"]
-        if env:
-            for k, v in env.items():
+        if self._exec_user is not None:
+            args.extend(["--user", self._exec_user])
+        exec_env = self._build_exec_env(env)
+        if exec_env:
+            for k, v in exec_env.items():
                 args.extend(["-e", f"{k}={v}"])
         args.extend(["-w", workdir, self._container_id, "/bin/sh", "-c", command])
         return args
+
+    def _build_exec_env(self, env: dict[str, str] | None) -> dict[str, str] | None:
+        merged_env = {**self._default_env, **dict(env or {})}
+        return merged_env or None
 
     async def _create_process(
         self,
@@ -308,6 +325,8 @@ class SandboxEnvironment(Environment):
         image: str | None = None,
         cleanup_on_exit: bool = True,
         shell_timeout: float = 30.0,
+        docker_exec_user: str | None = None,
+        docker_exec_default_env: dict[str, str] | None = None,
         enable_tmp_dir: bool = True,
         tmp_base_dir: Path | None = None,
         resource_state: ResourceRegistryState | None = None,
@@ -332,6 +351,8 @@ class SandboxEnvironment(Environment):
                 Only applies to Docker-managed containers.
             shell_timeout: Default timeout for shell commands.
                 Only applies when creating a DockerShell (no custom shell).
+            docker_exec_user: Docker exec user for DockerShell.
+            docker_exec_default_env: Default environment variables for DockerShell.
             enable_tmp_dir: Whether to create a session temporary directory.
             tmp_base_dir: Base directory for creating session temporary directory.
             resource_state: Optional state to restore resources from.
@@ -367,6 +388,8 @@ class SandboxEnvironment(Environment):
         self._image = image
         self._cleanup_on_exit = cleanup_on_exit
         self._shell_timeout = shell_timeout
+        self._docker_exec_user = docker_exec_user
+        self._docker_exec_default_env = dict(docker_exec_default_env or {})
         self._enable_tmp_dir = enable_tmp_dir
         self._tmp_base_dir = tmp_base_dir
 
@@ -445,6 +468,8 @@ class SandboxEnvironment(Environment):
                 container_id=self._container_id,
                 container_workdir=self._work_dir,
                 default_timeout=self._shell_timeout,
+                exec_user=self._docker_exec_user,
+                default_env=self._docker_exec_default_env,
             )
 
     async def _teardown(self) -> None:

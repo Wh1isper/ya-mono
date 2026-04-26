@@ -29,6 +29,10 @@ _DOCKER_CONTAINER_CACHE_SCHEMA_VERSION = 1
 _DOCKER_CONTAINER_LOCKS: dict[str, asyncio.Lock] = {}
 _DEFAULT_VIRTUAL_WORKSPACE_PATH = Path("/workspace")
 _DEFAULT_CONTAINER_CACHE_FILE = "workspace.json"
+_DEFAULT_DOCKER_WORKSPACE_HOME = "/home/claw"
+_DEFAULT_DOCKER_WORKSPACE_USER = "claw"
+_AUTO_DOCKER_EXEC_USER = "auto"
+_ROOT_DOCKER_EXEC_USER = "root"
 
 
 @dataclass(slots=True)
@@ -155,6 +159,8 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
         workspace_uid: int | None = None,
         workspace_gid: int | None = None,
         workspace_environment: dict[str, str] | None = None,
+        docker_exec_user: str | None = None,
+        docker_exec_default_env: dict[str, str] | None = None,
         shell_timeout: float = 30.0,
         cleanup_on_exit: bool = False,
         container_cache_path: Path | None = None,
@@ -173,6 +179,12 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
         self._workspace_uid = workspace_uid
         self._workspace_gid = workspace_gid
         self._workspace_environment = dict(workspace_environment or {})
+        self._docker_exec_user = _resolve_docker_exec_user(
+            docker_exec_user,
+            workspace_uid=workspace_uid,
+            workspace_gid=workspace_gid,
+        )
+        self._docker_exec_default_env = dict(docker_exec_default_env or {})
         self._container_cache_path = container_cache_path.expanduser() if container_cache_path is not None else None
         self._docker_host_paths = (
             [path.expanduser() for path in docker_host_paths] if docker_host_paths is not None else []
@@ -232,6 +244,8 @@ class ReusableSandboxEnvironment(SandboxEnvironment):
                 container_id=self._container_id,
                 container_workdir=self._work_dir,
                 default_timeout=self._shell_timeout,
+                exec_user=self._docker_exec_user,
+                default_env=self._docker_exec_default_env,
             )
 
     async def _ensure_container(self) -> None:
@@ -530,6 +544,8 @@ class DockerEnvironmentFactory(EnvironmentFactory):
         workspace_uid: int | None = None,
         workspace_gid: int | None = None,
         workspace_environment: dict[str, str] | None = None,
+        docker_exec_user: str | None = None,
+        docker_exec_default_env: dict[str, str] | None = None,
         shell_timeout: float = 30.0,
         cleanup_on_exit: bool = False,
         container_cache_dir: Path | None = None,
@@ -539,6 +555,8 @@ class DockerEnvironmentFactory(EnvironmentFactory):
         self._workspace_uid = workspace_uid
         self._workspace_gid = workspace_gid
         self._workspace_environment = dict(workspace_environment or {})
+        self._docker_exec_user = docker_exec_user
+        self._docker_exec_default_env = dict(docker_exec_default_env or build_docker_workspace_exec_default_env())
         self._shell_timeout = shell_timeout
         self._cleanup_on_exit = cleanup_on_exit
         self._container_cache_dir = container_cache_dir.expanduser() if container_cache_dir is not None else None
@@ -592,6 +610,8 @@ class DockerEnvironmentFactory(EnvironmentFactory):
             workspace_uid=self._workspace_uid,
             workspace_gid=self._workspace_gid,
             workspace_environment=workspace_environment,
+            docker_exec_user=self._docker_exec_user,
+            docker_exec_default_env=self._docker_exec_default_env,
             cleanup_on_exit=self._cleanup_on_exit,
             shell_timeout=self._shell_timeout,
             container_cache_path=_build_container_cache_path(self._container_cache_dir),
@@ -613,6 +633,8 @@ class DefaultEnvironmentFactory(EnvironmentFactory):
         workspace_environment: dict[str, str] | None = None,
         docker_container_cache_dir: Path | None = None,
         docker_extra_mounts: list[DockerExtraMount] | None = None,
+        docker_exec_user: str | None = None,
+        docker_exec_default_env: dict[str, str] | None = None,
     ) -> None:
         self._local_factory = LocalEnvironmentFactory(
             shell_timeout=shell_timeout,
@@ -624,6 +646,8 @@ class DefaultEnvironmentFactory(EnvironmentFactory):
             workspace_uid=workspace_uid,
             workspace_gid=workspace_gid,
             workspace_environment=workspace_environment,
+            docker_exec_user=docker_exec_user,
+            docker_exec_default_env=docker_exec_default_env,
             shell_timeout=shell_timeout,
             cleanup_on_exit=cleanup_on_exit,
             container_cache_dir=docker_container_cache_dir,
@@ -868,6 +892,26 @@ def _normalize_optional_str(value: Any) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _resolve_docker_exec_user(
+    value: str | None,
+    *,
+    workspace_uid: int | None,
+    workspace_gid: int | None,
+) -> str | None:
+    normalized_value = _normalize_optional_str(value) or _AUTO_DOCKER_EXEC_USER
+    if normalized_value.lower() == _AUTO_DOCKER_EXEC_USER:
+        if isinstance(workspace_uid, int) and isinstance(workspace_gid, int):
+            return f"{workspace_uid}:{workspace_gid}"
+        return None
+    return normalized_value
+
+
+def build_docker_workspace_exec_default_env(*, home: str | None = None, user: str | None = None) -> dict[str, str]:
+    normalized_home = _normalize_optional_str(home) or _DEFAULT_DOCKER_WORKSPACE_HOME
+    normalized_user = _normalize_optional_str(user) or _DEFAULT_DOCKER_WORKSPACE_USER
+    return {"HOME": normalized_home, "USER": normalized_user}
 
 
 def _first_optional_int(*values: Any) -> int | None:

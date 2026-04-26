@@ -50,6 +50,8 @@ flowchart TB
 | `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOST_WORKSPACE_DIR` | Docker daemon-visible host workspace path for service-in-Docker deployments |
 | `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID`                | UID used inside auto-started Docker workspace containers                    |
 | `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID`                | GID used inside auto-started Docker workspace containers                    |
+| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_EXEC_USER`          | Docker exec user, default `auto` resolves to workspace UID:GID              |
+| `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOME`               | default HOME passed to Docker exec commands, default `/home/claw`           |
 | `YA_CLAW_MCP_CONFIG_FILE`                              | global MCP JSON file injected into every runtime                            |
 | `YA_CLAW_WORKSPACE_MCP_CONFIG_PATH`                    | workspace MCP JSON path with workspace-level priority                       |
 | `YA_CLAW_SCHEDULE_DISPATCH_ENABLED`                    | enable schedule dispatcher                                                  |
@@ -173,7 +175,7 @@ The image provides a ready-to-use agent workspace on Debian stable with:
 
 The workspace provider treats the image as an implementation detail carried by `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE`. Deployments can override the image while keeping the same binding and environment factory contracts.
 
-Auto-started Docker workspace containers receive `YA_CLAW_WORKSPACE_UID`, `YA_CLAW_WORKSPACE_GID`, `YA_CLAW_HOST_UID`, and `YA_CLAW_HOST_GID`. The default UID/GID comes from the YA Claw service process, and deployments can override them through `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID` and `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID`.
+Auto-started Docker workspace containers receive `YA_CLAW_WORKSPACE_UID`, `YA_CLAW_WORKSPACE_GID`, `YA_CLAW_HOST_UID`, and `YA_CLAW_HOST_GID`. The default UID/GID comes from the YA Claw service process, and deployments can override them through `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID` and `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID`. Docker shell commands use `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_EXEC_USER=auto` by default, which resolves to the workspace UID:GID. `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOME` sets the default `HOME` for Docker exec commands and defaults to `/home/claw`.
 
 Workspace environments receive built-in `LARK_APP_ID` and `LARK_APP_SECRET` aliases from process environment values or the configured Lark bridge app settings. `YA_CLAW_WORKSPACE_ENV_VARS` forwards additional comma-separated process environment variable names into workspace environments; values are read from the YA Claw service process environment and passed to local shell execution or Docker container creation. `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_EXTRA_MOUNTS` mounts additional host directories into Docker workspace containers using comma-separated `host_path:container_path[:mode]` entries with `rw` and `ro` modes.
 

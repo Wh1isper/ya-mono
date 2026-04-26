@@ -56,6 +56,8 @@ Align workspace container UID/GID with the service user when both the service an
 ```env
 YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID=1000
 YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID=1000
+YA_CLAW_WORKSPACE_PROVIDER_DOCKER_EXEC_USER=auto
+YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOME=/home/claw
 ```
 
 ## Verification
