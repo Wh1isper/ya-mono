@@ -50,6 +50,8 @@ import type {
 import { buildTimeline, reduceAguiEvent } from './agui/eventReducer'
 import type { AguiTimelineState, TimelineBlock } from './agui/types'
 import { useQueryClient } from '@tanstack/react-query'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 type StreamStatus = 'idle' | 'connecting' | 'streaming' | 'closed' | 'error'
 
@@ -127,42 +129,53 @@ export function ChatPage() {
     })
   }, [sessionSearch, sessions.data])
 
-  const timeline = useMemo(() => {
-    const run =
+  const activeRun = useMemo(
+    () =>
       activeRunData?.run ??
       activeSessionData?.session.runs.find(
         (item) => item.id === resolvedRunId,
       ) ??
-      null
-    const replay =
-      activeRunData?.message ?? run?.message ?? activeSessionData?.message ?? []
-    const inputParts = run?.input_parts ?? []
+      null,
+    [activeRunData, activeSessionData, resolvedRunId],
+  )
+  const replayEvents = useMemo(
+    () =>
+      activeRunData?.message ??
+      activeRun?.message ??
+      activeSessionData?.message ??
+      [],
+    [activeRun, activeRunData, activeSessionData],
+  )
+  const hasCommittedTerminalEvent = useMemo(
+    () => replayEvents.some((event) => isTerminalAguiEvent(event)),
+    [replayEvents],
+  )
+  const effectiveLiveEvents = useMemo(
+    () => (hasCommittedTerminalEvent ? [] : liveEvents),
+    [hasCommittedTerminalEvent, liveEvents],
+  )
+
+  const timeline = useMemo(() => {
+    const inputParts = activeRun?.input_parts ?? []
     const base = buildTimeline(
-      replay,
+      replayEvents,
       inputParts,
-      run?.id ?? resolvedRunId ?? 'run',
+      activeRun?.id ?? resolvedRunId ?? 'run',
       { includeRuntimeEvents: false },
     )
-    if (!liveEvents.length) return base
-    return liveEvents.reduce(
+    if (!effectiveLiveEvents.length) return base
+    return effectiveLiveEvents.reduce(
       (state, event) =>
         reduceAguiEvent(state, event, { includeRuntimeEvents: false }),
       base,
     )
-  }, [activeRunData, activeSessionData, liveEvents, resolvedRunId])
+  }, [activeRun, effectiveLiveEvents, replayEvents, resolvedRunId])
 
   const runs = activeSessionData?.session.runs ?? []
-  const runEvents = useMemo(() => {
-    const run =
-      activeRunData?.run ??
-      activeSessionData?.session.runs.find(
-        (item) => item.id === resolvedRunId,
-      ) ??
-      null
-    const replay =
-      activeRunData?.message ?? run?.message ?? activeSessionData?.message ?? []
-    return [...replay, ...liveEvents]
-  }, [activeRunData, activeSessionData, liveEvents, resolvedRunId])
+  const runEvents = useMemo(
+    () => [...replayEvents, ...effectiveLiveEvents],
+    [effectiveLiveEvents, replayEvents],
+  )
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-slate-100">
@@ -175,7 +188,10 @@ export function ChatPage() {
             </h1>
           </div>
           <div className="flex items-center gap-2 text-xs text-slate-500">
-            <LivePill status={streamStatus} eventCount={liveEvents.length} />
+            <LivePill
+              status={streamStatus}
+              eventCount={effectiveLiveEvents.length}
+            />
             <button
               type="button"
               className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
@@ -249,7 +265,7 @@ export function ChatPage() {
               <EventDevToolsPanel
                 events={runEvents}
                 streamStatus={streamStatus}
-                liveEventCount={liveEvents.length}
+                liveEventCount={effectiveLiveEvents.length}
                 loading={contentLoading}
               />
             </Panel>
@@ -606,9 +622,7 @@ function TimelineCard({ block }: { block: TimelineBlock }) {
         title={block.name ? `Assistant · ${block.name}` : 'Assistant'}
         accent="emerald"
       >
-        <div className="whitespace-pre-wrap text-sm leading-7 text-slate-800">
-          {block.content}
-        </div>
+        <MarkdownMessage content={block.content} />
       </Card>
     )
   }
@@ -758,6 +772,135 @@ function TimelineCard({ block }: { block: TimelineBlock }) {
     <Card icon={MessageSquare} title={block.name} accent="slate" compact>
       <JsonView value={block.payload} height="180px" />
     </Card>
+  )
+}
+
+function MarkdownMessage({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        a: ({ className, ...props }) => (
+          <a
+            className={cn(
+              'font-medium text-blue-600 underline decoration-blue-300 underline-offset-2 hover:text-blue-700',
+              className,
+            )}
+            target="_blank"
+            rel="noreferrer"
+            {...props}
+          />
+        ),
+        blockquote: ({ className, ...props }) => (
+          <blockquote
+            className={cn(
+              'my-4 border-l-4 border-slate-200 pl-4 text-slate-600',
+              className,
+            )}
+            {...props}
+          />
+        ),
+        code: ({ className, children, ...props }) => (
+          <code
+            className={cn(
+              'rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[0.9em] text-slate-800',
+              className,
+            )}
+            {...props}
+          >
+            {children}
+          </code>
+        ),
+        h1: ({ className, ...props }) => (
+          <h1
+            className={cn(
+              'mb-3 mt-5 text-xl font-semibold text-slate-950',
+              className,
+            )}
+            {...props}
+          />
+        ),
+        h2: ({ className, ...props }) => (
+          <h2
+            className={cn(
+              'mb-3 mt-5 text-lg font-semibold text-slate-950',
+              className,
+            )}
+            {...props}
+          />
+        ),
+        h3: ({ className, ...props }) => (
+          <h3
+            className={cn(
+              'mb-2 mt-4 text-base font-semibold text-slate-950',
+              className,
+            )}
+            {...props}
+          />
+        ),
+        li: ({ className, ...props }) => (
+          <li className={cn('pl-1', className)} {...props} />
+        ),
+        ol: ({ className, ...props }) => (
+          <ol
+            className={cn('my-3 list-decimal space-y-1 pl-6', className)}
+            {...props}
+          />
+        ),
+        p: ({ className, ...props }) => (
+          <p
+            className={cn('my-3 leading-7 first:mt-0 last:mb-0', className)}
+            {...props}
+          />
+        ),
+        pre: ({ className, ...props }) => (
+          <pre
+            className={cn(
+              'scrollbar-thin my-4 max-w-full overflow-auto rounded-xl border border-slate-200 bg-slate-950 p-3 text-xs leading-5 text-slate-100',
+              className,
+            )}
+            {...props}
+          />
+        ),
+        table: ({ className, ...props }) => (
+          <div className="scrollbar-thin my-4 overflow-auto">
+            <table
+              className={cn(
+                'w-full border-collapse text-left text-sm',
+                className,
+              )}
+              {...props}
+            />
+          </div>
+        ),
+        td: ({ className, ...props }) => (
+          <td
+            className={cn(
+              'border border-slate-200 px-3 py-2 align-top',
+              className,
+            )}
+            {...props}
+          />
+        ),
+        th: ({ className, ...props }) => (
+          <th
+            className={cn(
+              'border border-slate-200 bg-slate-50 px-3 py-2 font-semibold',
+              className,
+            )}
+            {...props}
+          />
+        ),
+        ul: ({ className, ...props }) => (
+          <ul
+            className={cn('my-3 list-disc space-y-1 pl-6', className)}
+            {...props}
+          />
+        ),
+      }}
+    >
+      {content}
+    </ReactMarkdown>
   )
 }
 
@@ -951,6 +1094,11 @@ function Composer({
       </div>
     </div>
   )
+}
+
+function isTerminalAguiEvent(event: AguiEvent) {
+  const eventType = typeof event.type === 'string' ? event.type : ''
+  return eventType === 'RUN_FINISHED' || eventType === 'RUN_ERROR'
 }
 
 function eventKey(event: AguiEvent) {
