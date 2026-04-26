@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
 from uuid import uuid4
 
@@ -99,7 +99,7 @@ class HeartbeatController:
         last_fire = await self.last_fire(db_session)
         if last_fire is None:
             return utc_now()
-        return last_fire.scheduled_at + timedelta(seconds=max(settings.heartbeat_interval_seconds, 1))
+        return _as_utc_aware(last_fire.scheduled_at) + timedelta(seconds=max(settings.heartbeat_interval_seconds, 1))
 
     async def dispatch_due(
         self,
@@ -111,9 +111,16 @@ class HeartbeatController:
         if not settings.heartbeat_enabled:
             return None
         due_at = await self.next_fire_at(db_session, settings)
-        if due_at is None or due_at > utc_now():
+        if due_at is None or _as_utc_aware(due_at) > utc_now():
             return None
-        return await self.trigger(db_session, settings, runtime_state, dispatcher, scheduled_at=due_at, manual=False)
+        return await self.trigger(
+            db_session,
+            settings,
+            runtime_state,
+            dispatcher,
+            scheduled_at=_as_utc_aware(due_at),
+            manual=False,
+        )
 
     async def trigger(
         self,
@@ -164,6 +171,12 @@ class HeartbeatController:
         await db_session.commit()
         await db_session.refresh(record)
         return heartbeat_fire_summary_from_record(record)
+
+
+def _as_utc_aware(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def heartbeat_fire_summary_from_record(record: HeartbeatFireRecord) -> HeartbeatFireSummary:

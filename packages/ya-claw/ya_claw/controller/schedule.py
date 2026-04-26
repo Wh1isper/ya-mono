@@ -317,13 +317,12 @@ class ScheduleController:
         now: datetime | None = None,
         limit: int = 20,
     ) -> list[ScheduleFireSummary]:
-        effective_now = now or utc_now()
+        effective_now = _as_utc_aware(now or utc_now())
         statement = (
             select(ScheduleRecord)
             .where(
                 ScheduleRecord.status == "active",
                 ScheduleRecord.next_fire_at.is_not(None),
-                ScheduleRecord.next_fire_at <= effective_now,
             )
             .order_by(ScheduleRecord.next_fire_at.asc(), ScheduleRecord.id.asc())
             .limit(max(limit, 1))
@@ -331,7 +330,10 @@ class ScheduleController:
         result = await db_session.execute(statement)
         fired: list[ScheduleFireSummary] = []
         for record in result.scalars().all():
-            scheduled_at = record.next_fire_at or effective_now
+            next_fire_at = _as_utc_aware(record.next_fire_at) if record.next_fire_at is not None else None
+            if next_fire_at is None or next_fire_at > effective_now:
+                continue
+            scheduled_at = next_fire_at
             fire_record = await self._create_fire(db_session, record, scheduled_at=scheduled_at, manual=False)
             await self.dispatch_fire(db_session, settings, runtime_state, dispatcher, record, fire_record)
             record.next_fire_at = compute_next_fire_at(record.cron_expr, record.timezone, now=effective_now)
@@ -350,16 +352,18 @@ class ScheduleController:
         now: datetime | None = None,
         limit: int = 20,
     ) -> list[ScheduleFireSummary]:
-        effective_now = now or utc_now()
+        effective_now = _as_utc_aware(now or utc_now())
         statement = (
             select(ScheduleFireRecord)
-            .where(ScheduleFireRecord.status == "pending", ScheduleFireRecord.scheduled_at <= effective_now)
+            .where(ScheduleFireRecord.status == "pending")
             .order_by(ScheduleFireRecord.scheduled_at.asc(), ScheduleFireRecord.id.asc())
             .limit(max(limit, 1))
         )
         result = await db_session.execute(statement)
         fired: list[ScheduleFireSummary] = []
         for fire_record in result.scalars().all():
+            if _as_utc_aware(fire_record.scheduled_at) > effective_now:
+                continue
             record = await db_session.get(ScheduleRecord, fire_record.schedule_id)
             if not isinstance(record, ScheduleRecord) or record.status == "deleted":
                 fire_record.status = "skipped"
@@ -623,6 +627,12 @@ class ScheduleController:
         if not isinstance(record, SessionRecord):
             raise HTTPException(status_code=404, detail=f"Session '{session_id}' was not found.")
         return record
+
+
+def _as_utc_aware(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def fire_summary_from_record(record: ScheduleFireRecord) -> ScheduleFireSummary:

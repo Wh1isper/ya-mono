@@ -26,6 +26,9 @@ def clear_claw_settings(monkeypatch, tmp_path: Path) -> None:
         "YA_CLAW_WORKSPACE_DIR",
         "YA_CLAW_PROFILE_SEED_FILE",
         "YA_CLAW_AUTO_SEED_PROFILES",
+        "YA_CLAW_SCHEDULE_DISPATCH_ENABLED",
+        "YA_CLAW_HEARTBEAT_ENABLED",
+        "YA_CLAW_BRIDGE_DISPATCH_MODE",
     ):
         monkeypatch.delenv(env_name, raising=False)
 
@@ -33,6 +36,9 @@ def clear_claw_settings(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("YA_CLAW_DATA_DIR", str(tmp_path / "runtime-data"))
     monkeypatch.setenv("YA_CLAW_WORKSPACE_DIR", str(tmp_path / "workspace"))
     monkeypatch.setenv("YA_CLAW_AUTO_SEED_PROFILES", "false")
+    monkeypatch.setenv("YA_CLAW_SCHEDULE_DISPATCH_ENABLED", "false")
+    monkeypatch.setenv("YA_CLAW_HEARTBEAT_ENABLED", "false")
+    monkeypatch.setenv("YA_CLAW_BRIDGE_DISPATCH_MODE", "manual")
 
     get_settings.cache_clear()
     yield
@@ -462,24 +468,32 @@ def test_session_turns_return_completed_runs_with_raw_input_and_output() -> None
         assert failed_run_response.status_code == 201
         failed_run_id = failed_run_response.json()["id"]
 
-    async def _mark_failed() -> None:
-        settings = get_settings()
-        engine = create_engine(settings.resolved_database_url)
-        session_factory = create_session_factory(engine)
-        try:
-            async with session_factory() as db_session:
-                session_record = await db_session.get(SessionRecord, session_id)
-                run_record = await db_session.get(RunRecord, failed_run_id)
-                assert isinstance(session_record, SessionRecord)
-                assert isinstance(run_record, RunRecord)
-                run_record.status = "failed"
-                run_record.error_message = "boom"
-                session_record.active_run_id = None
-                await db_session.commit()
-        finally:
-            await engine.dispose()
+    def _mark_failed() -> None:
+        async def _run() -> None:
+            settings = get_settings()
+            for _ in range(5):
+                engine = create_engine(settings.resolved_database_url)
+                session_factory = create_session_factory(engine)
+                try:
+                    async with session_factory() as db_session:
+                        session_record = await db_session.get(SessionRecord, session_id)
+                        run_record = await db_session.get(RunRecord, failed_run_id)
+                        assert isinstance(session_record, SessionRecord)
+                        assert isinstance(run_record, RunRecord)
+                        run_record.status = "failed"
+                        run_record.error_message = "boom"
+                        session_record.active_run_id = None
+                        await db_session.commit()
+                        return
+                except OperationalError:
+                    await asyncio.sleep(0.1)
+                finally:
+                    await engine.dispose()
+            raise AssertionError("failed to mark run failed due to persistent database lock")
 
-    asyncio.run(_mark_failed())
+        asyncio.run(_run())
+
+    _mark_failed()
 
     with TestClient(create_app()) as client:
         second_run_response = client.post(
