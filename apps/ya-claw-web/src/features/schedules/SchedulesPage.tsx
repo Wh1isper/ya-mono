@@ -339,7 +339,9 @@ function ScheduleEditor({
                   <span className="mono text-xs text-slate-500">
                     {fire.id.slice(0, 10)}
                   </span>
-                  <StatusBadge status={mapFireStatus(fire.status)} />
+                  <StatusBadge
+                    status={mapFireStatus(fire.status, fire.run_status)}
+                  />
                 </div>
                 <p className="mt-2 text-slate-600">{fire.input_preview}</p>
                 <p className="mt-1 text-xs text-slate-400">
@@ -393,7 +395,11 @@ function formatDate(value?: string | null) {
   return new Date(value).toLocaleString()
 }
 
-function mapFireStatus(status: string) {
+function mapFireStatus(status: string, runStatus?: string | null) {
+  if (runStatus === 'failed') return 'failed'
+  if (runStatus === 'cancelled') return 'cancelled'
+  if (runStatus === 'completed') return 'completed'
+  if (runStatus === 'queued' || runStatus === 'running') return 'running'
   if (status === 'failed') return 'failed'
   if (status === 'pending' || status === 'submitted' || status === 'steered')
     return 'running'

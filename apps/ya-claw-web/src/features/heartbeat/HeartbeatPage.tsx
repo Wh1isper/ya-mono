@@ -69,18 +69,22 @@ export function HeartbeatPage() {
           <dl className="mt-4 grid grid-cols-2 gap-4 text-sm">
             <Detail
               label="Profile"
-              value={config.data?.profile_name ?? 'unknown'}
+              value={`${config.data?.profile_name ?? 'unknown'} (${formatProfileSource(config.data?.profile_source)})`}
             />
             <Detail
-              label="On active"
-              value={config.data?.on_active ?? 'unknown'}
+              label="Dispatcher"
+              value={config.data?.enabled ? 'enabled' : 'disabled'}
             />
             <Detail
               label="Guidance file"
-              value={config.data?.guidance_file.path ?? 'unknown'}
+              value={`${config.data?.guidance_file.exists ? 'found' : 'missing'} · ${config.data?.guidance_file.path ?? 'unknown'}`}
               wide
             />
-            <Detail label="Prompt" value={config.data?.prompt ?? ''} wide />
+            <Detail
+              label="Prompt"
+              value={`${config.data?.prompt ?? ''} (${formatPromptSource(config.data?.prompt_source)})`}
+              wide
+            />
           </dl>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -92,7 +96,10 @@ export function HeartbeatPage() {
                   {status.data.last_fire.id.slice(0, 10)}
                 </span>
                 <StatusBadge
-                  status={mapFireStatus(status.data.last_fire.status)}
+                  status={mapFireStatus(
+                    status.data.last_fire.status,
+                    status.data.last_fire.run_status,
+                  )}
                 />
               </div>
               <p className="mt-2 text-slate-600">
@@ -127,7 +134,9 @@ export function HeartbeatPage() {
               <span className="mono text-xs text-slate-500">
                 {fire.id.slice(0, 12)}
               </span>
-              <StatusBadge status={mapFireStatus(fire.status)} />
+              <StatusBadge
+                status={mapFireStatus(fire.status, fire.run_status)}
+              />
               <span className="text-xs text-slate-500">
                 {formatDate(fire.created_at)}
               </span>
@@ -194,8 +203,22 @@ function formatDate(value?: string | null) {
   return new Date(value).toLocaleString()
 }
 
-function mapFireStatus(status: string) {
+function mapFireStatus(status: string, runStatus?: string | null) {
+  if (runStatus === 'failed') return 'failed'
+  if (runStatus === 'cancelled') return 'cancelled'
+  if (runStatus === 'completed') return 'completed'
+  if (runStatus === 'queued' || runStatus === 'running') return 'running'
   if (status === 'failed') return 'failed'
   if (status === 'pending' || status === 'submitted') return 'running'
   return 'completed'
+}
+
+function formatProfileSource(source?: string) {
+  if (source === 'heartbeat') return 'YA_CLAW_HEARTBEAT_PROFILE'
+  return 'YA_CLAW_DEFAULT_PROFILE'
+}
+
+function formatPromptSource(source?: string) {
+  if (source === 'heartbeat_setting') return 'YA_CLAW_HEARTBEAT_PROMPT'
+  return source ?? 'unknown'
 }

@@ -32,6 +32,13 @@ export type ClawInfo = {
   }
 }
 
+export type FireRunStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
 export type ScheduleFireSummary = {
   id: string
   schedule_id: string
@@ -43,6 +50,7 @@ export type ScheduleFireSummary = {
   created_session_id?: string | null
   run_id?: string | null
   active_run_id?: string | null
+  run_status?: FireRunStatus | null
   input_preview?: string | null
   error_message?: string | null
   created_at: string
@@ -126,6 +134,7 @@ export type HeartbeatFireSummary = {
   status: 'pending' | 'submitted' | 'skipped' | 'failed'
   session_id?: string | null
   run_id?: string | null
+  run_status?: FireRunStatus | null
   error_message?: string | null
   metadata: Record<string, unknown>
   created_at: string
@@ -136,7 +145,9 @@ export type HeartbeatConfig = {
   enabled: boolean
   interval_seconds: number
   profile_name: string
+  profile_source: 'heartbeat' | 'default'
   prompt: string
+  prompt_source: 'heartbeat_setting'
   on_active: string
   guidance_file: {
     path: string

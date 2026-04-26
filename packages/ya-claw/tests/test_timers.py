@@ -250,6 +250,8 @@ async def test_heartbeat_controller_defaults_and_manual_trigger_create_isolated_
     assert config.enabled is False
     assert config.interval_seconds == 300
     assert config.profile_name == "default"
+    assert config.profile_source == "default"
+    assert config.prompt_source == "heartbeat_setting"
     assert config.guidance_file["exists"] is True
     assert config.next_fire_at is None
 
@@ -268,6 +270,40 @@ async def test_heartbeat_controller_defaults_and_manual_trigger_create_isolated_
     assert run.run_metadata["source"] == "heartbeat"
     assert run.run_metadata["heartbeat_fire_id"] == fire.id
     assert run.restore_from_run_id is None
+    run.status = "completed"
+    await db_session.commit()
+
+    fires = await controller.list_fires(db_session)
+    assert fires.fires[0].run_status == "completed"
+
+
+async def test_schedule_fire_history_includes_run_status(
+    db_session: AsyncSession,
+    settings: ClawSettings,
+) -> None:
+    controller = ScheduleController()
+    runtime_state = InMemoryRuntimeState()
+    supervisor = RecordingSupervisor()
+    dispatcher = RunDispatcher(supervisor)  # type: ignore[arg-type]
+    schedule = await controller.create(
+        db_session,
+        ScheduleCreateRequest(
+            name="Run status schedule",
+            prompt="Report timer status.",
+            cron="* * * * *",
+            timezone="UTC",
+            profile_name="default",
+        ),
+    )
+
+    fire = await controller.trigger(db_session, settings, runtime_state, dispatcher, schedule.id)
+    run = await db_session.get(RunRecord, fire.run_id)
+    assert isinstance(run, RunRecord)
+    run.status = "completed"
+    await db_session.commit()
+
+    fires = await controller.list_fires(db_session, schedule.id)
+    assert fires.fires[0].run_status == "completed"
 
 
 async def test_heartbeat_dispatcher_scan_triggers_due_fire(
@@ -357,6 +393,8 @@ def test_timer_api_routes_expose_config_create_trigger_and_fire_history() -> Non
         assert heartbeat_config.status_code == 200
         assert heartbeat_config.json()["enabled"] is False
         assert heartbeat_config.json()["interval_seconds"] == 300
+        assert heartbeat_config.json()["profile_source"] == "default"
+        assert heartbeat_config.json()["prompt_source"] == "heartbeat_setting"
 
         create_schedule = client.post(
             "/api/v1/schedules",
@@ -385,6 +423,7 @@ def test_timer_api_routes_expose_config_create_trigger_and_fire_history() -> Non
         schedule_fires = client.get(f"/api/v1/schedules/{schedule_id}/fires", headers=_auth_headers())
         assert schedule_fires.status_code == 200
         assert len(schedule_fires.json()["fires"]) == 1
+        assert schedule_fires.json()["fires"][0]["run_status"] == "queued"
 
         heartbeat_fire = client.post("/api/v1/heartbeat:trigger", headers=_auth_headers())
         assert heartbeat_fire.status_code == 201
@@ -394,3 +433,4 @@ def test_timer_api_routes_expose_config_create_trigger_and_fire_history() -> Non
         heartbeat_fires = client.get("/api/v1/heartbeat/fires", headers=_auth_headers())
         assert heartbeat_fires.status_code == 200
         assert len(heartbeat_fires.json()["fires"]) == 1
+        assert heartbeat_fires.json()["fires"][0]["run_status"] == "queued"
