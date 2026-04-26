@@ -62,11 +62,11 @@ curl -fsS "$BASE_URL/healthz" | python -m json.tool
 echo "== profiles =="
 request GET /api/v1/profiles | python -m json.tool
 
-create_payload=$(python - <<'PY'
+create_payload=$(DEFAULT_PROFILE="$DEFAULT_PROFILE" python - <<'PY'
 import json
+import os
 print(json.dumps({
-    'profile_name': 'default',
-    'project_id': 'e2e-smoke',
+    'profile_name': os.environ['DEFAULT_PROFILE'],
     'metadata': {'source': 'e2e-smoke'},
     'input_parts': [{'type': 'text', 'text': 'hello from e2e smoke'}],
 }))

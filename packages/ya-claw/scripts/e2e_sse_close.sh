@@ -59,11 +59,12 @@ extract_json() {
   python -c "import json,sys; data=json.load(sys.stdin); print(eval(sys.argv[1], {'data': data}))" "$1"
 }
 
-create_payload=$(python - <<'PY'
+create_payload=$(DEFAULT_PROFILE="$DEFAULT_PROFILE" python - <<'PY'
 import json
+import os
 print(json.dumps({
-    'profile_name': 'default',
-    'project_id': 'e2e-sse-close',
+    'profile_name': os.environ['DEFAULT_PROFILE'],
+    'metadata': {'source': 'e2e-sse-close'},
     'input_parts': [{'type': 'text', 'text': 'verify sse closes'}],
 }))
 PY
