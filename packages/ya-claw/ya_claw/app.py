@@ -28,6 +28,7 @@ from ya_claw.execution import (
     ProfileResolver,
     RunDispatcher,
     RuntimeInstanceManager,
+    SessionPruneDispatcher,
 )
 from ya_claw.execution.heartbeat import HeartbeatDispatcher
 from ya_claw.execution.schedule import ScheduleDispatcher
@@ -74,6 +75,7 @@ class ClawApplication:
         app.state.bridge_supervisor = None
         app.state.schedule_dispatcher = None
         app.state.heartbeat_dispatcher = None
+        app.state.session_prune_dispatcher = None
 
         self.register_api_token_middleware(app)
         app.add_middleware(
@@ -192,6 +194,12 @@ class ClawApplication:
             )
             app.state.heartbeat_dispatcher = heartbeat_dispatcher
             await heartbeat_dispatcher.startup()
+            session_prune_dispatcher = SessionPruneDispatcher(
+                settings=self.settings,
+                session_factory=app.state.db_session_factory,
+            )
+            app.state.session_prune_dispatcher = session_prune_dispatcher
+            await session_prune_dispatcher.startup()
             if self.settings.bridge_dispatch_mode == BridgeDispatchMode.EMBEDDED:
                 bridge_supervisor = build_bridge_supervisor(
                     settings=self.settings,
@@ -216,6 +224,7 @@ class ClawApplication:
             bridge_supervisor = app.state.bridge_supervisor
             schedule_dispatcher = app.state.schedule_dispatcher
             heartbeat_dispatcher = app.state.heartbeat_dispatcher
+            session_prune_dispatcher = app.state.session_prune_dispatcher
             execution_supervisor = app.state.execution_supervisor
 
             app.state.db_session_factory = None
@@ -230,6 +239,10 @@ class ClawApplication:
             app.state.bridge_supervisor = None
             app.state.schedule_dispatcher = None
             app.state.heartbeat_dispatcher = None
+            app.state.session_prune_dispatcher = None
+
+            if isinstance(session_prune_dispatcher, SessionPruneDispatcher):
+                await session_prune_dispatcher.shutdown()
 
             if isinstance(heartbeat_dispatcher, HeartbeatDispatcher):
                 await heartbeat_dispatcher.shutdown()

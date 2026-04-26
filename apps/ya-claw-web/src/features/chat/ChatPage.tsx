@@ -1,6 +1,7 @@
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import {
   Activity,
+  ArchiveX,
   Bot,
   CheckCircle2,
   ChevronRight,
@@ -147,6 +148,13 @@ export function ChatPage() {
       [],
     [activeRun, activeRunData, activeSessionData],
   )
+  const selectedRunArtifactsPruned = Boolean(
+    activeRun &&
+      activeRun.status !== 'queued' &&
+      activeRun.status !== 'running' &&
+      !activeRunData?.run.has_message &&
+      replayEvents.length === 0,
+  )
   const hasCommittedTerminalEvent = useMemo(
     () => replayEvents.some((event) => isTerminalAguiEvent(event)),
     [replayEvents],
@@ -248,7 +256,11 @@ export function ChatPage() {
                   onSelectRun={selectRun}
                 />
                 <RunControlBar run={activeRunData?.run ?? null} />
-                <TimelinePanel timeline={timeline} loading={contentLoading} />
+                <TimelinePanel
+                  timeline={timeline}
+                  loading={contentLoading}
+                  artifactsPruned={selectedRunArtifactsPruned}
+                />
                 <Composer
                   selectedSessionId={selectedSessionId}
                   selectedProfile={
@@ -268,6 +280,7 @@ export function ChatPage() {
                 streamStatus={streamStatus}
                 liveEventCount={effectiveLiveEvents.length}
                 loading={contentLoading}
+                artifactsPruned={selectedRunArtifactsPruned}
               />
             </Panel>
           </Group>
@@ -442,11 +455,13 @@ function EventDevToolsPanel({
   streamStatus,
   liveEventCount,
   loading,
+  artifactsPruned,
 }: {
   events: AguiEvent[]
   streamStatus: StreamStatus
   liveEventCount: number
   loading: boolean
+  artifactsPruned: boolean
 }) {
   return (
     <aside className="flex h-full min-h-0 flex-col border-l border-slate-200 bg-slate-950 text-slate-100">
@@ -487,9 +502,16 @@ function EventDevToolsPanel({
           </div>
         ) : null}
         {!loading && events.length === 0 ? (
-          <div className="rounded-xl border border-slate-800 bg-slate-900 p-3 text-xs text-slate-400">
-            Select a run to inspect raw AGUI events.
-          </div>
+          artifactsPruned ? (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-5 text-amber-200">
+              Run replay artifacts have been pruned from disk. Database
+              metadata, input parts, status, and summaries are still available.
+            </div>
+          ) : (
+            <div className="rounded-xl border border-slate-800 bg-slate-900 p-3 text-xs text-slate-400">
+              Select a run to inspect raw AGUI events.
+            </div>
+          )
         ) : null}
         <div className="space-y-1">
           {events.map((event, index) => (
@@ -560,9 +582,11 @@ function EventRow({ event, index }: { event: AguiEvent; index: number }) {
 function TimelinePanel({
   timeline,
   loading,
+  artifactsPruned,
 }: {
   timeline: AguiTimelineState
   loading: boolean
+  artifactsPruned: boolean
 }) {
   const bottomRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
@@ -573,10 +597,14 @@ function TimelinePanel({
     <section className="scrollbar-thin min-h-0 flex-1 overflow-auto bg-slate-50 p-5">
       {loading ? <TimelineSkeleton /> : null}
       {!loading && timeline.blocks.length === 0 ? (
-        <EmptyState
-          title="No replay yet"
-          description="Select a run with committed AGUI messages or start a new turn."
-        />
+        artifactsPruned ? (
+          <PrunedArtifactsNotice />
+        ) : (
+          <EmptyState
+            title="No replay yet"
+            description="Select a run with committed AGUI messages or start a new turn."
+          />
+        )
       ) : null}
       <div className="mx-auto max-w-4xl space-y-4">
         {timeline.blocks.map((block) => (
@@ -585,6 +613,25 @@ function TimelinePanel({
         <div ref={bottomRef} />
       </div>
     </section>
+  )
+}
+
+function PrunedArtifactsNotice() {
+  return (
+    <div className="mx-auto max-w-4xl">
+      <Card icon={ArchiveX} title="Replay artifacts pruned" accent="amber">
+        <div className="space-y-2 text-sm leading-6 text-slate-700">
+          <p>
+            The raw AGUI replay for this run has been pruned from disk to reduce
+            storage usage.
+          </p>
+          <p className="text-slate-500">
+            YA Claw still keeps the run database row, input parts, status,
+            output text, and compact summary when available.
+          </p>
+        </div>
+      </Card>
+    </div>
   )
 }
 

@@ -6,6 +6,7 @@ from ya_claw.execution.instance import RuntimeInstanceManager
 from ya_claw.execution.profile import ProfileResolver, ResolvedProfile
 from ya_claw.execution.restore import ResolvedRestorePoint, load_restore_point, resolve_restore_run
 from ya_claw.execution.runtime import ClawRuntimeBuilder
+from ya_claw.execution.session_prune import SessionPruneDispatcher
 from ya_claw.execution.state_machine import (
     cancel_run,
     complete_run,
@@ -31,6 +32,7 @@ __all__ = [
     "RunDispatcher",
     "RunStore",
     "RuntimeInstanceManager",
+    "SessionPruneDispatcher",
     "build_message_checkpoint",
     "cancel_run",
     "commit_run_artifacts",

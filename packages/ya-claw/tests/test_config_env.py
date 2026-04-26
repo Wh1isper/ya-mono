@@ -89,6 +89,18 @@ def test_settings_use_official_workspace_image_by_default(monkeypatch) -> None:
     assert settings.workspace_provider_docker_image == "ghcr.io/wh1isper/ya-claw-workspace:latest"
 
 
+def test_settings_session_prune_defaults() -> None:
+    settings = ClawSettings(api_token="test-token", _env_file=None)  # noqa: S106
+
+    assert settings.session_prune_enabled is False
+    assert settings.session_prune_run_keep_recent == 10
+    assert settings.session_prune_generated_sessions_enabled is False
+    assert settings.session_prune_schedule_keep_recent == 10
+    assert settings.session_prune_heartbeat_keep_recent == 10
+    assert settings.session_prune_fire_records_older_than_days == 0
+    assert settings.session_prune_orphans_enabled is True
+
+
 def test_settings_default_workspace_docker_host_workspace_dir_uses_workspace_dir(tmp_path: Path) -> None:
     workspace_dir = tmp_path / "workspace"
     settings = ClawSettings(

@@ -75,6 +75,37 @@ YA Claw loads settings from process environment and `.env` files. `YA_CLAW_*` va
 
 Heartbeat guidance lives at `<YA_CLAW_WORKSPACE_DIR>/HEARTBEAT.md`. See [`schedules-heartbeat.md`](schedules-heartbeat.md) for deployment steps, API checks, and backup notes.
 
+## Session and Run Pruning Settings
+
+| Variable                                             | Default | Purpose                                                                                                     |
+| ---------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------- |
+| `YA_CLAW_SESSION_PRUNE_ENABLED`                      | `false` | Enables the background prune job                                                                            |
+| `YA_CLAW_SESSION_PRUNE_INTERVAL_SECONDS`             | `86400` | Seconds between prune scans                                                                                 |
+| `YA_CLAW_SESSION_PRUNE_STARTUP_DELAY_SECONDS`        | `300`   | Delay after service startup before the first scan                                                           |
+| `YA_CLAW_SESSION_PRUNE_BATCH_SIZE`                   | `1000`  | Maximum run-store directories or generated sessions processed per scan                                      |
+| `YA_CLAW_SESSION_PRUNE_RUN_KEEP_RECENT`              | `10`    | Per-session latest run count whose run-store directories are protected                                      |
+| `YA_CLAW_SESSION_PRUNE_RUN_OLDER_THAN_DAYS`          | `0`     | Positive values prune only run-store directories older than this age                                        |
+| `YA_CLAW_SESSION_PRUNE_GENERATED_SESSIONS_ENABLED`   | `false` | Enables DB deletion for heartbeat sessions and schedule isolate/fork generated sessions                     |
+| `YA_CLAW_SESSION_PRUNE_SCHEDULE_KEEP_RECENT`         | `10`    | Per-schedule generated session count protected when generated-session pruning is enabled                    |
+| `YA_CLAW_SESSION_PRUNE_SCHEDULE_OLDER_THAN_DAYS`     | `30`    | Age gate for schedule generated session DB pruning                                                          |
+| `YA_CLAW_SESSION_PRUNE_HEARTBEAT_KEEP_RECENT`        | `10`    | Latest heartbeat generated session count protected when generated-session pruning is enabled                |
+| `YA_CLAW_SESSION_PRUNE_HEARTBEAT_OLDER_THAN_DAYS`    | `7`     | Age gate for heartbeat generated session DB pruning                                                         |
+| `YA_CLAW_SESSION_PRUNE_FIRE_RECORDS_OLDER_THAN_DAYS` | `0`     | Positive values enable DB retention for `schedule_fires` and `heartbeat_fires`                              |
+| `YA_CLAW_SESSION_PRUNE_ORPHANS_ENABLED`              | `true`  | Deletes `run-store/*` directories with no matching `RunRecord.id` while the background prune job is enabled |
+
+Safe disk-only production configuration:
+
+```env
+YA_CLAW_SESSION_PRUNE_ENABLED=true
+YA_CLAW_SESSION_PRUNE_RUN_KEEP_RECENT=10
+YA_CLAW_SESSION_PRUNE_RUN_OLDER_THAN_DAYS=30
+YA_CLAW_SESSION_PRUNE_GENERATED_SESSIONS_ENABLED=false
+YA_CLAW_SESSION_PRUNE_FIRE_RECORDS_OLDER_THAN_DAYS=0
+YA_CLAW_SESSION_PRUNE_ORPHANS_ENABLED=true
+```
+
+This mode deletes old `run-store/{run_id}` directories and keeps `sessions`, `runs`, input parts, statuses, output text, output summaries, and run metadata in the database. The web UI shows a replay-artifacts-pruned notice when raw `state.json` or `message.json` data has been removed.
+
 ## Bridge Settings
 
 | Variable                              | Purpose                                                                       |
@@ -128,6 +159,12 @@ YA_CLAW_SCHEDULE_DISPATCH_ENABLED=true
 YA_CLAW_HEARTBEAT_ENABLED=false
 YA_CLAW_HEARTBEAT_INTERVAL_SECONDS=300
 YA_CLAW_HEARTBEAT_PROFILE=default
+YA_CLAW_SESSION_PRUNE_ENABLED=true
+YA_CLAW_SESSION_PRUNE_RUN_KEEP_RECENT=10
+YA_CLAW_SESSION_PRUNE_RUN_OLDER_THAN_DAYS=30
+YA_CLAW_SESSION_PRUNE_GENERATED_SESSIONS_ENABLED=false
+YA_CLAW_SESSION_PRUNE_FIRE_RECORDS_OLDER_THAN_DAYS=0
+YA_CLAW_SESSION_PRUNE_ORPHANS_ENABLED=true
 YA_CLAW_BRIDGE_DISPATCH_MODE=embedded
 YA_CLAW_BRIDGE_ENABLED_ADAPTERS=lark
 YA_CLAW_BRIDGE_LARK_APP_ID=cli_xxx

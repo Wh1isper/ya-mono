@@ -123,6 +123,51 @@ docker compose up -d --build
 
 The `ya-claw start` command applies migrations when `YA_CLAW_AUTO_MIGRATE=true`.
 
+## Session and Run Pruning
+
+YA Claw can run a background prune job to control runtime data growth. The safe production mode prunes disk artifacts while retaining database metadata.
+
+Recommended safe configuration:
+
+```env
+YA_CLAW_SESSION_PRUNE_ENABLED=true
+YA_CLAW_SESSION_PRUNE_RUN_KEEP_RECENT=10
+YA_CLAW_SESSION_PRUNE_RUN_OLDER_THAN_DAYS=30
+YA_CLAW_SESSION_PRUNE_GENERATED_SESSIONS_ENABLED=false
+YA_CLAW_SESSION_PRUNE_FIRE_RECORDS_OLDER_THAN_DAYS=0
+YA_CLAW_SESSION_PRUNE_ORPHANS_ENABLED=true
+```
+
+Safe mode behavior:
+
+- Deletes old `run-store/{run_id}` directories for prunable runs
+- Keeps `sessions` and `runs` database rows
+- Keeps `input_parts`, status, trigger type, metadata, `output_text`, and `output_summary`
+- Protects each session's latest runs, `head_run_id`, `head_success_run_id`, `active_run_id`, active runs, and direct restore sources
+- Deletes orphan `run-store/*` directories that have no matching `RunRecord.id`
+
+The web UI displays a replay-artifacts-pruned notice when a selected run has database metadata but no replay files on disk.
+
+Generated session database pruning is an explicit retention policy:
+
+```env
+YA_CLAW_SESSION_PRUNE_GENERATED_SESSIONS_ENABLED=true
+YA_CLAW_SESSION_PRUNE_SCHEDULE_KEEP_RECENT=10
+YA_CLAW_SESSION_PRUNE_SCHEDULE_OLDER_THAN_DAYS=30
+YA_CLAW_SESSION_PRUNE_HEARTBEAT_KEEP_RECENT=10
+YA_CLAW_SESSION_PRUNE_HEARTBEAT_OLDER_THAN_DAYS=7
+```
+
+This mode deletes `sessions` and `runs` rows for old heartbeat sessions and schedule isolate/fork generated sessions. It protects active schedule source/target sessions, parent sessions, active sessions, active run sessions, and sessions referenced by external `restore_from_run_id` links.
+
+Fire-record database retention is separately enabled:
+
+```env
+YA_CLAW_SESSION_PRUNE_FIRE_RECORDS_OLDER_THAN_DAYS=30
+```
+
+This removes old `schedule_fires` and `heartbeat_fires` rows while preserving pending fires and latest fire records.
+
 ## Backup
 
 Back up both database and run store. For SQLite compose deployments with a runtime volume mounted at `/var/lib/ya-claw`:
