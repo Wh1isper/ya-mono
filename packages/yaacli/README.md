@@ -36,6 +36,14 @@ Run as a module:
 python -m yaacli
 ```
 
+## Built-in Skills
+
+YAACLI ships with `building-agents` from the repository canonical source `skills/agent-builder/`.
+
+The YA Claw deployment skill lives in `skills/ya-claw-deploy/` and is published as `YA_CLAW_DEPLOY_SKILL.zip` during release.
+
+The repository sync script keeps bundled skill files under `packages/yaacli/yaacli/skills/` aligned.
+
 ## Development
 
 This package lives in the [`ya-mono`](https://github.com/wh1isper/ya-mono) workspace.

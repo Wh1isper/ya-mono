@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import time as time_module
 from typing import Annotated
 
+from loguru import logger
 from pydantic import Field
 from pydantic_ai import RunContext
 from ya_agent_sdk.context import AgentContext
@@ -19,8 +19,6 @@ from ya_claw.execution.background import (
     BackgroundMonitor,
     BackgroundTaskAlreadyActiveError,
 )
-
-logger = logging.getLogger(__name__)
 
 
 def _get_background_monitor(ctx: RunContext[AgentContext]) -> BackgroundMonitor | None:
@@ -110,12 +108,14 @@ class SpawnDelegateTool(BaseTool):
                     duration_seconds=duration,
                     result_preview=preview,
                 )
-                logger.info("Spawned delegate '%s' (%s) completed", subagent_name, agent_id)
+                logger.info("Spawned delegate completed subagent_name={} agent_id={}", subagent_name, agent_id)
             except asyncio.CancelledError:
-                logger.info("Spawned delegate '%s' (%s) cancelled", subagent_name, agent_id)
+                logger.info("Spawned delegate cancelled subagent_name={} agent_id={}", subagent_name, agent_id)
                 raise
             except Exception as exc:
-                logger.warning("Spawned delegate '%s' (%s) failed: %s", subagent_name, agent_id, exc)
+                logger.warning(
+                    "Spawned delegate failed subagent_name={} agent_id={} error={}", subagent_name, agent_id, exc
+                )
                 error_msg = str(exc)[:200]
                 await monitor.emit_subagent_failed(
                     agent_id=agent_id,

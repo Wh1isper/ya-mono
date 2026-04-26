@@ -60,7 +60,6 @@ def settings(tmp_path: Path) -> ClawSettings:
         api_token="test-token",  # noqa: S106
         data_dir=tmp_path / "runtime-data",
         workspace_dir=tmp_path / "workspace",
-        execution_model="test",
         instance_id="instance-test",
     )
 

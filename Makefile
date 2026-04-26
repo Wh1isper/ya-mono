@@ -7,7 +7,7 @@ install: ## Install Python, web dependencies, and pre-commit hooks
 	@uv run pre-commit install
 
 .PHONY: install-skills
-install-skills: ## Install bundled skills into ~/.agents/skills
+install-skills: ## Install canonical skills into ~/.agents/skills
 	@echo "Installing skills into $$HOME/.agents/skills"
 	@rm -rf "$$HOME/.agents/skills/agent-builder"
 	@mkdir -p "$$HOME/.agents/skills/agent-builder"
@@ -15,6 +15,9 @@ install-skills: ## Install bundled skills into ~/.agents/skills
 	@mkdir -p "$$HOME/.agents/skills/agent-builder/examples"
 	@cp -R examples/* "$$HOME/.agents/skills/agent-builder/examples/"
 	@cp examples/.env.example "$$HOME/.agents/skills/agent-builder/examples/"
+	@rm -rf "$$HOME/.agents/skills/ya-claw-deploy"
+	@mkdir -p "$$HOME/.agents/skills/ya-claw-deploy"
+	@cp -R skills/ya-claw-deploy/. "$$HOME/.agents/skills/ya-claw-deploy/"
 
 .PHONY: lint
 lint: ## Lint the code
@@ -110,6 +113,10 @@ check: ## Run code quality tools for all active packages
 	@uv lock --locked
 	@echo "Running pre-commit"
 	@uv run pre-commit run -a
+	@echo "Checking bundled skills sync"
+	@./scripts/check-skills-sync.sh
+	@echo "Checking release skill zip build"
+	@python scripts/build-skill-zips.py --check
 	@echo "Running web lint"
 	@$(MAKE) web-lint
 	@echo "Running web build"

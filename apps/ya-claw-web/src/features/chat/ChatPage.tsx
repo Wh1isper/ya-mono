@@ -76,6 +76,7 @@ export function ChatPage() {
   const live = useRunEventStream(
     resolvedRunId,
     activeRunData?.run.status ?? null,
+    selectedSessionId,
   )
   const liveEvents = useMemo(
     () => (resolvedRunId ? live.events : []),
@@ -218,7 +219,7 @@ export function ChatPage() {
       </div>
 
       <Group orientation="horizontal" className="min-h-0 flex-1">
-        <Panel defaultSize="42%" minSize="320px" maxSize="58%">
+        <Panel defaultSize="26%" minSize="260px" maxSize="36%">
           <SessionList
             sessions={filteredSessions}
             selectedSessionId={selectedSessionId}
@@ -237,7 +238,7 @@ export function ChatPage() {
           />
         </Panel>
         <ResizeHandle />
-        <Panel defaultSize="58%" minSize="42%">
+        <Panel defaultSize="74%" minSize="64%">
           <Group orientation="horizontal" className="h-full min-h-0">
             <Panel defaultSize="68%" minSize="44%">
               <div className="flex h-full min-h-0 flex-col">
@@ -1217,6 +1218,7 @@ function accentFromRuntimeStatus(
 function useRunEventStream(
   runId: string | null,
   status: RunSummary['status'] | null,
+  sessionId: string | null,
 ): { status: StreamStatus; events: AguiEvent[] } {
   const baseUrl = useConnectionStore((state) => state.baseUrl)
   const apiToken = useConnectionStore((state) => state.apiToken)
@@ -1260,9 +1262,15 @@ function useRunEventStream(
           setEvents((previous) => [...previous, event])
           const eventType = typeof event.type === 'string' ? event.type : ''
           if (eventType === 'RUN_FINISHED' || eventType === 'RUN_ERROR') {
-            void queryClient.invalidateQueries({
-              queryKey: queryKeys.run(runId),
-            })
+            void Promise.all([
+              queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+              sessionId
+                ? queryClient.invalidateQueries({
+                    queryKey: queryKeys.session(sessionId),
+                  })
+                : Promise.resolve(),
+              queryClient.invalidateQueries({ queryKey: queryKeys.run(runId) }),
+            ])
             setStreamStatus('closed')
           }
         },
@@ -1279,7 +1287,7 @@ function useRunEventStream(
     return () => {
       controller.abort()
     }
-  }, [apiToken, baseUrl, queryClient, runId, status])
+  }, [apiToken, baseUrl, queryClient, runId, sessionId, status])
 
   return { status: streamStatus, events }
 }

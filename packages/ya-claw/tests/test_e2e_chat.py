@@ -2,17 +2,14 @@
 
 Verifies:
 1. Session create via HTTP POST /api/v1/sessions
-2. Auto-dispatch via YA_CLAW_EXECUTION_MODEL
+2. Auto-dispatch through an AgentProfile
 3. Supervisor claim + coordinator execution
 4. AGUI events via SSE stream
 5. Commit artifacts (state.json, message.json)
 6. Session GET returns state + message
 
-Requires a configured model endpoint. Set environment variables:
-  YA_CLAW_EXECUTION_MODEL=openai:gpt-4o-mini
-  OPENAI_API_KEY=...
-
-If no model is configured, the test is skipped.
+Requires configured gateway credentials. Set GATEWAY_API_KEY and GATEWAY_BASE_URL.
+If gateway credentials are missing, the test is skipped.
 """
 
 from __future__ import annotations
@@ -29,8 +26,9 @@ from ya_claw.config import get_settings
 
 
 def _has_model() -> bool:
-    settings = get_settings()
-    return isinstance(settings.execution_model, str) and settings.execution_model.strip() != ""
+    import os
+
+    return os.environ.get("GATEWAY_API_KEY", "").strip() != "" and os.environ.get("GATEWAY_BASE_URL", "").strip() != ""
 
 
 def _create_schema() -> None:
@@ -63,7 +61,7 @@ def _auth_headers() -> dict[str, str]:
     return {"Authorization": "Bearer test-token"}
 
 
-@pytest.mark.skipif(not _has_model(), reason="YA_CLAW_EXECUTION_MODEL not configured")
+@pytest.mark.skipif(not _has_model(), reason="Gateway credentials are not configured")
 def test_full_chat_pipeline_creates_run_streams_events_and_commits_artifacts() -> None:
     """Test the complete execution pipeline end-to-end.
 
@@ -80,7 +78,7 @@ def test_full_chat_pipeline_creates_run_streams_events_and_commits_artifacts() -
             "/api/v1/sessions",
             headers=_auth_headers(),
             json={
-                "profile_name": "general",
+                "profile_name": "default",
                 "metadata": {"source": "e2e-test"},
                 "input_parts": [{"type": "text", "text": "Say exactly: e2e-test-complete"}],
                 "dispatch_mode": "async",
@@ -162,7 +160,7 @@ def test_full_chat_pipeline_creates_run_streams_events_and_commits_artifacts() -
     assert (continue_run_dir / "message.json").exists()
 
 
-@pytest.mark.skipif(not _has_model(), reason="YA_CLAW_EXECUTION_MODEL not configured")
+@pytest.mark.skipif(not _has_model(), reason="Gateway credentials are not configured")
 def test_sse_event_stream_during_run_execution() -> None:
     """Test SSE event streaming during a real run execution.
 
@@ -176,7 +174,7 @@ def test_sse_event_stream_during_run_execution() -> None:
             "/api/v1/sessions",
             headers=_auth_headers(),
             json={
-                "profile_name": "general",
+                "profile_name": "default",
                 "input_parts": [{"type": "text", "text": "Say exactly: sse-test-ok"}],
                 "dispatch_mode": "async",
             },

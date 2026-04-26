@@ -40,7 +40,6 @@ def test_runtime_builder_propagates_container_id_from_workspace_metadata(
         api_token="test-token",  # noqa: S106
         data_dir=tmp_path / "runtime-data",
         workspace_dir=tmp_path / "workspace",
-        execution_model="gateway@openai-responses:gpt-5.4",
         _env_file=None,
     )
     builder = ClawRuntimeBuilder(settings=settings)

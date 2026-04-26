@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import yaml
+from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -62,16 +63,21 @@ class ProfileResolver:
 
     async def resolve(self, profile_name: str | None) -> ResolvedProfile:
         resolved_name = profile_name or self._settings.default_profile
+        logger.debug("Resolving execution profile requested={} resolved={}", profile_name, resolved_name)
         if isinstance(resolved_name, str) and resolved_name.strip() != "":
             record = await self._load_profile_record(resolved_name)
             if isinstance(record, ProfileRecord):
+                logger.info("Execution profile resolved name={} source_type={}", record.name, record.source_type)
                 return self._resolved_from_record(record)
+        logger.warning("Execution profile missing requested={}", resolved_name)
         return self._bootstrap_profile(requested_name=resolved_name)
 
     async def seed_profiles(self, *, prune_missing: bool = False) -> list[str]:
         seed_file = self._settings.resolved_profile_seed_file
         if seed_file is None or not seed_file.exists():
+            logger.debug("Profile seed skipped seed_file={}", seed_file)
             return []
+        logger.info("Seeding execution profiles seed_file={} prune_missing={}", seed_file, prune_missing)
         seed_content = seed_file.read_text(encoding="utf-8")
         rows = _load_seed_rows(seed_content)
         source_checksum = hashlib.sha256(seed_content.encode("utf-8")).hexdigest()
@@ -94,6 +100,7 @@ class ProfileResolver:
                     if record.source_type == "seed" and name not in seeded_names:
                         await db_session.delete(record)
             await db_session.commit()
+        logger.info("Execution profiles seeded count={} names={}", len(seeded_names), seeded_names)
         return seeded_names
 
     async def _load_profile_record(self, profile_name: str) -> ProfileRecord | None:
@@ -134,23 +141,8 @@ class ProfileResolver:
         )
 
     def _bootstrap_profile(self, *, requested_name: str | None) -> ResolvedProfile:
-        model = self._settings.execution_model
-        if not isinstance(model, str) or model.strip() == "":
-            profile_value = requested_name or self._settings.default_profile or _DEFAULT_PROFILE_NAME
-            raise ValueError(f"Execution profile '{profile_value}' could not be resolved.")
-        return ResolvedProfile(
-            name=requested_name or self._settings.default_profile or _DEFAULT_PROFILE_NAME,
-            model=model,
-            model_settings=resolve_model_settings(self._settings.execution_model_settings_preset),
-            model_config=resolve_model_cfg(self._settings.execution_model_config_preset),
-            system_prompt=None,
-            builtin_toolsets=list(_DEFAULT_BUILTIN_TOOLSETS),
-            subagent_configs=[],
-            include_builtin_subagents=False,
-            unified_subagents=False,
-            workspace_backend_hint=None,
-            metadata={"source_type": "bootstrap"},
-        )
+        profile_value = requested_name or self._settings.default_profile or _DEFAULT_PROFILE_NAME
+        raise ValueError(f"Execution profile '{profile_value}' could not be resolved.")
 
     def _resolve_subagent_configs(self, raw_subagents: list[dict[str, Any]] | None) -> list[SubagentConfig]:
         resolved_configs: list[SubagentConfig] = []

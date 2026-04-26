@@ -24,9 +24,6 @@ def clear_claw_settings(monkeypatch, tmp_path: Path) -> None:
         "YA_CLAW_DATA_DIR",
         "YA_CLAW_WEB_DIST_DIR",
         "YA_CLAW_WORKSPACE_DIR",
-        "YA_CLAW_EXECUTION_MODEL",
-        "YA_CLAW_EXECUTION_MODEL_SETTINGS_PRESET",
-        "YA_CLAW_EXECUTION_MODEL_CONFIG_PRESET",
         "YA_CLAW_PROFILE_SEED_FILE",
         "YA_CLAW_AUTO_SEED_PROFILES",
     ):

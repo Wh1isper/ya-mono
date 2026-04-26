@@ -89,6 +89,30 @@ def test_settings_use_official_workspace_image_by_default(monkeypatch) -> None:
     assert settings.workspace_provider_docker_image == "ghcr.io/wh1isper/ya-claw-workspace:latest"
 
 
+def test_settings_default_workspace_docker_host_workspace_dir_uses_workspace_dir(tmp_path: Path) -> None:
+    workspace_dir = tmp_path / "workspace"
+    settings = ClawSettings(
+        api_token="test-token",  # noqa: S106
+        workspace_dir=workspace_dir,
+        _env_file=None,
+    )
+
+    assert settings.resolved_workspace_provider_docker_host_workspace_dir == workspace_dir
+
+
+def test_settings_workspace_docker_host_workspace_dir_can_be_configured(tmp_path: Path) -> None:
+    workspace_dir = tmp_path / "service-workspace"
+    host_workspace_dir = tmp_path / "host-workspace"
+    settings = ClawSettings(
+        api_token="test-token",  # noqa: S106
+        workspace_dir=workspace_dir,
+        workspace_provider_docker_host_workspace_dir=host_workspace_dir,
+        _env_file=None,
+    )
+
+    assert settings.resolved_workspace_provider_docker_host_workspace_dir == host_workspace_dir
+
+
 def test_settings_default_workspace_docker_identity_uses_process_uid_gid(monkeypatch) -> None:
     monkeypatch.delenv("YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID", raising=False)
     monkeypatch.delenv("YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID", raising=False)

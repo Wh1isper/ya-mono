@@ -102,14 +102,15 @@ Behavior:
 
 ## Trigger Model
 
-Schedules support these trigger kinds:
+Schedules use cron triggers.
 
-| Kind       | Fields                                   | Meaning                       |
-| ---------- | ---------------------------------------- | ----------------------------- |
-| `cron`     | `cron_expr`, `timezone`                  | fire according to a cron rule |
-| `interval` | `interval_seconds`, optional `starts_at` | fire repeatedly by interval   |
-| `once`     | `starts_at`                              | fire a single time            |
-| `manual`   | created by `:trigger` on demand          | fire immediately              |
+| Field          | Meaning                                        |
+| -------------- | ---------------------------------------------- |
+| `cron_expr`    | cron expression used to compute fire times     |
+| `timezone`     | timezone used to interpret the cron expression |
+| `next_fire_at` | absolute timestamp used by dispatcher scans    |
+
+Manual fire is an action created through `trigger_schedule` or `/api/v1/schedules/{schedule_id}:trigger`. It records a fire immediately and uses the stored schedule prompt or a prompt override.
 
 The runtime stores `next_fire_at` as an absolute timestamp. Cron and timezone parsing happens in the schedule controller. Dispatcher scans use `next_fire_at` only.
 
@@ -127,12 +128,8 @@ Suggested fields:
 - `owner_session_id`
 - `owner_run_id`
 - `profile_name`
-- `trigger_kind`: `cron | interval | once`
 - `cron_expr`
-- `interval_seconds`
 - `timezone`
-- `starts_at`
-- `ends_at`
 - `next_fire_at`
 - `execution_mode`: `continue_session | fork_session | isolate_session`
 - `target_session_id`
@@ -155,6 +152,8 @@ Suggested fields:
 - `fork_session` requires `source_session_id`
 - `isolate_session` creates a fresh session for each fire and leaves target/source session fields empty
 - `on_active` applies to `continue_session`
+- `cron_expr` is required for active schedules
+- `timezone` defaults to runtime timezone or `UTC`
 - `input_parts_template` uses the same JSON-compatible input part model as run creation
 - schedule-owned metadata must be queryable and safe to return to the console
 
@@ -194,7 +193,8 @@ Heartbeat configuration is runtime-owned and comes from settings. The console re
 Suggested effective config fields:
 
 - `enabled`
-- `interval_seconds`
+- `cron_expr`
+- `timezone`
 - `profile_name`
 - `prompt`
 - `guidance_path`
@@ -353,7 +353,7 @@ Agent-facing schedule tools use these rules:
 - schedule profile inherits the current run profile
 - pause and resume use `enabled: boolean`
 - session behavior uses booleans: `continue_current_session`, `start_from_current_session`, `steer_when_running`
-- timing uses one of `cron`, `interval_seconds`, or `run_at`
+- schedule cadence uses `cron: string`
 - advanced fields stay on the HTTP/admin schedule API
 
 ### Facade mapping
@@ -369,9 +369,7 @@ Agent-facing schedule tools use these rules:
 | `continue_current_session=false`, `start_from_current_session=false` | `execution_mode="isolate_session"`                                       |
 | `steer_when_running=true`                                            | `on_active="steer"`                                                      |
 | `steer_when_running=false`                                           | `on_active="queue"`                                                      |
-| `cron`                                                               | `trigger_kind="cron"`, `cron_expr=cron`                                  |
-| `interval_seconds`                                                   | `trigger_kind="interval"`                                                |
-| `run_at`                                                             | `trigger_kind="once"`, `starts_at=run_at`                                |
+| `cron`                                                               | `cron_expr=cron`                                                         |
 
 `continue_current_session` takes priority over `start_from_current_session` in the mapping. A continuing schedule naturally uses the target session continuation pointer.
 
@@ -380,7 +378,7 @@ Agent-facing schedule tools use these rules:
 The schedule toolset should inject concise guidance:
 
 ```text
-Use schedule tools to create, list, update, delete, and manually trigger schedules that you own. Provide a plain text prompt and one timing rule. Use continue_current_session for timed messages in this conversation. Use start_from_current_session for recurring branches from this conversation's latest committed state. Use enabled to pause or resume. Heartbeat is runtime-owned and is visible through console APIs.
+Use schedule tools to create, list, update, delete, and manually trigger schedules that you own. Provide a plain text prompt and a cron expression. Use continue_current_session for timed messages in this conversation. Use start_from_current_session for recurring branches from this conversation's latest committed state. Use enabled to pause or resume. Heartbeat is runtime-owned and is visible through console APIs.
 ```
 
 ### Ownership and scope
@@ -435,8 +433,6 @@ Agent mutation scope:
   "name": "Daily follow-up",
   "prompt": "Review current progress and suggest the next concrete action.",
   "cron": "0 9 * * *",
-  "interval_seconds": null,
-  "run_at": null,
   "timezone": "Asia/Shanghai",
   "enabled": true,
   "continue_current_session": true,
@@ -445,19 +441,11 @@ Agent mutation scope:
 }
 ```
 
-Timing fields are mutually exclusive:
-
-- `cron` for cron schedules
-- `interval_seconds` for interval schedules
-- `run_at` for one-time schedules
-
 `update_schedule` accepts a patch over:
 
 - `name`
 - `prompt`
 - `cron`
-- `interval_seconds`
-- `run_at`
 - `timezone`
 - `enabled`
 - `continue_current_session`
@@ -485,10 +473,8 @@ Schedule tools return compact facade records:
   "name": "Daily follow-up",
   "enabled": true,
   "prompt": "Review current progress and suggest the next concrete action.",
-  "timing": {
-    "cron": "0 9 * * *",
-    "interval_seconds": null,
-    "run_at": null,
+  "cron": {
+    "expr": "0 9 * * *",
     "timezone": "Asia/Shanghai",
     "next_fire_at": "2026-04-26T09:00:00+08:00"
   },

@@ -1,21 +1,26 @@
 #!/bin/bash
 # Sync canonical skill sources into the CLI skill bundle.
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
 
-SOURCE_DIR="skills/agent-builder"
-TARGET_DIR="packages/yaacli/yaacli/skills/building-agents"
+sync_skill() {
+  local source_dir="$1"
+  local target_dir="$2"
 
-rm -rf "$TARGET_DIR"
-mkdir -p "$TARGET_DIR"
-cp -R "$SOURCE_DIR"/. "$TARGET_DIR"/
-mkdir -p "$TARGET_DIR/examples"
-cp -R examples/* "$TARGET_DIR/examples/"
-cp examples/.env.example "$TARGET_DIR/examples/"
+  rm -rf "$target_dir"
+  mkdir -p "$target_dir"
+  cp -R "$source_dir"/. "$target_dir"/
 
-echo "Synced $SOURCE_DIR and repository examples into $TARGET_DIR"
+  echo "Synced $source_dir into $target_dir"
+}
+
+sync_skill "skills/agent-builder" "packages/yaacli/yaacli/skills/building-agents"
+mkdir -p "packages/yaacli/yaacli/skills/building-agents/examples"
+cp -R examples/* "packages/yaacli/yaacli/skills/building-agents/examples/"
+cp examples/.env.example "packages/yaacli/yaacli/skills/building-agents/examples/"
+echo "Synced repository examples into packages/yaacli/yaacli/skills/building-agents/examples"

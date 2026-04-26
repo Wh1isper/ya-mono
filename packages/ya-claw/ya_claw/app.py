@@ -8,6 +8,7 @@ from secrets import compare_digest
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from ya_claw.api.claw import router as claw_router
@@ -26,6 +27,7 @@ from ya_claw.execution import (
     RunDispatcher,
     RuntimeInstanceManager,
 )
+from ya_claw.logging import configure_claw_logging, redact_url
 from ya_claw.notifications import NotificationHub, create_notification_hub
 from ya_claw.runtime_state import InMemoryRuntimeState, create_runtime_state
 from ya_claw.workspace import (
@@ -44,6 +46,8 @@ class ClawApplication:
         self.settings = settings
 
     def create(self) -> FastAPI:
+        configure_claw_logging(self.settings.log_level)
+        logger.info("Creating YA Claw FastAPI app log_level={}", self.settings.log_level)
         self.settings.require_api_token()
 
         app = FastAPI(
@@ -86,8 +90,22 @@ class ClawApplication:
         return app
 
     @asynccontextmanager
-    async def lifespan(self, app: FastAPI) -> AsyncIterator[None]:  # noqa: C901
+    async def lifespan(self, app: FastAPI) -> AsyncIterator[None]:
+        logger.info(
+            "Starting YA Claw app environment={} instance_id={} host={} port={} public_base_url={}",
+            self.settings.environment,
+            self.settings.instance_id,
+            self.settings.host,
+            self.settings.port,
+            self.settings.public_base_url,
+        )
         self.settings.ensure_runtime_directories()
+        logger.info(
+            "Runtime directories ready data_dir={} run_store_dir={} workspace_dir={}",
+            self.settings.runtime_data_dir,
+            self.settings.run_store_dir,
+            self.settings.resolved_workspace_dir,
+        )
 
         app.state.db_engine = create_engine(
             self.settings.resolved_database_url,
@@ -97,9 +115,11 @@ class ClawApplication:
             pool_recycle=self.settings.database_pool_recycle_seconds,
         )
         app.state.db_session_factory = create_session_factory(app.state.db_engine)
+        logger.info("Database engine ready url={}", redact_url(self.settings.resolved_database_url))
         app.state.runtime_state = create_runtime_state()
         app.state.notification_hub = create_notification_hub()
         app.state.workspace_provider = self.create_workspace_provider()
+        logger.info("Workspace provider ready backend={}", self.settings.workspace_provider_backend)
         app.state.environment_factory = DefaultEnvironmentFactory(
             docker_image=self.settings.workspace_provider_docker_image,
             workspace_uid=self.settings.resolved_workspace_provider_docker_uid,
@@ -114,7 +134,8 @@ class ClawApplication:
                 session_factory=app.state.db_session_factory,
             )
             if self.settings.auto_seed_profiles:
-                await app.state.profile_resolver.seed_profiles()
+                seeded_profiles = await app.state.profile_resolver.seed_profiles()
+                logger.info("Profile auto-seed completed count={} names={}", len(seeded_profiles), seeded_profiles)
             app.state.runtime_builder = ClawRuntimeBuilder(settings=self.settings)
 
         if (
@@ -139,8 +160,9 @@ class ClawApplication:
                 session_factory=app.state.db_session_factory,
             )
             await app.state.runtime_instance_manager.register(metadata={"environment": self.settings.environment})
-            if supervisor.execution_enabled:
-                await supervisor.startup_recover()
+            logger.info("Runtime instance registered instance_id={}", self.settings.instance_id)
+            recovery_result = await supervisor.startup_recover()
+            logger.info("Execution supervisor startup recovery completed result={}", recovery_result)
             if self.settings.bridge_dispatch_mode == BridgeDispatchMode.EMBEDDED:
                 bridge_supervisor = build_bridge_supervisor(
                     settings=self.settings,
@@ -150,10 +172,15 @@ class ClawApplication:
                 )
                 app.state.bridge_supervisor = bridge_supervisor
                 await bridge_supervisor.startup()
+                logger.info(
+                    "Bridge supervisor started adapters={}", sorted(self.settings.resolved_bridge_enabled_adapters)
+                )
 
+        logger.info("YA Claw app startup complete")
         try:
             yield
         finally:
+            logger.info("Shutting down YA Claw app")
             db_engine = app.state.db_engine
             runtime_state = app.state.runtime_state
             notification_hub = app.state.notification_hub
@@ -187,10 +214,18 @@ class ClawApplication:
 
     def create_workspace_provider(self) -> WorkspaceProvider:
         if self.settings.workspace_provider_backend == "docker":
+            logger.info(
+                "Configuring Docker workspace provider image={} service_workspace_dir={} docker_host_workspace_dir={}",
+                self.settings.workspace_provider_docker_image,
+                self.settings.resolved_workspace_dir,
+                self.settings.resolved_workspace_provider_docker_host_workspace_dir,
+            )
             return DockerWorkspaceProvider(
                 self.settings.resolved_workspace_dir,
                 image=self.settings.workspace_provider_docker_image,
+                docker_host_workspace_dir=self.settings.resolved_workspace_provider_docker_host_workspace_dir,
             )
+        logger.info("Configuring local workspace provider workspace_dir={}", self.settings.resolved_workspace_dir)
         return LocalWorkspaceProvider(self.settings.resolved_workspace_dir)
 
     def register_api_token_middleware(self, app: FastAPI) -> None:
@@ -283,4 +318,6 @@ class ClawApplication:
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    configure_claw_logging(settings.log_level)
+    logger.info("create_app loaded settings environment={} log_level={}", settings.environment, settings.log_level)
     return ClawApplication(settings).create()
