@@ -21,10 +21,7 @@ from ya_claw.controller.models import (
     SessionRunCreateRequest,
     SessionSummary,
     SessionTurnsResponse,
-    extract_project_references,
-    normalize_project_references,
     run_summary_from_record,
-    serialize_project_references,
     session_summary_from_record,
     session_turn_from_record,
 )
@@ -32,7 +29,6 @@ from ya_claw.controller.run import RunController
 from ya_claw.controller.store import read_run_message_blob_if_exists, read_run_state_blob_if_exists
 from ya_claw.orm.tables import RunRecord, SessionRecord
 from ya_claw.runtime_state import InMemoryRuntimeState
-from ya_claw.workspace import cleanup_session_sandbox, remove_session_sandbox_metadata
 
 _DEFAULT_SESSION_RUNS_LIMIT = 20
 _MAX_SESSION_RUNS_LIMIT = 100
@@ -57,16 +53,10 @@ class SessionController:
         request: SessionCreateRequest,
     ) -> SessionCreateResponse:
         session_id = uuid4().hex
-        project_references = normalize_project_references(request.project_id, request.projects)
-        primary_project_id = project_references[0].project_id if project_references else request.project_id
-        session_metadata = dict(request.metadata)
-        if project_references:
-            session_metadata["projects"] = serialize_project_references(project_references)
         record = SessionRecord(
             id=session_id,
             profile_name=request.profile_name,
-            project_id=primary_project_id,
-            session_metadata=session_metadata,
+            session_metadata=dict(request.metadata),
         )
         db_session.add(record)
         await db_session.commit()
@@ -81,8 +71,6 @@ class SessionController:
                 RunCreateRequest(
                     session_id=session_id,
                     profile_name=request.profile_name,
-                    project_id=primary_project_id,
-                    projects=project_references,
                     input_parts=request.input_parts,
                     trigger_type=request.trigger_type,
                     metadata={},
@@ -108,25 +96,9 @@ class SessionController:
         if not isinstance(record, SessionRecord):
             raise HTTPException(status_code=404, detail=f"Session '{session_id}' was not found.")
 
-        if request.reset_sandbox:
-            if isinstance(record.active_run_id, str):
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Session '{session_id}' already has an active run '{record.active_run_id}'.",
-                )
-            await cleanup_session_sandbox(record.session_metadata)
-            record.session_metadata = remove_session_sandbox_metadata(record.session_metadata)
-            await db_session.commit()
-            await db_session.refresh(record)
-
         run_metadata = dict(request.metadata)
-        project_references = normalize_project_references(record.project_id, request.projects)
-        if project_references:
-            run_metadata["projects"] = serialize_project_references(project_references)
         if request.reset_state:
             run_metadata["reset_state"] = True
-        if request.reset_sandbox:
-            run_metadata["reset_sandbox"] = True
 
         return await self._run_controller.create(
             db_session,
@@ -137,8 +109,6 @@ class SessionController:
                 restore_from_run_id=request.restore_from_run_id,
                 reset_state=request.reset_state,
                 profile_name=record.profile_name,
-                project_id=record.project_id,
-                projects=project_references,
                 input_parts=request.input_parts,
                 trigger_type=request.trigger_type,
                 metadata=run_metadata,
@@ -290,22 +260,11 @@ class SessionController:
                 detail=f"Run '{restore_from_run_id}' does not belong to session '{session_id}'.",
             )
 
-        source_projects = extract_project_references(source_record.project_id, source_record.session_metadata)
-        project_references = normalize_project_references(
-            request.project_id or source_record.project_id, request.projects or source_projects
-        )
-        primary_project_id = (
-            project_references[0].project_id if project_references else request.project_id or source_record.project_id
-        )
-        session_metadata = dict(request.metadata)
-        if project_references:
-            session_metadata["projects"] = serialize_project_references(project_references)
         fork_record = SessionRecord(
             id=uuid4().hex,
             parent_session_id=source_record.id,
             profile_name=request.profile_name or source_record.profile_name,
-            project_id=primary_project_id,
-            session_metadata=session_metadata,
+            session_metadata=dict(request.metadata),
             head_run_id=restore_record.id,
             head_success_run_id=restore_record.id
             if restore_record.status == RunStatus.COMPLETED

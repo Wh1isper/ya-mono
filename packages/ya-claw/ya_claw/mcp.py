@@ -1,71 +1,35 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
+from typing import Any
 
-from ya_agent_sdk.mcp import MCPConfig, load_mcp_config_file
+from ya_agent_sdk.mcp import MCPConfig, MCPServerConfig
 
-from ya_claw.config import ClawSettings
-
-_DEFAULT_PROJECT_MCP_CONFIG_PATH = Path(".ya-claw/mcp.json")
+_ALLOWED_PROFILE_MCP_TRANSPORTS = {"streamable_http"}
 
 
-@dataclass(frozen=True, slots=True)
-class LoadedMCPConfig:
-    scope: str
-    path: Path
-    config: MCPConfig
-
-
-@dataclass(slots=True)
-class _CachedMCPConfig:
-    mtime_ns: int
-    size: int
-    config: MCPConfig
-
-
-class ClawMCPConfigResolver:
-    def __init__(self, *, settings: ClawSettings) -> None:
-        self._settings = settings
-        self._cache: dict[Path, _CachedMCPConfig] = {}
-
-    def load_for_workspace(self, workspace_root: Path | None = None) -> LoadedMCPConfig | None:
-        project_file = self.resolve_project_mcp_config_file(workspace_root)
-        if isinstance(project_file, Path) and project_file.exists():
-            return LoadedMCPConfig(scope="project", path=project_file, config=self._load_cached(project_file))
-
-        global_file = self._settings.resolved_mcp_config_file
-        if global_file.exists():
-            return LoadedMCPConfig(scope="global", path=global_file, config=self._load_cached(global_file))
-
+def build_profile_mcp_config(mcp_servers: dict[str, Any] | None) -> MCPConfig | None:
+    if not isinstance(mcp_servers, dict) or not mcp_servers:
         return None
 
-    def resolve_project_mcp_config_file(self, workspace_root: Path | None) -> Path | None:
-        if not isinstance(workspace_root, Path):
-            return None
-        relative_path = self._settings.resolved_project_mcp_config_path
-        if relative_path is None:
-            return None
-        return (workspace_root / relative_path).resolve()
+    servers: dict[str, MCPServerConfig] = {}
+    for raw_name, raw_config in mcp_servers.items():
+        name = str(raw_name).strip()
+        if name == "" or not isinstance(raw_config, dict):
+            continue
+        config = MCPServerConfig.model_validate(raw_config)
+        if config.transport not in _ALLOWED_PROFILE_MCP_TRANSPORTS:
+            raise ValueError(f"Profile MCP server '{name}' uses unsupported transport: {config.transport}")
+        if not isinstance(config.url, str) or config.url.strip() == "":
+            raise ValueError(f"Profile MCP server '{name}' requires a URL.")
+        servers[name] = config.model_copy(update={"url": config.url.strip()}, deep=True)
 
-    def _load_cached(self, file_path: Path) -> MCPConfig:
-        stat_result = file_path.stat()
-        cached = self._cache.get(file_path)
-        if (
-            isinstance(cached, _CachedMCPConfig)
-            and cached.mtime_ns == stat_result.st_mtime_ns
-            and cached.size == stat_result.st_size
-        ):
-            return cached.config
-
-        loaded = load_mcp_config_file(file_path)
-        self._cache[file_path] = _CachedMCPConfig(
-            mtime_ns=stat_result.st_mtime_ns,
-            size=stat_result.st_size,
-            config=loaded,
-        )
-        return loaded
+    if not servers:
+        return None
+    return MCPConfig(servers=servers)
 
 
-def default_project_mcp_config_path() -> Path:
-    return _DEFAULT_PROJECT_MCP_CONFIG_PATH
+def normalize_profile_mcp_servers(mcp_servers: dict[str, Any] | None) -> dict[str, Any]:
+    config = build_profile_mcp_config(mcp_servers)
+    if config is None:
+        return {}
+    return config.model_dump(mode="json", exclude_none=True)["servers"]

@@ -18,17 +18,15 @@ def clear_claw_settings(monkeypatch, tmp_path: Path) -> None:
         "YA_CLAW_DATABASE_URL",
         "YA_CLAW_DATA_DIR",
         "YA_CLAW_WEB_DIST_DIR",
-        "YA_CLAW_WORKSPACE_ROOT",
+        "YA_CLAW_WORKSPACE_DIR",
         "YA_CLAW_PROFILE_SEED_FILE",
         "YA_CLAW_AUTO_SEED_PROFILES",
-        "YA_CLAW_MCP_CONFIG_FILE",
-        "YA_CLAW_PROJECT_MCP_CONFIG_PATH",
     ):
         monkeypatch.delenv(env_name, raising=False)
 
     monkeypatch.setenv("YA_CLAW_API_TOKEN", "test-token")
     monkeypatch.setenv("YA_CLAW_DATA_DIR", str(tmp_path / "runtime-data"))
-    monkeypatch.setenv("YA_CLAW_WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    monkeypatch.setenv("YA_CLAW_WORKSPACE_DIR", str(tmp_path / "workspace"))
     monkeypatch.setenv("YA_CLAW_PROFILE_SEED_FILE", str(tmp_path / "profiles.yaml"))
     monkeypatch.setenv("YA_CLAW_AUTO_SEED_PROFILES", "false")
 
@@ -66,6 +64,12 @@ profiles:
     model_config_preset: gpt5_270k
     builtin_toolsets: [core, web]
     enabled_mcps: [context7]
+    mcp_servers:
+      context7:
+        transport: streamable_http
+        url: https://mcp.context7.com/mcp
+        description: Library docs
+        required: false
     unified_subagents: true
     subagents:
       - name: explorer
@@ -84,10 +88,23 @@ profiles:
                 "model": "gateway@openai-responses:gpt-5.4",
                 "model_settings_preset": "openai_responses_high",
                 "model_config_preset": "gpt5_270k",
+                "system_prompt": "You are a custom profile.",
                 "toolsets": ["filesystem", "shell"],
                 "need_user_approve_mcps": ["context7"],
                 "enabled_mcps": ["context7", "github"],
                 "disabled_mcps": ["github"],
+                "mcp_servers": {
+                    "context7": {
+                        "transport": "streamable_http",
+                        "url": "https://mcp.context7.com/mcp",
+                        "description": "Library docs",
+                        "required": False,
+                    },
+                    "github": {
+                        "transport": "streamable_http",
+                        "url": "https://mcp.github.example/mcp",
+                    },
+                },
                 "subagents": [
                     {
                         "name": "debugger",
@@ -104,11 +121,38 @@ profiles:
         )
         assert put_response.status_code == 200
         assert put_response.json()["name"] == "custom"
+        assert put_response.json()["system_prompt"] == "You are a custom profile."
         assert put_response.json()["builtin_toolsets"] == ["filesystem", "shell"]
         assert put_response.json()["toolsets"] == ["filesystem", "shell"]
         assert put_response.json()["need_user_approve_mcps"] == ["context7"]
         assert put_response.json()["enabled_mcps"] == ["context7", "github"]
         assert put_response.json()["disabled_mcps"] == ["github"]
+        assert put_response.json()["mcp_servers"] == {
+            "context7": {
+                "transport": "streamable_http",
+                "url": "https://mcp.context7.com/mcp",
+                "headers": {},
+                "description": "Library docs",
+                "required": False,
+            },
+            "github": {
+                "transport": "streamable_http",
+                "url": "https://mcp.github.example/mcp",
+                "headers": {},
+                "description": "",
+                "required": True,
+            },
+        }
+
+        invalid_mcp_response = client.put(
+            "/api/v1/profiles/invalid-mcp",
+            headers=_auth_headers(),
+            json={
+                "model": "gateway@openai-responses:gpt-5.4",
+                "mcp_servers": {"github": {"transport": "stdio", "url": "https://example.test/mcp"}},
+            },
+        )
+        assert invalid_mcp_response.status_code == 422
 
         list_response = client.get("/api/v1/profiles", headers=_auth_headers())
         assert list_response.status_code == 200
@@ -121,6 +165,7 @@ profiles:
         assert get_response.json()["subagents"][0]["model"] == "inherit"
         assert get_response.json()["builtin_toolsets"] == ["filesystem", "shell"]
         assert get_response.json()["toolsets"] == ["filesystem", "shell"]
+        assert get_response.json()["mcp_servers"]["context7"]["url"] == "https://mcp.context7.com/mcp"
 
         seed_response = client.post(
             "/api/v1/profiles/seed",
@@ -139,6 +184,7 @@ profiles:
         assert seeded_get_response.json()["subagents"][0]["name"] == "explorer"
         assert seeded_get_response.json()["builtin_toolsets"] == ["core", "web"]
         assert seeded_get_response.json()["enabled_mcps"] == ["context7"]
+        assert seeded_get_response.json()["mcp_servers"]["context7"]["required"] is False
 
         delete_response = client.delete("/api/v1/profiles/custom", headers=_auth_headers())
         assert delete_response.status_code == 204

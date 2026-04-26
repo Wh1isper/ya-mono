@@ -20,7 +20,7 @@ from ya_agent_sdk.events import ModelRequestCompleteEvent, ModelRequestStartEven
 from ya_claw.agui_adapter import AguiEventAdapter
 from ya_claw.config import ClawSettings
 from ya_claw.context import ClawAgentContext
-from ya_claw.controller.models import InputPart, extract_project_references, parse_input_parts
+from ya_claw.controller.models import InputPart, parse_input_parts
 from ya_claw.execution.background import BACKGROUND_MONITOR_KEY, BackgroundMonitor
 from ya_claw.execution.checkpoint import build_message_checkpoint, commit_run_artifacts, write_message_checkpoint
 from ya_claw.execution.input import InputMappingResult, map_input_parts
@@ -37,7 +37,7 @@ from ya_claw.workspace import (
     EnvironmentFactory,
     WorkspaceBinding,
     WorkspaceProvider,
-    build_session_sandbox_metadata,
+    build_workspace_sandbox_metadata,
 )
 
 logger = logging.getLogger(__name__)
@@ -229,7 +229,6 @@ class RunCoordinator:
                 input_parts=parse_input_parts(list(run_record.input_parts)),
                 profile=profile,
                 profile_name=run_record.profile_name,
-                project_id=run_record.project_id,
                 trigger_type=run_record.trigger_type,
                 run_metadata=dict(run_record.run_metadata),
                 buffers=buffers,
@@ -351,7 +350,6 @@ class RunCoordinator:
         input_parts: list[InputPart],
         profile: ResolvedProfile,
         profile_name: str | None,
-        project_id: str | None,
         trigger_type: str,
         run_metadata: dict[str, Any],
         buffers: ExecutionBuffers,
@@ -376,7 +374,6 @@ class RunCoordinator:
             restore_state=restored_state,
             session_id=session_id,
             run_id=run_id,
-            project_id=project_id,
             restore_from_run_id=restore_point.run_id if restore_point is not None else None,
             dispatch_mode=dispatch_mode,
             source_kind=trigger_type,
@@ -394,7 +391,7 @@ class RunCoordinator:
 
             if isinstance(environment, Environment):
                 runtime.ctx.container_id = self._extract_environment_container_id(environment)
-            await self._persist_session_sandbox(session_id, workspace_binding, environment)
+            await self._persist_workspace_sandbox(session_id, workspace_binding, environment)
             async with stream_agent(
                 runtime,
                 user_prompt_factory=lambda runtime_obj: self._build_initial_prompt(
@@ -456,7 +453,6 @@ class RunCoordinator:
                     workspace_binding=workspace_binding,
                     restore_point=restore_point,
                     profile=profile,
-                    project_id=project_id,
                     trigger_type=trigger_type,
                     message_payload=buffers.latest_message_payload,
                 )
@@ -502,23 +498,17 @@ class RunCoordinator:
         session_record: SessionRecord,
         profile: ResolvedProfile,
     ) -> WorkspaceBinding:
-        project_id = run_record.project_id or session_record.project_id or session_record.id
-        project_references = extract_project_references(
-            run_record.project_id or session_record.project_id,
-            run_record.run_metadata if isinstance(run_record.run_metadata, dict) else session_record.session_metadata,
-        )
         metadata: dict[str, Any] = {
             "run_id": run_record.id,
             "session_id": session_record.id,
             "profile_name": profile.name,
             "trigger_type": run_record.trigger_type,
-            "projects": [project.model_dump(mode="json", exclude_none=True) for project in project_references],
         }
         if isinstance(session_record.session_metadata, dict):
             sandbox = session_record.session_metadata.get("sandbox")
             if isinstance(sandbox, dict):
                 metadata["sandbox"] = dict(sandbox)
-        binding = self._workspace_provider.resolve(project_id, metadata)
+        binding = self._workspace_provider.resolve(metadata)
         if isinstance(profile.workspace_backend_hint, str) and profile.workspace_backend_hint.strip() != "":
             binding.backend_hint = profile.workspace_backend_hint
             binding.metadata["workspace_backend_hint"] = profile.workspace_backend_hint
@@ -531,13 +521,13 @@ class RunCoordinator:
                 return value.strip()
         return None
 
-    async def _persist_session_sandbox(
+    async def _persist_workspace_sandbox(
         self,
         session_id: str,
         workspace_binding: WorkspaceBinding,
         environment: Environment,
     ) -> None:
-        sandbox_metadata = build_session_sandbox_metadata(binding=workspace_binding, environment=environment)
+        sandbox_metadata = build_workspace_sandbox_metadata(binding=workspace_binding, environment=environment)
         if sandbox_metadata is None:
             return
 
@@ -565,16 +555,9 @@ class RunCoordinator:
         workspace_binding: WorkspaceBinding,
     ) -> str | list[Any]:
         prompt_parts: list[Any] = []
-        project_lines = [
-            f"- {mount.project_id}: {mount.virtual_path}"
-            + (f" -- {mount.description}" if isinstance(mount.description, str) and mount.description else "")
-            for mount in workspace_binding.project_mounts
-        ]
         instruction_lines = [
             f"Workspace cwd: {workspace_binding.cwd}",
             f"Writable paths: {', '.join(str(path) for path in workspace_binding.writable_paths)}",
-            "Mounted projects:",
-            *project_lines,
         ]
         if mapping.mode_parts:
             instruction_lines.append("Modes: " + ", ".join(part.mode for part in mapping.mode_parts))
@@ -619,7 +602,6 @@ class RunCoordinator:
         workspace_binding: WorkspaceBinding,
         restore_point: ResolvedRestorePoint | None,
         profile: ResolvedProfile,
-        project_id: str | None,
         trigger_type: str,
         message_payload: dict[str, Any] | None,
     ) -> dict[str, Any]:
@@ -641,19 +623,10 @@ class RunCoordinator:
             if restore_point is not None
             else None,
             "workspace": {
-                "project_id": workspace_binding.project_id,
                 "virtual_path": str(workspace_binding.virtual_path),
                 "cwd": str(workspace_binding.cwd),
-                "projects": [
-                    {
-                        "project_id": mount.project_id,
-                        "description": mount.description,
-                        "virtual_path": str(mount.virtual_path),
-                        "readable": mount.readable,
-                        "writable": mount.writable,
-                    }
-                    for mount in workspace_binding.project_mounts
-                ],
+                "readable_paths": [str(path) for path in workspace_binding.readable_paths],
+                "writable_paths": [str(path) for path in workspace_binding.writable_paths],
                 "metadata": self._serialize_value(workspace_binding.metadata),
             },
             "profile": {
@@ -664,7 +637,6 @@ class RunCoordinator:
                 "session_id": ctx.session_id,
                 "claw_run_id": ctx.claw_run_id,
                 "profile_name": ctx.profile_name,
-                "project_id": ctx.project_id,
                 "restore_from_run_id": ctx.restore_from_run_id,
                 "dispatch_mode": ctx.dispatch_mode,
                 "source_kind": ctx.source_kind,
@@ -675,8 +647,7 @@ class RunCoordinator:
                 ),
             },
             "trigger_type": trigger_type,
-            "project_id": project_id,
-            "version": 3,
+            "version": 4,
         }
 
     def _extract_replay_events(self, message_payload: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -753,7 +724,6 @@ async def _publish_run_status_notification(
             "status": run_record.status,
             "sequence_no": run_record.sequence_no,
             "profile_name": run_record.profile_name,
-            "project_id": run_record.project_id,
             "termination_reason": run_record.termination_reason,
             "error_message": run_record.error_message,
             "output_summary": run_record.output_summary,

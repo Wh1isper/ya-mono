@@ -140,7 +140,6 @@ async def _publish_run_notification(request: Request, event_type: str, run: RunD
             "status": run.status,
             "sequence_no": run.sequence_no,
             "profile_name": run.profile_name,
-            "project_id": run.project_id,
             "termination_reason": run.termination_reason,
             "error_message": run.error_message,
         },

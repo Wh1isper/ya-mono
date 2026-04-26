@@ -36,13 +36,13 @@ async def db_session(db_engine: AsyncEngine) -> AsyncSession:
 @pytest.fixture
 def settings(tmp_path: Path) -> ClawSettings:
     data_dir = tmp_path / "runtime-data"
-    workspace_root = tmp_path / "workspace"
+    workspace_dir = tmp_path / "workspace"
     data_dir.mkdir(parents=True, exist_ok=True)
-    workspace_root.mkdir(parents=True, exist_ok=True)
+    workspace_dir.mkdir(parents=True, exist_ok=True)
     return ClawSettings(
         api_token="test-token",  # noqa: S106
         data_dir=data_dir,
-        workspace_root=workspace_root,
+        workspace_dir=workspace_dir,
     )
 
 
@@ -59,7 +59,6 @@ async def test_session_controller_creates_session_and_initial_run(
         runtime_state,
         SessionCreateRequest(
             profile_name="general",
-            project_id="repo-a",
             metadata={"source": "api"},
             input_parts=[{"type": "text", "text": "hello from api"}],
         ),
@@ -163,27 +162,17 @@ async def test_session_controller_get_embeds_paginated_runs_with_optional_messag
     assert next_page.session.runs_has_more is False
 
 
-async def test_session_controller_create_run_supports_reset_state_and_reset_sandbox(
+async def test_session_controller_create_run_supports_reset_state(
     db_session: AsyncSession,
     settings: ClawSettings,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     controller = SessionController()
     runtime_state = create_runtime_state()
-    cleaned_metadata: list[dict[str, object]] = []
-
-    async def _cleanup_stub(metadata: dict[str, object] | None) -> bool:
-        if isinstance(metadata, dict):
-            cleaned_metadata.append(dict(metadata))
-        return True
-
-    monkeypatch.setattr("ya_claw.controller.session.cleanup_session_sandbox", _cleanup_stub)
 
     session_record = SessionRecord(
         id="session-1",
         profile_name="general",
-        project_id="repo-a",
-        session_metadata={"sandbox": {"container_ref": "ya-claw-session-session-1", "container_id": "cid-1"}},
+        session_metadata={"sandbox": {"container_ref": "ya-claw-workspace-ref", "container_id": "cid-1"}},
         head_run_id="run-1",
         head_success_run_id="run-1",
     )
@@ -195,7 +184,6 @@ async def test_session_controller_create_run_supports_reset_state_and_reset_sand
         status="completed",
         trigger_type="api",
         profile_name="general",
-        project_id="repo-a",
         input_parts=[{"type": "text", "text": "base"}],
         run_metadata={},
     )
@@ -210,7 +198,6 @@ async def test_session_controller_create_run_supports_reset_state_and_reset_sand
         "session-1",
         SessionRunCreateRequest(
             reset_state=True,
-            reset_sandbox=True,
             input_parts=[{"type": "text", "text": "fresh start"}],
         ),
     )
@@ -225,9 +212,9 @@ async def test_session_controller_create_run_supports_reset_state_and_reset_sand
     assert rerun.restore_from_run_id is None
     assert refreshed_run.restore_from_run_id is None
     assert rerun.metadata["reset_state"] is True
-    assert rerun.metadata["reset_sandbox"] is True
-    assert cleaned_metadata == [{"sandbox": {"container_ref": "ya-claw-session-session-1", "container_id": "cid-1"}}]
-    assert "sandbox" not in refreshed_session.session_metadata
+    assert refreshed_session.session_metadata == {
+        "sandbox": {"container_ref": "ya-claw-workspace-ref", "container_id": "cid-1"}
+    }
 
 
 async def test_run_controller_create_auto_creates_session_and_supports_steer_cancel(
@@ -244,7 +231,6 @@ async def test_run_controller_create_auto_creates_session_and_supports_steer_can
         RunCreateRequest(
             session_id=None,
             profile_name="general",
-            project_id="repo-b",
             input_parts=[{"type": "text", "text": "hello"}],
             metadata={"source": "tool"},
         ),
@@ -264,7 +250,6 @@ async def test_run_controller_create_auto_creates_session_and_supports_steer_can
     assert run.status == "queued"
     assert run.session_id
     assert run.profile_name == "general"
-    assert run.project_id == "repo-b"
     assert run.metadata == {"source": "tool"}
     assert run.input_preview == "hello"
     assert (settings.run_store_dir / run.id).exists()

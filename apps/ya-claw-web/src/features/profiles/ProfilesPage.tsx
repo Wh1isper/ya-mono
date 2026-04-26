@@ -36,6 +36,7 @@ import {
 import { useLayoutStore } from '../../stores/layoutStore'
 import type {
   ProfileDetail,
+  ProfileMCPServer,
   ProfileSummary,
   ProfileUpsertRequest,
 } from '../../types'
@@ -67,6 +68,7 @@ type ProfileFormValues = {
   need_user_approve_mcps: string
   enabled_mcps: string
   disabled_mcps: string
+  mcp_servers: string
   model_settings_preset: string
   model_settings_override: string
   model_config_preset: string
@@ -90,6 +92,7 @@ const blankProfile: ProfileFormValues = {
   need_user_approve_mcps: '',
   enabled_mcps: '',
   disabled_mcps: '',
+  mcp_servers: '',
   model_settings_preset: '',
   model_settings_override: '',
   model_config_preset: '',
@@ -534,6 +537,15 @@ function ProfileEditor({
                   helper="Comma-separated"
                 />
               </div>
+              <div className="mt-4">
+                <JsonField
+                  label="MCP servers"
+                  registration={form.register('mcp_servers')}
+                />
+                <p className="mt-1 text-xs text-slate-400">
+                  JSON object keyed by namespace. Use streamable_http transport.
+                </p>
+              </div>
             </Section>
 
             <Section title="Model advanced" icon={SlidersHorizontal}>
@@ -838,6 +850,9 @@ function formValuesFromProfile(profile: ProfileDetail): ProfileFormValues {
     need_user_approve_mcps: joinCsv(profile.need_user_approve_mcps),
     enabled_mcps: joinCsv(profile.enabled_mcps),
     disabled_mcps: joinCsv(profile.disabled_mcps),
+    mcp_servers: Object.keys(profile.mcp_servers).length
+      ? safeJsonStringify(profile.mcp_servers)
+      : '',
     model_settings_preset: profile.model_settings_preset ?? '',
     model_settings_override: profile.model_settings_override
       ? safeJsonStringify(profile.model_settings_override)
@@ -890,12 +905,47 @@ function payloadFromForm(values: ProfileFormValues): ProfileUpsertRequest {
     need_user_approve_mcps: splitCsv(values.need_user_approve_mcps),
     enabled_mcps: splitCsv(values.enabled_mcps),
     disabled_mcps: splitCsv(values.disabled_mcps),
+    mcp_servers: parseMcpServers(values.mcp_servers),
     workspace_backend_hint: nullableText(values.workspace_backend_hint),
     enabled: values.enabled,
     source_type: nullableText(values.source_type),
     source_version: nullableText(values.source_version),
     source_checksum: nullableText(values.source_checksum),
   }
+}
+
+function parseMcpServers(value: string): Record<string, ProfileMCPServer> {
+  const parsed = parseJsonObject(value) ?? {}
+  const servers: Record<string, ProfileMCPServer> = {}
+  for (const [name, rawServer] of Object.entries(parsed)) {
+    if (
+      !rawServer ||
+      typeof rawServer !== 'object' ||
+      Array.isArray(rawServer)
+    ) {
+      throw new Error(`MCP server ${name} must be a JSON object`)
+    }
+    const server = rawServer as Record<string, unknown>
+    if (server.transport !== 'streamable_http') {
+      throw new Error(`MCP server ${name} must use streamable_http transport`)
+    }
+    if (typeof server.url !== 'string' || !server.url.trim()) {
+      throw new Error(`MCP server ${name} requires url`)
+    }
+    const headers = server.headers
+    if (headers && (typeof headers !== 'object' || Array.isArray(headers))) {
+      throw new Error(`MCP server ${name} headers must be an object`)
+    }
+    servers[name] = {
+      transport: 'streamable_http',
+      url: server.url.trim(),
+      headers: (headers ?? {}) as Record<string, string>,
+      description:
+        typeof server.description === 'string' ? server.description : '',
+      required: typeof server.required === 'boolean' ? server.required : true,
+    }
+  }
+  return servers
 }
 
 function nullableText(value: string) {

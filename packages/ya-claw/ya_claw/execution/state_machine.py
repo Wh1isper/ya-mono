@@ -9,7 +9,6 @@ def queue_run(session: SessionRecord, run: RunRecord, *, queued_at: datetime | N
     effective_time = queued_at or datetime.now(UTC)
     session.head_run_id = run.id
     session.profile_name = run.profile_name
-    session.project_id = run.project_id
     session.updated_at = effective_time
     run.status = "queued"
 

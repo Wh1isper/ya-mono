@@ -26,7 +26,6 @@ from ya_claw.execution import (
     RunDispatcher,
     RuntimeInstanceManager,
 )
-from ya_claw.mcp import ClawMCPConfigResolver
 from ya_claw.notifications import NotificationHub, create_notification_hub
 from ya_claw.runtime_state import InMemoryRuntimeState, create_runtime_state
 from ya_claw.workspace import (
@@ -61,7 +60,6 @@ class ClawApplication:
         app.state.workspace_provider = None
         app.state.environment_factory = None
         app.state.profile_resolver = None
-        app.state.mcp_config_resolver = None
         app.state.runtime_builder = None
         app.state.execution_supervisor = None
         app.state.runtime_instance_manager = None
@@ -107,6 +105,7 @@ class ClawApplication:
             workspace_uid=self.settings.resolved_workspace_provider_docker_uid,
             workspace_gid=self.settings.resolved_workspace_provider_docker_gid,
             workspace_environment=self.settings.resolved_lark_cli_environment,
+            docker_container_cache_dir=self.settings.resolved_workspace_provider_docker_container_cache_dir,
         )
 
         if app.state.db_session_factory is not None:
@@ -114,13 +113,9 @@ class ClawApplication:
                 settings=self.settings,
                 session_factory=app.state.db_session_factory,
             )
-            app.state.mcp_config_resolver = ClawMCPConfigResolver(settings=self.settings)
             if self.settings.auto_seed_profiles:
                 await app.state.profile_resolver.seed_profiles()
-            app.state.runtime_builder = ClawRuntimeBuilder(
-                settings=self.settings,
-                mcp_config_resolver=app.state.mcp_config_resolver,
-            )
+            app.state.runtime_builder = ClawRuntimeBuilder(settings=self.settings)
 
         if (
             isinstance(app.state.runtime_state, InMemoryRuntimeState)
@@ -193,10 +188,10 @@ class ClawApplication:
     def create_workspace_provider(self) -> WorkspaceProvider:
         if self.settings.workspace_provider_backend == "docker":
             return DockerWorkspaceProvider(
-                self.settings.resolved_workspace_root,
+                self.settings.resolved_workspace_dir,
                 image=self.settings.workspace_provider_docker_image,
             )
-        return LocalWorkspaceProvider(self.settings.resolved_workspace_root)
+        return LocalWorkspaceProvider(self.settings.resolved_workspace_dir)
 
     def register_api_token_middleware(self, app: FastAPI) -> None:
         expected_token = self.settings.require_api_token()

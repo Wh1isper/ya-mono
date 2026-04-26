@@ -147,7 +147,6 @@ class BridgeController:
         if isinstance(existing, BridgeConversationRecord):
             return existing
 
-        project_id = self._resolve_project_id(settings, message)
         profile_name = self._resolve_profile(settings, message.adapter)
         created = await self._session_controller.create(
             db_session,
@@ -155,7 +154,6 @@ class BridgeController:
             runtime_state,
             SessionCreateRequest(
                 profile_name=profile_name,
-                project_id=project_id,
                 metadata={"bridge": self._conversation_metadata(message)},
                 dispatch_mode=DispatchMode.QUEUE,
                 trigger_type=TriggerType.BRIDGE,
@@ -167,7 +165,6 @@ class BridgeController:
             tenant_key=message.tenant_key,
             external_chat_id=message.chat_id,
             session_id=created.session.id,
-            project_id=project_id,
             profile_name=profile_name,
             conversation_metadata=self._conversation_metadata(message),
             last_event_at=datetime.now(UTC),
@@ -181,18 +178,6 @@ class BridgeController:
         if adapter == BridgeAdapterType.LARK:
             return settings.resolved_bridge_lark_profile
         return settings.default_profile
-
-    def _resolve_project_id(self, settings: ClawSettings, message: BridgeInboundMessage) -> str:
-        template = (
-            settings.bridge_lark_project_id_template
-            if message.adapter == BridgeAdapterType.LARK
-            else "bridge/{chat_id}"
-        )
-        return template.format(
-            tenant_key=message.tenant_key,
-            chat_id=message.chat_id,
-            adapter=message.adapter,
-        )
 
     def _conversation_metadata(self, message: BridgeInboundMessage) -> dict[str, object]:
         return {

@@ -35,7 +35,7 @@ def test_serve_runs_auto_migrate_with_default_sqlite(monkeypatch, tmp_path) -> N
         api_token=TEST_API_TOKEN,
         database_url=None,
         data_dir=tmp_path,
-        workspace_root=tmp_path / "workspace",
+        workspace_dir=tmp_path / "workspace",
     )
 
     monkeypatch.setattr(claw_cli, "get_settings", lambda: settings)
@@ -62,7 +62,7 @@ def test_serve_requires_api_token(monkeypatch, tmp_path) -> None:
         api_token=None,
         database_url=None,
         data_dir=tmp_path,
-        workspace_root=tmp_path / "workspace",
+        workspace_dir=tmp_path / "workspace",
     )
 
     monkeypatch.setattr(claw_cli, "get_settings", lambda: settings)
@@ -83,7 +83,7 @@ def test_serve_skips_auto_migrate_when_disabled(monkeypatch, tmp_path) -> None:
         api_token=TEST_API_TOKEN,
         database_url=None,
         data_dir=tmp_path,
-        workspace_root=tmp_path / "workspace",
+        workspace_dir=tmp_path / "workspace",
     )
 
     monkeypatch.setattr(claw_cli, "get_settings", lambda: settings)
@@ -123,7 +123,7 @@ def test_start_runs_migrate_seed_and_serve(monkeypatch, tmp_path: Path) -> None:
         api_token=TEST_API_TOKEN,
         database_url=None,
         data_dir=tmp_path,
-        workspace_root=tmp_path / "workspace",
+        workspace_dir=tmp_path / "workspace",
         profile_seed_file=seed_file,
     )
 
@@ -162,7 +162,7 @@ def test_start_requires_api_token(monkeypatch, tmp_path: Path) -> None:
     settings = ClawSettings(
         api_token=None,
         data_dir=tmp_path,
-        workspace_root=tmp_path / "workspace",
+        workspace_dir=tmp_path / "workspace",
     )
 
     monkeypatch.setattr(claw_cli, "get_settings", lambda: settings)
@@ -179,7 +179,7 @@ def test_start_reports_missing_seed_file(monkeypatch, tmp_path: Path) -> None:
         auto_seed_profiles=True,
         api_token=TEST_API_TOKEN,
         data_dir=tmp_path,
-        workspace_root=tmp_path / "workspace",
+        workspace_dir=tmp_path / "workspace",
         profile_seed_file=tmp_path / "missing.yaml",
     )
 
@@ -196,7 +196,7 @@ def test_profiles_seed_command(monkeypatch, tmp_path: Path) -> None:
     settings = ClawSettings(
         api_token=TEST_API_TOKEN,
         data_dir=tmp_path,
-        workspace_root=tmp_path / "workspace",
+        workspace_dir=tmp_path / "workspace",
         profile_seed_file=tmp_path / "profiles.yaml",
     )
 

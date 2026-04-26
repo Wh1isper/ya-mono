@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from inline_snapshot import snapshot
 from sqlalchemy.exc import OperationalError
 from ya_claw.app import create_app
 from ya_claw.config import get_settings
@@ -22,18 +23,16 @@ def clear_claw_settings(monkeypatch, tmp_path: Path) -> None:
         "YA_CLAW_DATABASE_URL",
         "YA_CLAW_DATA_DIR",
         "YA_CLAW_WEB_DIST_DIR",
-        "YA_CLAW_WORKSPACE_ROOT",
+        "YA_CLAW_WORKSPACE_DIR",
         "YA_CLAW_EXECUTION_MODEL",
         "YA_CLAW_EXECUTION_MODEL_SETTINGS_PRESET",
         "YA_CLAW_EXECUTION_MODEL_CONFIG_PRESET",
-        "YA_CLAW_EXECUTION_SYSTEM_PROMPT",
-        "YA_CLAW_EXECUTION_CONTEXT_WINDOW",
     ):
         monkeypatch.delenv(env_name, raising=False)
 
     monkeypatch.setenv("YA_CLAW_API_TOKEN", "test-token")
     monkeypatch.setenv("YA_CLAW_DATA_DIR", str(tmp_path / "runtime-data"))
-    monkeypatch.setenv("YA_CLAW_WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    monkeypatch.setenv("YA_CLAW_WORKSPACE_DIR", str(tmp_path / "workspace"))
 
     get_settings.cache_clear()
     yield
@@ -98,7 +97,6 @@ def test_session_and_run_endpoints_support_rerun_controls_and_events() -> None:
             headers=_auth_headers(),
             json={
                 "profile_name": "general",
-                "project_id": "repo-a",
                 "metadata": {"source": "api"},
                 "input_parts": [{"type": "text", "text": "hello from api"}],
             },
@@ -178,35 +176,56 @@ def test_session_and_run_endpoints_support_rerun_controls_and_events() -> None:
     assert "ya_claw.run_interrupted" in run_events_response.text
 
 
-def test_session_create_accepts_project_references() -> None:
+def test_session_create_uses_single_workspace_response_shape() -> None:
     _create_schema()
 
     with TestClient(create_app()) as client:
         create_session_response = client.post(
             "/api/v1/sessions",
             headers=_auth_headers(),
-            json={
-                "projects": [
-                    {"project_id": "repo-a", "description": "primary repo"},
-                    {"project_id": "repo-b", "description": "reference repo"},
-                ],
-                "input_parts": [{"type": "text", "text": "hello from multi project session"}],
-            },
+            json={"input_parts": [{"type": "text", "text": "hello from workspace session"}]},
         )
 
     assert create_session_response.status_code == 201
     payload = create_session_response.json()
-    assert payload["session"]["project_id"] == "repo-a"
-    assert payload["session"]["projects"] == [
-        {"project_id": "repo-a", "description": "primary repo"},
-        {"project_id": "repo-b", "description": "reference repo"},
-    ]
     assert payload["session"]["metadata"] == {}
-    assert payload["run"]["project_id"] == "repo-a"
-    assert payload["run"]["projects"] == [
-        {"project_id": "repo-a", "description": "primary repo"},
-        {"project_id": "repo-b", "description": "reference repo"},
-    ]
+    assert sorted(payload["session"]) == snapshot([
+        "active_run_id",
+        "created_at",
+        "head_run_id",
+        "head_success_run_id",
+        "id",
+        "latest_run",
+        "metadata",
+        "parent_session_id",
+        "profile_name",
+        "run_count",
+        "status",
+        "updated_at",
+    ])
+    assert sorted(payload["run"]) == snapshot([
+        "committed_at",
+        "created_at",
+        "error_message",
+        "finished_at",
+        "has_message",
+        "has_state",
+        "id",
+        "input_parts",
+        "input_preview",
+        "message",
+        "metadata",
+        "output_summary",
+        "output_text",
+        "profile_name",
+        "restore_from_run_id",
+        "sequence_no",
+        "session_id",
+        "started_at",
+        "status",
+        "termination_reason",
+        "trigger_type",
+    ])
 
 
 def test_session_detail_can_include_message_and_paginate_runs() -> None:
@@ -499,7 +518,7 @@ def test_session_turns_return_completed_runs_with_raw_input_and_output() -> None
     assert page_2_payload["turns"][0]["output_text"] == "answer-1"
 
 
-def test_run_trace_projects_tool_call_and_response_with_trimming() -> None:
+def test_run_trace_extracts_tool_call_and_response_with_trimming() -> None:
     _create_schema()
 
     with TestClient(create_app()) as client:

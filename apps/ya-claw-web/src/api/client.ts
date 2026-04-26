@@ -100,7 +100,6 @@ export class ClawApiClient {
 
   createSession(payload: {
     profile_name?: string | null
-    project_id?: string | null
     input_parts: InputPart[]
     metadata?: Record<string, unknown>
   }) {

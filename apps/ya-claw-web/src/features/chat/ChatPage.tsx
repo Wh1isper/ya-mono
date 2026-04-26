@@ -102,7 +102,6 @@ export function ChatPage() {
       const haystack = [
         session.id,
         session.profile_name ?? '',
-        session.project_id ?? '',
         session.latest_run?.input_preview ?? '',
         session.status,
       ]
@@ -694,7 +693,6 @@ function Composer({
 }) {
   const [text, setText] = useState('')
   const [profileName, setProfileName] = useState(selectedProfile ?? '')
-  const [projectId, setProjectId] = useState('')
   const createSession = useCreateSessionMutation()
   const createRun = useCreateSessionRunMutation(selectedSessionId)
   const profiles = useProfilesQuery()
@@ -719,7 +717,6 @@ function Composer({
       } else {
         const response = await createSession.mutateAsync({
           profile_name: profileName.trim() || null,
-          project_id: projectId.trim() || null,
           input_parts: inputParts,
         })
         selectSession(response.session.id)
@@ -768,13 +765,6 @@ function Composer({
                   </option>
                 ))}
               </select>
-              <input
-                className="max-w-52 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 outline-none ring-blue-600 focus:ring-2"
-                value={projectId}
-                onChange={(event) => setProjectId(event.target.value)}
-                placeholder="project id"
-                disabled={Boolean(selectedSessionId) || sessionLocked}
-              />
             </div>
             <button
               type="button"

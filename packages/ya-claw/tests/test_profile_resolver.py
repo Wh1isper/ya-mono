@@ -31,10 +31,21 @@ profiles:
     model: gateway@openai-responses:gpt-5.4
     model_settings_preset: openai_responses_high
     model_config_preset: gpt5_270k
+    system_prompt: |
+      You are the profile-scoped execution agent.
     builtin_toolsets: [filesystem, shell]
     need_user_approve_mcps: [context7]
     enabled_mcps: [context7, github]
     disabled_mcps: [github]
+    mcp_servers:
+      context7:
+        transport: streamable_http
+        url: https://mcp.context7.com/mcp
+        description: Library docs
+        required: false
+      github:
+        transport: streamable_http
+        url: https://mcp.github.example/mcp
     unified_subagents: true
     workspace_backend_hint: docker
     subagents:
@@ -55,7 +66,7 @@ profiles:
     settings = ClawSettings(
         api_token="test-token",  # noqa: S106
         data_dir=tmp_path / "runtime-data",
-        workspace_root=tmp_path / "workspace",
+        workspace_dir=tmp_path / "workspace",
         profile_seed_file=seed_file,
     )
     session_factory = create_session_factory(db_engine)
@@ -66,10 +77,31 @@ profiles:
 
     assert seeded_names == ["default"]
     assert resolved_profile.model == "gateway@openai-responses:gpt-5.4"
+    assert resolved_profile.system_prompt == "You are the profile-scoped execution agent."
     assert resolved_profile.builtin_toolsets == ["filesystem", "shell"]
     assert resolved_profile.need_user_approve_mcps == ["context7"]
     assert resolved_profile.enabled_mcps == ["context7", "github"]
     assert resolved_profile.disabled_mcps == ["github"]
+    assert resolved_profile.mcp_servers == {
+        "context7": {
+            "transport": "streamable_http",
+            "args": [],
+            "env": {},
+            "url": "https://mcp.context7.com/mcp",
+            "headers": {},
+            "description": "Library docs",
+            "required": False,
+        },
+        "github": {
+            "transport": "streamable_http",
+            "args": [],
+            "env": {},
+            "url": "https://mcp.github.example/mcp",
+            "headers": {},
+            "description": "",
+            "required": True,
+        },
+    }
     assert resolved_profile.unified_subagents is True
     assert resolved_profile.workspace_backend_hint == "docker"
     assert [config.name for config in resolved_profile.subagent_configs] == ["explorer", "searcher"]
@@ -86,8 +118,39 @@ profiles:
         assert record.need_user_approve_mcps == ["context7"]
         assert record.enabled_mcps == ["context7", "github"]
         assert record.disabled_mcps == ["github"]
+        assert record.mcp_servers["context7"]["transport"] == "streamable_http"
         assert record.unified_subagents is True
         assert [item["name"] for item in record.subagents] == ["explorer", "searcher"]
+
+
+async def test_profile_resolver_rejects_stdio_mcp_from_yaml(
+    tmp_path: Path,
+    db_engine: AsyncEngine,
+) -> None:
+    seed_file = tmp_path / "profiles.yaml"
+    seed_file.write_text(
+        """
+profiles:
+  - name: invalid
+    model: gateway@openai-responses:gpt-5.4
+    mcp_servers:
+      github:
+        transport: stdio
+        command: npx
+""".strip(),
+        encoding="utf-8",
+    )
+    settings = ClawSettings(
+        api_token="test-token",  # noqa: S106
+        data_dir=tmp_path / "runtime-data",
+        workspace_dir=tmp_path / "workspace",
+        profile_seed_file=seed_file,
+    )
+    session_factory = create_session_factory(db_engine)
+    resolver = ProfileResolver(settings=settings, session_factory=session_factory)
+
+    with pytest.raises(ValueError, match="unsupported transport"):
+        await resolver.seed_profiles()
 
 
 async def test_profile_resolver_accepts_legacy_toolsets_alias_from_yaml(
@@ -107,7 +170,7 @@ profiles:
     settings = ClawSettings(
         api_token="test-token",  # noqa: S106
         data_dir=tmp_path / "runtime-data",
-        workspace_root=tmp_path / "workspace",
+        workspace_dir=tmp_path / "workspace",
         profile_seed_file=seed_file,
     )
     session_factory = create_session_factory(db_engine)
@@ -136,7 +199,7 @@ profiles:
     settings = ClawSettings(
         api_token="test-token",  # noqa: S106
         data_dir=tmp_path / "runtime-data",
-        workspace_root=tmp_path / "workspace",
+        workspace_dir=tmp_path / "workspace",
         profile_seed_file=seed_file,
     )
     session_factory = create_session_factory(db_engine)
@@ -155,7 +218,7 @@ async def test_bootstrap_profile_has_no_default_subagents(
     settings = ClawSettings(
         api_token="test-token",  # noqa: S106
         data_dir=tmp_path / "runtime-data",
-        workspace_root=tmp_path / "workspace",
+        workspace_dir=tmp_path / "workspace",
         execution_model="test",
     )
     session_factory = create_session_factory(db_engine)
@@ -163,7 +226,9 @@ async def test_bootstrap_profile_has_no_default_subagents(
 
     resolved_profile = await resolver.resolve(None)
 
+    assert resolved_profile.system_prompt is None
     assert resolved_profile.builtin_toolsets == ["core"]
+    assert resolved_profile.mcp_servers == {}
     assert resolved_profile.enabled_mcps == []
     assert resolved_profile.disabled_mcps == []
     assert resolved_profile.workspace_backend_hint is None

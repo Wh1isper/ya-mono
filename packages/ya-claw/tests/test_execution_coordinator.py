@@ -18,15 +18,14 @@ from ya_claw.workspace import WorkspaceBinding, WorkspaceProvider
 
 
 class StubWorkspaceProvider(WorkspaceProvider):
-    def __init__(self, workspace_root: Path) -> None:
-        self._workspace_root = workspace_root
+    def __init__(self, workspace_dir: Path) -> None:
+        self._workspace_dir = workspace_dir
 
-    def resolve(self, project_id: str, metadata: dict[str, object] | None = None) -> WorkspaceBinding:
-        host_path = self._workspace_root / project_id
+    def resolve(self, metadata: dict[str, object] | None = None) -> WorkspaceBinding:
+        host_path = self._workspace_dir
         host_path.mkdir(parents=True, exist_ok=True)
-        virtual_path = Path("/workspace") / project_id
+        virtual_path = Path("/workspace")
         return WorkspaceBinding(
-            project_id=project_id,
             host_path=host_path,
             virtual_path=virtual_path,
             cwd=virtual_path,
@@ -78,7 +77,6 @@ class StubRunCoordinator(RunCoordinator):
         )
         self.failure = failure
         self.restore_run_ids: list[str | None] = []
-        self.project_ids: list[str] = []
 
     async def _execute_agent_run(
         self,
@@ -91,13 +89,11 @@ class StubRunCoordinator(RunCoordinator):
         input_parts,
         profile,
         profile_name: str | None,
-        project_id: str | None,
         trigger_type: str,
         run_metadata: dict[str, Any],
         buffers: ExecutionBuffers,
     ) -> None:
         self.restore_run_ids.append(restore_point.run_id if restore_point is not None else None)
-        self.project_ids.append(workspace_binding.project_id)
         await self._runtime_state.append_run_event(
             run_id,
             {
@@ -145,8 +141,11 @@ class StubRunCoordinator(RunCoordinator):
             "message_history": list(buffers.latest_message_payload["message_history"]),
             "message_count": 1,
             "profile_name": profile_name,
-            "project_id": project_id,
-            "version": 3,
+            "workspace": {
+                "virtual_path": str(workspace_binding.virtual_path),
+                "cwd": str(workspace_binding.cwd),
+            },
+            "version": 4,
         }
         buffers.output_text = f"completed {run_id}"
         buffers.output_summary = f"completed {run_id}"
@@ -166,7 +165,6 @@ class InterruptingFailureRunCoordinator(StubRunCoordinator):
         input_parts,
         profile,
         profile_name: str | None,
-        project_id: str | None,
         trigger_type: str,
         run_metadata: dict[str, Any],
         buffers: ExecutionBuffers,
@@ -180,7 +178,6 @@ class InterruptingFailureRunCoordinator(StubRunCoordinator):
             input_parts=input_parts,
             profile=profile,
             profile_name=profile_name,
-            project_id=project_id,
             trigger_type=trigger_type,
             run_metadata=run_metadata,
             buffers=buffers,
@@ -217,13 +214,13 @@ async def db_session(db_engine: AsyncEngine) -> AsyncSession:
 @pytest.fixture
 def settings(tmp_path: Path) -> ClawSettings:
     data_dir = tmp_path / "runtime-data"
-    workspace_root = tmp_path / "workspace"
+    workspace_dir = tmp_path / "workspace"
     data_dir.mkdir(parents=True, exist_ok=True)
-    workspace_root.mkdir(parents=True, exist_ok=True)
+    workspace_dir.mkdir(parents=True, exist_ok=True)
     return ClawSettings(
         api_token="test-token",  # noqa: S106
         data_dir=data_dir,
-        workspace_root=workspace_root,
+        workspace_dir=workspace_dir,
         execution_model="stub-model",
     )
 
@@ -239,7 +236,7 @@ async def test_execution_supervisor_claims_queued_run(
     settings: ClawSettings,
     runtime_state: InMemoryRuntimeState,
 ) -> None:
-    session_record = SessionRecord(id="session-1", profile_name="general", project_id="repo-a", session_metadata={})
+    session_record = SessionRecord(id="session-1", profile_name="general", session_metadata={})
     run_record = RunRecord(
         id="run-1",
         session_id="session-1",
@@ -248,7 +245,6 @@ async def test_execution_supervisor_claims_queued_run(
         status="queued",
         trigger_type="api",
         profile_name="general",
-        project_id="repo-a",
         input_parts=[{"type": "text", "text": "hello"}],
         run_metadata={},
     )
@@ -261,7 +257,7 @@ async def test_execution_supervisor_claims_queued_run(
         settings=settings,
         session_factory=create_session_factory(db_engine),
         runtime_state=runtime_state,
-        workspace_provider=StubWorkspaceProvider(settings.resolved_workspace_root),
+        workspace_provider=StubWorkspaceProvider(settings.resolved_workspace_dir),
         environment_factory=StubEnvironmentFactory(),
         profile_resolver=StubProfileResolver(),
         runtime_builder=StubRuntimeBuilder(),
@@ -291,7 +287,7 @@ async def test_run_coordinator_completes_run_and_commits_artifacts(
     settings: ClawSettings,
     runtime_state: InMemoryRuntimeState,
 ) -> None:
-    session_record = SessionRecord(id="session-1", profile_name="general", project_id="repo-a", session_metadata={})
+    session_record = SessionRecord(id="session-1", profile_name="general", session_metadata={})
     run_record = RunRecord(
         id="run-1",
         session_id="session-1",
@@ -300,7 +296,6 @@ async def test_run_coordinator_completes_run_and_commits_artifacts(
         status="queued",
         trigger_type="api",
         profile_name="general",
-        project_id="repo-a",
         input_parts=[{"type": "text", "text": "hello"}],
         run_metadata={},
     )
@@ -314,7 +309,7 @@ async def test_run_coordinator_completes_run_and_commits_artifacts(
         settings=settings,
         session_factory=create_session_factory(db_engine),
         runtime_state=runtime_state,
-        workspace_provider=StubWorkspaceProvider(settings.resolved_workspace_root),
+        workspace_provider=StubWorkspaceProvider(settings.resolved_workspace_dir),
     )
 
     await coordinator.execute("run-1")
@@ -355,7 +350,6 @@ async def test_run_coordinator_loads_restore_point_from_previous_run(
     session_record = SessionRecord(
         id="session-1",
         profile_name="general",
-        project_id="repo-a",
         session_metadata={},
         head_run_id="run-1",
         head_success_run_id="run-1",
@@ -368,7 +362,6 @@ async def test_run_coordinator_loads_restore_point_from_previous_run(
         status="completed",
         trigger_type="api",
         profile_name="general",
-        project_id="repo-a",
         input_parts=[{"type": "text", "text": "base"}],
         run_metadata={},
     )
@@ -380,7 +373,6 @@ async def test_run_coordinator_loads_restore_point_from_previous_run(
         status="queued",
         trigger_type="api",
         profile_name="general",
-        project_id="repo-a",
         input_parts=[{"type": "text", "text": "rerun"}],
         run_metadata={},
     )
@@ -419,7 +411,7 @@ async def test_run_coordinator_loads_restore_point_from_previous_run(
         settings=settings,
         session_factory=create_session_factory(db_engine),
         runtime_state=runtime_state,
-        workspace_provider=StubWorkspaceProvider(settings.resolved_workspace_root),
+        workspace_provider=StubWorkspaceProvider(settings.resolved_workspace_dir),
     )
 
     await coordinator.execute("run-2")
@@ -437,7 +429,7 @@ async def test_run_coordinator_marks_run_failed_on_exception(
     settings: ClawSettings,
     runtime_state: InMemoryRuntimeState,
 ) -> None:
-    session_record = SessionRecord(id="session-1", profile_name="general", project_id="repo-a", session_metadata={})
+    session_record = SessionRecord(id="session-1", profile_name="general", session_metadata={})
     run_record = RunRecord(
         id="run-1",
         session_id="session-1",
@@ -446,7 +438,6 @@ async def test_run_coordinator_marks_run_failed_on_exception(
         status="queued",
         trigger_type="api",
         profile_name="general",
-        project_id="repo-a",
         input_parts=[{"type": "text", "text": "hello"}],
         run_metadata={},
     )
@@ -460,7 +451,7 @@ async def test_run_coordinator_marks_run_failed_on_exception(
         settings=settings,
         session_factory=create_session_factory(db_engine),
         runtime_state=runtime_state,
-        workspace_provider=StubWorkspaceProvider(settings.resolved_workspace_root),
+        workspace_provider=StubWorkspaceProvider(settings.resolved_workspace_dir),
         failure=RuntimeError("boom"),
     )
 
@@ -487,7 +478,7 @@ async def test_run_coordinator_preserves_interrupt_when_failure_races_with_stop(
     settings: ClawSettings,
     runtime_state: InMemoryRuntimeState,
 ) -> None:
-    session_record = SessionRecord(id="session-1", profile_name="general", project_id="repo-a", session_metadata={})
+    session_record = SessionRecord(id="session-1", profile_name="general", session_metadata={})
     run_record = RunRecord(
         id="run-1",
         session_id="session-1",
@@ -496,7 +487,6 @@ async def test_run_coordinator_preserves_interrupt_when_failure_races_with_stop(
         status="queued",
         trigger_type="api",
         profile_name="general",
-        project_id="repo-a",
         input_parts=[{"type": "text", "text": "hello"}],
         run_metadata={},
     )
@@ -510,7 +500,7 @@ async def test_run_coordinator_preserves_interrupt_when_failure_races_with_stop(
         settings=settings,
         session_factory=create_session_factory(db_engine),
         runtime_state=runtime_state,
-        workspace_provider=StubWorkspaceProvider(settings.resolved_workspace_root),
+        workspace_provider=StubWorkspaceProvider(settings.resolved_workspace_dir),
     )
 
     await coordinator.execute("run-1")

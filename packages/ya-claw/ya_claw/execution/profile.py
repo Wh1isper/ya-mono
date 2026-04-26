@@ -12,6 +12,7 @@ from ya_agent_sdk.presets import resolve_model_cfg, resolve_model_settings
 from ya_agent_sdk.subagents.config import SubagentConfig
 
 from ya_claw.config import ClawSettings
+from ya_claw.mcp import normalize_profile_mcp_servers
 from ya_claw.orm.tables import ProfileRecord
 
 _DEFAULT_BUILTIN_TOOLSETS = ["core"]
@@ -44,6 +45,7 @@ class ResolvedProfile:
     need_user_approve_mcps: list[str] = field(default_factory=list)
     enabled_mcps: list[str] = field(default_factory=list)
     disabled_mcps: list[str] = field(default_factory=list)
+    mcp_servers: dict[str, Any] = field(default_factory=dict)
     workspace_backend_hint: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -122,6 +124,7 @@ class ProfileResolver:
             need_user_approve_mcps=list(record.need_user_approve_mcps or []),
             enabled_mcps=list(record.enabled_mcps or []),
             disabled_mcps=list(record.disabled_mcps or []),
+            mcp_servers=normalize_profile_mcp_servers(record.mcp_servers),
             workspace_backend_hint=record.workspace_backend_hint,
             metadata={
                 "source_type": record.source_type,
@@ -140,7 +143,7 @@ class ProfileResolver:
             model=model,
             model_settings=resolve_model_settings(self._settings.execution_model_settings_preset),
             model_config=resolve_model_cfg(self._settings.execution_model_config_preset),
-            system_prompt=self._settings.execution_system_prompt,
+            system_prompt=None,
             builtin_toolsets=list(_DEFAULT_BUILTIN_TOOLSETS),
             subagent_configs=[],
             include_builtin_subagents=False,
@@ -218,6 +221,7 @@ def _apply_seed_row(record: ProfileRecord, row: dict[str, Any], *, source_checks
     record.need_user_approve_mcps = _normalize_optional_str_list(row.get("need_user_approve_mcps")) or []
     record.enabled_mcps = _normalize_optional_str_list(row.get("enabled_mcps")) or []
     record.disabled_mcps = _normalize_optional_str_list(row.get("disabled_mcps")) or []
+    record.mcp_servers = normalize_profile_mcp_servers(_normalize_optional_dict(row.get("mcp_servers")))
     record.workspace_backend_hint = _normalize_optional_str(row.get("workspace_backend_hint"))
     record.enabled = bool(row.get("enabled", True))
     record.source_type = _normalize_optional_str(row.get("source_type")) or "seed"

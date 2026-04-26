@@ -19,7 +19,7 @@ def clear_claw_settings(monkeypatch, tmp_path: Path) -> None:
         "YA_CLAW_DATABASE_URL",
         "YA_CLAW_DATA_DIR",
         "YA_CLAW_WEB_DIST_DIR",
-        "YA_CLAW_WORKSPACE_ROOT",
+        "YA_CLAW_WORKSPACE_DIR",
         "YA_CLAW_PROFILE_SEED_FILE",
         "YA_CLAW_AUTO_SEED_PROFILES",
         "YA_CLAW_EXECUTION_MODEL",
@@ -28,7 +28,7 @@ def clear_claw_settings(monkeypatch, tmp_path: Path) -> None:
 
     monkeypatch.setenv("YA_CLAW_API_TOKEN", "test-token")
     monkeypatch.setenv("YA_CLAW_DATA_DIR", str(tmp_path / "runtime-data"))
-    monkeypatch.setenv("YA_CLAW_WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    monkeypatch.setenv("YA_CLAW_WORKSPACE_DIR", str(tmp_path / "workspace"))
     monkeypatch.setenv("YA_CLAW_PROFILE_SEED_FILE", str(tmp_path / "profiles.yaml"))
     monkeypatch.setenv("YA_CLAW_AUTO_SEED_PROFILES", "false")
 
@@ -95,7 +95,6 @@ def test_console_notifications_capture_session_run_and_profile_events() -> None:
             headers=_auth_headers(),
             json={
                 "profile_name": "general",
-                "project_id": "repo-a",
                 "input_parts": [{"type": "text", "text": "hello"}],
             },
         )

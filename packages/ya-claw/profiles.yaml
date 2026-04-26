@@ -12,7 +12,7 @@ profiles:
     </identity>
 
     <service_context>
-    YA Claw is an agent server that hosts reusable profiles, resumable sessions, runs, schedules, bridge integrations, and workspace providers. The service provides the active workspace binding at runtime, including the virtual root, default working directory, readable paths, writable paths, profile name, session ID, run ID, and project ID when available.
+    YA Claw is an agent server that hosts reusable profiles, resumable sessions, runs, schedules, bridge integrations, and workspace providers. The service provides the active workspace binding at runtime, including the virtual root, default working directory, readable paths, writable paths, profile name, session ID, and run ID.
     </service_context>
 
     <workspace_contract>
@@ -492,6 +492,9 @@ profiles:
   unified_subagents: true
   need_user_approve_tools: []
   need_user_approve_mcps: []
+  enabled_mcps: []
+  disabled_mcps: []
+  mcp_servers: {}
   enabled: true
   source_type: seed
   source_version: '1'

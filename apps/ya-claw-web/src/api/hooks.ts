@@ -117,7 +117,6 @@ export function useCreateSessionMutation() {
   return useMutation({
     mutationFn: (payload: {
       profile_name?: string | null
-      project_id?: string | null
       input_parts: InputPart[]
     }) => api.createSession(payload),
     onSuccess: async () => {

@@ -16,8 +16,8 @@ from ya_claw.bridge.models import BridgeAdapterType, BridgeDispatchMode
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_DATABASE_FILENAME = "ya_claw.sqlite3"
 _DEFAULT_DATA_DIR = Path("~/.ya-claw/data")
-_DEFAULT_WORKSPACE_ROOT = Path("~/.ya-claw/workspace")
 _DEFAULT_RUN_STORE_DIRNAME = "run-store"
+_DEFAULT_WORKSPACE_DIRNAME = "workspace"
 _DEFAULT_WORKSPACE_DOCKER_IMAGE = "ghcr.io/wh1isper/ya-claw-workspace:latest"
 
 
@@ -64,7 +64,7 @@ class ClawSettings(BaseSettings):
     web_dist_dir: Path | None = None
     api_token: SecretStr | None = None
     data_dir: Path = Field(default_factory=lambda: _DEFAULT_DATA_DIR)
-    workspace_root: Path = Field(default_factory=lambda: _DEFAULT_WORKSPACE_ROOT)
+    workspace_dir: Path | None = None
     allow_origins: list[str] = Field(default_factory=lambda: ["http://127.0.0.1:5173", "http://localhost:5173"])
 
     database_url: str | None = None
@@ -77,13 +77,13 @@ class ClawSettings(BaseSettings):
     workspace_provider_docker_image: str = _DEFAULT_WORKSPACE_DOCKER_IMAGE
     workspace_provider_docker_uid: int | None = None
     workspace_provider_docker_gid: int | None = None
+    workspace_provider_docker_container_cache_dir: Path | None = None
     bridge_dispatch_mode: BridgeDispatchMode = BridgeDispatchMode.EMBEDDED
     bridge_enabled_adapters: str = ""
     bridge_lark_enabled: bool = False
     bridge_lark_app_id: str | None = None
     bridge_lark_app_secret: SecretStr | None = None
     bridge_lark_default_profile: str | None = None
-    bridge_lark_project_id_template: str = "lark/{tenant_key}/{chat_id}"
     bridge_lark_event_types: str = (
         "im.chat.member.bot.added_v1,im.chat.member.user.added_v1,im.message.receive_v1,drive.notice.comment_add_v1"
     )
@@ -92,13 +92,9 @@ class ClawSettings(BaseSettings):
     default_profile: str = "default"
     profile_seed_file: Path | None = None
     auto_seed_profiles: bool = False
-    mcp_config_file: Path | None = None
-    project_mcp_config_path: str = ".ya-claw/mcp.json"
     execution_model: str | None = None
     execution_model_settings_preset: str | None = None
     execution_model_config_preset: str | None = None
-    execution_system_prompt: str | None = None
-    execution_context_window: int = 200_000
 
     auto_migrate: bool = True
 
@@ -111,30 +107,16 @@ class ClawSettings(BaseSettings):
         return self.data_dir.expanduser()
 
     @property
-    def resolved_workspace_root(self) -> Path:
-        return self.workspace_root.expanduser()
+    def resolved_workspace_dir(self) -> Path:
+        if self.workspace_dir is not None:
+            return self.workspace_dir.expanduser()
+        return self.runtime_data_dir / _DEFAULT_WORKSPACE_DIRNAME
 
     @property
     def resolved_profile_seed_file(self) -> Path | None:
         if self.profile_seed_file is None:
             return None
         return self.profile_seed_file.expanduser()
-
-    @property
-    def resolved_mcp_config_file(self) -> Path:
-        if self.mcp_config_file is not None:
-            return self.mcp_config_file.expanduser()
-        return self.runtime_root / "mcp.json"
-
-    @property
-    def resolved_project_mcp_config_path(self) -> Path | None:
-        normalized_value = self.project_mcp_config_path.strip()
-        if normalized_value == "":
-            return None
-        resolved_path = Path(normalized_value)
-        if resolved_path.is_absolute():
-            raise ValueError("YA_CLAW_PROJECT_MCP_CONFIG_PATH must be a relative path inside each workspace.")
-        return resolved_path
 
     @property
     def run_store_dir(self) -> Path:
@@ -151,6 +133,12 @@ class ClawSettings(BaseSettings):
         if isinstance(self.workspace_provider_docker_gid, int):
             return self.workspace_provider_docker_gid
         return os.getgid()
+
+    @property
+    def resolved_workspace_provider_docker_container_cache_dir(self) -> Path:
+        if self.workspace_provider_docker_container_cache_dir is not None:
+            return self.workspace_provider_docker_container_cache_dir.expanduser()
+        return self.runtime_data_dir / "docker-workspace-containers"
 
     @property
     def resolved_bridge_enabled_adapters(self) -> set[BridgeAdapterType]:
@@ -216,7 +204,7 @@ class ClawSettings(BaseSettings):
     def ensure_runtime_directories(self) -> None:
         self.runtime_data_dir.mkdir(parents=True, exist_ok=True)
         self.run_store_dir.mkdir(parents=True, exist_ok=True)
-        self.resolved_workspace_root.mkdir(parents=True, exist_ok=True)
+        self.resolved_workspace_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache(maxsize=1)

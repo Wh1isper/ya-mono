@@ -68,11 +68,6 @@ export type InputPart =
       metadata?: Record<string, unknown> | null
     }
 
-export type ProjectReference = {
-  project_id: string
-  description?: string | null
-}
-
 export type RunStatus =
   | 'queued'
   | 'running'
@@ -110,8 +105,6 @@ export type RunSummary = {
   status: RunStatus
   trigger_type: string
   profile_name?: string | null
-  project_id?: string | null
-  projects: ProjectReference[]
   input_preview?: string | null
   input_parts?: InputPart[] | null
   output_text?: string | null
@@ -135,8 +128,6 @@ export type SessionSummary = {
   id: string
   parent_session_id?: string | null
   profile_name?: string | null
-  project_id?: string | null
-  projects: ProjectReference[]
   metadata: Record<string, unknown>
   created_at: string
   updated_at: string
@@ -169,8 +160,6 @@ export type SessionCreateResponse = {
 export type SessionRunCreateRequest = {
   restore_from_run_id?: string | null
   reset_state?: boolean
-  reset_sandbox?: boolean
-  projects?: ProjectReference[]
   input_parts: InputPart[]
   metadata?: Record<string, unknown>
 }
@@ -214,6 +203,14 @@ export type ProfileSubagent = {
   model_config_override?: Record<string, unknown> | null
 }
 
+export type ProfileMCPServer = {
+  transport: 'streamable_http'
+  url: string
+  headers: Record<string, string>
+  description: string
+  required: boolean
+}
+
 export type ProfileSummary = {
   name: string
   model: string
@@ -239,6 +236,7 @@ export type ProfileDetail = ProfileSummary & {
   need_user_approve_mcps: string[]
   enabled_mcps: string[]
   disabled_mcps: string[]
+  mcp_servers: Record<string, ProfileMCPServer>
   source_checksum?: string | null
   created_at: string
 }
@@ -258,6 +256,7 @@ export type ProfileUpsertRequest = {
   need_user_approve_mcps: string[]
   enabled_mcps: string[]
   disabled_mcps: string[]
+  mcp_servers: Record<string, ProfileMCPServer>
   workspace_backend_hint?: string | null
   enabled: boolean
   source_type?: string | null
