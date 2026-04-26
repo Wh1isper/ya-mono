@@ -21,10 +21,16 @@ from ya_claw.runtime_state import InMemoryRuntimeState
 
 
 class RecordingSupervisor:
-    def __init__(self) -> None:
+    def __init__(self, *, accepting_submissions: bool = True) -> None:
         self.submitted_run_ids: list[str] = []
+        self.accepting_submissions = accepting_submissions
+
+    def get_background_task(self, run_id: str) -> None:
+        return None
 
     def submit_run(self, run_id: str) -> bool:
+        if not self.accepting_submissions:
+            return False
         self.submitted_run_ids.append(run_id)
         return True
 
@@ -169,6 +175,40 @@ async def test_schedule_controller_dispatch_due_scans_due_records_and_submits_ru
     assert record.next_fire_at.replace(tzinfo=UTC) > now
 
 
+async def test_schedule_fire_stays_pending_when_dispatch_skips(
+    db_session: AsyncSession,
+    settings: ClawSettings,
+) -> None:
+    controller = ScheduleController()
+    runtime_state = InMemoryRuntimeState()
+    supervisor = RecordingSupervisor(accepting_submissions=False)
+    dispatcher = RunDispatcher(supervisor)  # type: ignore[arg-type]
+    now = datetime(2026, 4, 26, 5, 30, tzinfo=UTC)
+
+    schedule = await controller.create(
+        db_session,
+        ScheduleCreateRequest(
+            name="Shutdown skip schedule",
+            prompt="Report timer status.",
+            cron="* * * * *",
+            timezone="UTC",
+            profile_name="default",
+        ),
+    )
+    record = await db_session.get(ScheduleRecord, schedule.id)
+    assert isinstance(record, ScheduleRecord)
+    record.next_fire_at = now - timedelta(minutes=1)
+    await db_session.commit()
+
+    fired = await controller.dispatch_due(db_session, settings, runtime_state, dispatcher, now=now)
+
+    assert len(fired) == 1
+    assert fired[0].status == "pending"
+    assert fired[0].run_id is not None
+    assert fired[0].error_message == "Dispatch skipped: supervisor_shutting_down"
+    assert supervisor.submitted_run_ids == []
+
+
 async def test_heartbeat_dispatch_due_handles_sqlite_naive_datetimes(
     db_session: AsyncSession,
     settings: ClawSettings,
@@ -202,6 +242,25 @@ async def test_heartbeat_dispatch_due_handles_sqlite_naive_datetimes(
     assert fire is not None
     assert fire.status == "submitted"
     assert fire.run_id in supervisor.submitted_run_ids
+
+
+async def test_heartbeat_fire_stays_pending_when_dispatch_skips(
+    db_session: AsyncSession,
+    settings: ClawSettings,
+) -> None:
+    settings.heartbeat_enabled = True
+    settings.heartbeat_interval_seconds = 1
+    controller = HeartbeatController()
+    runtime_state = InMemoryRuntimeState()
+    supervisor = RecordingSupervisor(accepting_submissions=False)
+    dispatcher = RunDispatcher(supervisor)  # type: ignore[arg-type]
+
+    fire = await controller.trigger(db_session, settings, runtime_state, dispatcher)
+
+    assert fire.status == "pending"
+    assert fire.run_id is not None
+    assert fire.error_message == "Dispatch skipped: supervisor_shutting_down"
+    assert supervisor.submitted_run_ids == []
 
 
 async def test_schedule_dispatch_due_handles_sqlite_naive_datetimes(
@@ -417,8 +476,9 @@ def test_timer_api_routes_expose_config_create_trigger_and_fire_history() -> Non
             headers=_auth_headers(),
         )
         assert manual_fire.status_code == 201
-        assert manual_fire.json()["status"] == "submitted"
+        assert manual_fire.json()["status"] == "pending"
         assert manual_fire.json()["run_id"] is not None
+        assert manual_fire.json()["error_message"] == "Dispatch skipped: supervisor_unavailable"
 
         schedule_fires = client.get(f"/api/v1/schedules/{schedule_id}/fires", headers=_auth_headers())
         assert schedule_fires.status_code == 200
@@ -427,8 +487,9 @@ def test_timer_api_routes_expose_config_create_trigger_and_fire_history() -> Non
 
         heartbeat_fire = client.post("/api/v1/heartbeat:trigger", headers=_auth_headers())
         assert heartbeat_fire.status_code == 201
-        assert heartbeat_fire.json()["status"] == "submitted"
+        assert heartbeat_fire.json()["status"] == "pending"
         assert heartbeat_fire.json()["run_id"] is not None
+        assert heartbeat_fire.json()["error_message"] == "Dispatch skipped: supervisor_unavailable"
 
         heartbeat_fires = client.get("/api/v1/heartbeat/fires", headers=_auth_headers())
         assert heartbeat_fires.status_code == 200

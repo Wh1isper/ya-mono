@@ -106,6 +106,42 @@ def test_serve_skips_auto_migrate_when_disabled(monkeypatch, tmp_path) -> None:
                 "port": 9042,
                 "reload": False,
                 "log_level": "info",
+                "timeout_graceful_shutdown": None,
+            },
+        )
+    ]
+
+
+def test_serve_passes_shutdown_timeout_to_uvicorn(monkeypatch, tmp_path) -> None:
+    calls: list[tuple[str, object]] = []
+    settings = ClawSettings(
+        host="127.0.0.1",
+        port=9042,
+        reload=False,
+        auto_migrate=False,
+        api_token=TEST_API_TOKEN,
+        database_url=None,
+        data_dir=tmp_path,
+        workspace_dir=tmp_path / "workspace",
+        shutdown_timeout_seconds=600,
+    )
+
+    monkeypatch.setattr(claw_cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(claw_cli.uvicorn, "run", lambda *args, **kwargs: calls.append(("serve", kwargs)))
+
+    result = runner.invoke(claw_cli.cli, ["serve"])
+
+    assert result.exit_code == 0
+    assert calls == [
+        (
+            "serve",
+            {
+                "factory": True,
+                "host": "127.0.0.1",
+                "port": 9042,
+                "reload": False,
+                "log_level": "info",
+                "timeout_graceful_shutdown": 600,
             },
         )
     ]

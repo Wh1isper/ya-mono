@@ -62,6 +62,7 @@ flowchart TB
 | `YA_CLAW_HEARTBEAT_PROFILE`                            | heartbeat profile name                                                      |
 | `YA_CLAW_HEARTBEAT_PROMPT`                             | heartbeat input prompt                                                      |
 | `YA_CLAW_HEARTBEAT_ON_ACTIVE`                          | heartbeat active-run policy                                                 |
+| `YA_CLAW_SHUTDOWN_TIMEOUT_SECONDS`                     | optional Uvicorn graceful shutdown timeout; unset waits for active runs     |
 
 LLM provider keys and tool API keys stay in environment variables and follow `ya-agent-sdk` conventions.
 

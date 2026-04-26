@@ -99,12 +99,13 @@ class ClawCliApplication:
         resolved_migrate = settings.auto_migrate if migrate is None else migrate
 
         logger.info(
-            "Resolved serve options host={} port={} reload={} migrate={} log_level={}",
+            "Resolved serve options host={} port={} reload={} migrate={} log_level={} shutdown_timeout_seconds={}",
             resolved_host,
             resolved_port,
             resolved_reload,
             resolved_migrate,
             settings.log_level,
+            settings.shutdown_timeout_seconds,
         )
 
         if resolved_migrate:
@@ -120,6 +121,7 @@ class ClawCliApplication:
             port=resolved_port,
             reload=resolved_reload,
             log_level=settings.log_level.lower(),
+            timeout_graceful_shutdown=settings.shutdown_timeout_seconds,
         )
 
 

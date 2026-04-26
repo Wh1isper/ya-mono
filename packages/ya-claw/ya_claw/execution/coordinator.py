@@ -73,8 +73,19 @@ class ExecutionSupervisor:
         self._runtime_builder = runtime_builder
         self._notification_hub = notification_hub
         self._run_store = RunStore(settings)
+        self._accepting_submissions = True
+
+    @property
+    def accepting_submissions(self) -> bool:
+        return self._accepting_submissions
+
+    def get_background_task(self, run_id: str) -> asyncio.Task[None] | None:
+        return self._runtime_state.get_background_task(run_id)
 
     def submit_run(self, run_id: str) -> bool:
+        if not self._accepting_submissions:
+            logger.info("Run submission skipped run_id={} reason=supervisor_shutting_down", run_id)
+            return False
         if self._runtime_state.get_background_task(run_id) is not None:
             logger.debug("Run submission skipped run_id={} reason=background_task_exists", run_id)
             return False
@@ -85,6 +96,22 @@ class ExecutionSupervisor:
 
     def schedule_run(self, run_id: str) -> bool:
         return self.submit_run(run_id)
+
+    async def shutdown(self) -> None:
+        self._accepting_submissions = False
+        while True:
+            active_tasks = {
+                run_id: task for run_id, task in self._runtime_state.background_tasks.items() if not task.done()
+            }
+            if not active_tasks:
+                logger.info("Execution supervisor stopped")
+                return
+            logger.info(
+                "Waiting for active run tasks before shutdown count={} run_ids={}",
+                len(active_tasks),
+                sorted(active_tasks),
+            )
+            await asyncio.gather(*active_tasks.values(), return_exceptions=True)
 
     async def recover_queued_runs(self) -> list[str]:
         async with self._session_factory() as db_session:

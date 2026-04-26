@@ -8,7 +8,7 @@ from typing import Literal
 from uuid import uuid4
 
 from dotenv import dotenv_values, load_dotenv
-from pydantic import Field, SecretStr
+from pydantic import Field, PositiveInt, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ya_claw.bridge.models import BridgeAdapterType, BridgeDispatchMode
@@ -141,6 +141,7 @@ class ClawSettings(BaseSettings):
     heartbeat_profile: str | None = None
     heartbeat_prompt: str = "Run heartbeat according to HEARTBEAT.md."
     heartbeat_on_active: Literal["skip", "queue"] = "skip"
+    shutdown_timeout_seconds: PositiveInt | None = None
 
     auto_migrate: bool = True
 
