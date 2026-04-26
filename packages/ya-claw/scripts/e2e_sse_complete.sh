@@ -13,7 +13,6 @@ values = {
     'YA_CLAW_PUBLIC_BASE_URL': settings.public_base_url,
     'YA_CLAW_API_TOKEN': settings.api_token_value or '',
     'YA_CLAW_DEFAULT_PROFILE': settings.default_profile,
-    'YA_CLAW_EXECUTION_MODEL': settings.execution_model or '',
 }
 for key, value in values.items():
     print(f'{key}={value}')
@@ -25,7 +24,6 @@ while IFS='=' read -r key value; do
     YA_CLAW_PUBLIC_BASE_URL) BASE_URL=${YA_CLAW_PUBLIC_BASE_URL:-$value} ;;
     YA_CLAW_API_TOKEN) API_TOKEN=${YA_CLAW_API_TOKEN:-$value} ;;
     YA_CLAW_DEFAULT_PROFILE) DEFAULT_PROFILE=${YA_CLAW_DEFAULT_PROFILE:-$value} ;;
-    YA_CLAW_EXECUTION_MODEL) EXECUTION_MODEL=${YA_CLAW_EXECUTION_MODEL:-$value} ;;
   esac
 done <<EOF
 $(resolve_settings)
@@ -34,15 +32,9 @@ EOF
 : "${BASE_URL:=http://127.0.0.1:9042}"
 : "${API_TOKEN:=}"
 : "${DEFAULT_PROFILE:=default}"
-: "${EXECUTION_MODEL:=}"
 
 if [ -z "$API_TOKEN" ]; then
   echo "YA Claw API token is required." >&2
-  exit 1
-fi
-
-if [ -z "$EXECUTION_MODEL" ]; then
-  echo "YA_CLAW_EXECUTION_MODEL is required for SSE completion smoke." >&2
   exit 1
 fi
 
@@ -62,6 +54,18 @@ request() {
       "$BASE_URL$path"
   fi
 }
+
+profile_response=$(request GET "/api/v1/profiles/$DEFAULT_PROFILE")
+PROFILE_RESPONSE="$profile_response" DEFAULT_PROFILE="$DEFAULT_PROFILE" python - <<'PY'
+import json
+import os
+
+profile = json.loads(os.environ['PROFILE_RESPONSE'])
+assert profile['name'] == os.environ['DEFAULT_PROFILE'], profile
+assert profile.get('enabled') is True, profile
+assert isinstance(profile.get('model'), str) and profile['model'].strip(), profile
+print(f"seeded profile {profile['name']} uses model {profile['model']}")
+PY
 
 create_payload=$(DEFAULT_PROFILE="$DEFAULT_PROFILE" python - <<'PY'
 import json

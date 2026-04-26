@@ -23,7 +23,7 @@ class RunDispatcher:
         if self._supervisor is None:
             return RunDispatchResult(run_id=run_id, mode=mode, submitted=False, reason="supervisor_unavailable")
         if not self._supervisor.execution_enabled:
-            return RunDispatchResult(run_id=run_id, mode=mode, submitted=False, reason="execution_model_unconfigured")
+            return RunDispatchResult(run_id=run_id, mode=mode, submitted=False, reason="execution_profile_unconfigured")
         submitted = self._supervisor.submit_run(run_id)
         return RunDispatchResult(
             run_id=run_id,

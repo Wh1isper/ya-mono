@@ -55,9 +55,12 @@ def test_agui_adapter_maps_text_stream_events_and_compacts_replay() -> None:
         "TEXT_MESSAGE_END",
     ]
 
+    replay.append(adapter.build_run_finished_event(result={"output_summary": "hello world"}))
+
     compacted = replay.snapshot()
-    assert [event["type"] for event in compacted] == ["CUSTOM", "TEXT_MESSAGE_CHUNK"]
+    assert [event["type"] for event in compacted] == ["CUSTOM", "TEXT_MESSAGE_CHUNK", "RUN_FINISHED"]
     assert compacted[1]["delta"] == "hello world"
+    assert "result" not in compacted[2]
 
 
 def test_agui_replay_buffer_merges_tool_call_chunks() -> None:
@@ -101,5 +104,6 @@ def test_agui_adapter_maps_run_lifecycle_events() -> None:
     assert started["type"] == "RUN_STARTED"
     assert started["runId"] == "run-1"
     assert finished["type"] == "RUN_FINISHED"
+    assert "result" not in finished
     assert errored["type"] == "RUN_ERROR"
     assert errored["message"] == "boom"

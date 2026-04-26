@@ -2,10 +2,13 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 function getDefaultBaseUrl() {
+  if (import.meta.env.VITE_CLAW_BASE_URL) {
+    return import.meta.env.VITE_CLAW_BASE_URL
+  }
   if (typeof window !== 'undefined') {
     return window.location.origin
   }
-  return import.meta.env.VITE_CLAW_BASE_URL ?? 'http://127.0.0.1:9042'
+  return 'http://127.0.0.1:9042'
 }
 
 function normalizeBaseUrl(baseUrl: string) {

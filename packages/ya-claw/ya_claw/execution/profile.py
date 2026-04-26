@@ -8,7 +8,7 @@ import yaml
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from ya_agent_sdk.presets import resolve_model_cfg, resolve_model_settings
+from ya_agent_sdk.presets import INHERIT, resolve_model_cfg, resolve_model_settings
 from ya_agent_sdk.subagents.config import SubagentConfig
 
 from ya_claw.config import ClawSettings
@@ -163,7 +163,7 @@ class ProfileResolver:
                     system_prompt=inline.system_prompt,
                     model=inline.model,
                     model_settings=_merge_dicts(
-                        resolve_model_settings(inline.model_settings_preset),
+                        _resolve_inheritable_model_settings(inline.model_settings_preset),
                         inline.model_settings_override,
                     ),
                     model_cfg=_merge_dicts(
@@ -175,6 +175,14 @@ class ProfileResolver:
                 )
             )
         return resolved_configs
+
+
+def _resolve_inheritable_model_settings(preset_or_dict: str | dict[str, Any] | None) -> dict[str, Any] | None:
+    if preset_or_dict is None:
+        return None
+    if preset_or_dict == INHERIT:
+        return None
+    return resolve_model_settings(preset_or_dict)
 
 
 def _merge_dicts(base: dict[str, Any] | None, override: dict[str, Any] | None) -> dict[str, Any] | None:

@@ -15,10 +15,9 @@ This spec set defines one execution shape:
 ## Design Principles
 
 - **Single-node first**: one machine, one runtime, one operational context
-- **Workspace-root based**: one configured workspace root bounds runtime file and shell access
-- **Opaque project selector**: `project_id` is application input that YA Claw consumes and records
+- **Single-workspace based**: one configured workspace directory bounds runtime file and shell access
 - **SDK-aligned**: `ya-agent-sdk` stays responsible for agent execution primitives
-- **Queued-run execution model**: API ingress, schedules, and bridges all create durable queued runs before execution starts
+- **Queued-run execution model**: API ingress, schedules, heartbeat, and bridges all create durable queued runs before execution starts
 - **Explicit runtime assembly**: workspace resolution, environment construction, context construction, and agent runtime construction each have their own boundary
 - **Profile-driven configuration**: reusable execution profiles live in the relational store and can be seeded from YAML
 - **Durable and practical**: SQLite is the default durable store, PostgreSQL is an optional backend, and the local filesystem stores committed session state
@@ -35,6 +34,7 @@ This spec set defines one execution shape:
 | 05      | [05-web-ui-and-operations.md](05-web-ui-and-operations.md)                               | web shell, runtime operations, schedules, and bridge usage              |
 | 06      | [06-runtime-assembly.md](06-runtime-assembly.md)                                         | `WorkspaceBinding -> Environment -> ClawAgentContext -> AgentRuntime`   |
 | 07      | [07-async-subagents.md](07-async-subagents.md)                                           | non-blocking background subagent dispatch, spawn_delegate, steer        |
+| 08      | [08-schedules-and-heartbeat.md](08-schedules-and-heartbeat.md)                           | schedule modes, heartbeat, agent schedule toolset, and timer dispatch   |
 
 ## Out of Scope
 

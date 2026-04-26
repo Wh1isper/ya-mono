@@ -2,10 +2,12 @@
 
 YA Claw exposes one local HTTP API under `/api/v1`.
 
-The API has two layers:
+The API has four layers:
 
 - **session API** for the common high-level workflow
 - **run API** for explicit low-level orchestration
+- **schedule API** for timer-managed work
+- **heartbeat API** for runtime-owned operational timer visibility
 
 ## API Principle
 
@@ -21,6 +23,8 @@ flowchart TB
     ROOT --> RUNS[/runs]
     ROOT --> EVENTS[/events via nested session and run routes]
     ROOT --> PROFILES[/profiles and seed operations]
+    ROOT --> SCHEDULES[/schedules]
+    ROOT --> HEARTBEAT[/heartbeat]
     ROOT --> CLAW[/claw info and notifications]
 ```
 
@@ -85,7 +89,6 @@ Supported part types:
 Suggested fields:
 
 - `profile_name`
-- `project_id`
 - `metadata`
 - `input_parts`
 - `dispatch_mode`
@@ -108,7 +111,6 @@ Suggested fields:
 - `session_id`
 - `restore_from_run_id`
 - `profile_name`
-- `project_id`
 - `input_parts`
 - `metadata`
 - `dispatch_mode`
@@ -140,7 +142,6 @@ Suggested run summary fields:
 - `status`
 - `trigger_type`
 - `profile_name`
-- `project_id`
 - `input_preview`
 - `input_parts` when `include_input_parts=true`
 - `output_text`
@@ -226,7 +227,23 @@ The built-in `session` toolset exposes read-only tools for the running agent:
 - `list_session_turns` reads completed turns for the current session through an internal HTTP client.
 - `get_run_trace` reads tool-call and tool-response trace for a run in the current session.
 
-The client carries the current `session_id` and bearer token internally. Tool calls do not accept a session ID and reject trace payloads from any other session.
+The client carries the current `session_id` and bearer token internally. Tool calls use the current session scope for session selection and trace access.
+
+## Agent Schedule Tools
+
+The built-in `schedule` toolset lets the running agent manage its own timer resources through an internal client.
+
+Agent-facing tools:
+
+- `list_schedules`
+- `create_schedule`
+- `update_schedule`
+- `delete_schedule`
+- `trigger_schedule`
+
+The internal client carries current `session_id`, `run_id`, current profile, and bearer token. Agent-created schedules are stamped with `owner_kind="agent"`, `owner_session_id=current session id`, and `owner_run_id=current run id`. Schedule prompts are plain text and are converted into text input parts by the runtime. Agent schedules inherit the current run profile. Mutations are limited to schedules owned by the current session. Heartbeat operations are excluded from this toolset.
+
+Schedule tool facade semantics and argument shapes are defined in [08-schedules-and-heartbeat.md](08-schedules-and-heartbeat.md).
 
 ## Control Endpoints
 
@@ -259,7 +276,7 @@ Event streaming uses SSE.
 
 The single-node baseline keeps the event buffer in memory.
 Queued-run creation and active execution are separate concerns.
-SSE reflects active or recently buffered execution, not the act of durable creation itself.
+SSE reflects active or recently buffered execution. Durable creation returns through JSON creation responses.
 
 ## Console Info and Notifications
 
@@ -275,14 +292,16 @@ Suggested response shape:
   "public_base_url": "http://127.0.0.1:9042",
   "instance_id": "host-123-abcdef",
   "auth": "bearer",
-  "surfaces": ["profiles", "sessions", "runs", "notifications"],
+  "surfaces": ["profiles", "sessions", "runs", "schedules", "heartbeat", "notifications"],
   "workspace_provider_backend": "docker",
   "storage_model": "sqlite",
   "features": {
     "session_events": true,
     "run_events": true,
     "notifications": true,
-    "profiles": true
+    "profiles": true,
+    "schedules": true,
+    "heartbeat": true
   }
 }
 ```
@@ -313,11 +332,49 @@ Initial notification types:
 - `profile.updated`
 - `profile.deleted`
 - `profiles.seeded`
+- `schedule.created`
+- `schedule.updated`
+- `schedule.deleted`
+- `schedule.fire.created`
+- `schedule.fire.updated`
+- `heartbeat.fire.created`
+- `heartbeat.fire.updated`
+
+## Schedules
+
+Schedules are available through `/api/v1/schedules` CRUD routes plus manual fire and fire history routes.
+
+| Method   | Path                                      | Purpose              |
+| -------- | ----------------------------------------- | -------------------- |
+| `GET`    | `/api/v1/schedules`                       | list schedules       |
+| `POST`   | `/api/v1/schedules`                       | create schedule      |
+| `GET`    | `/api/v1/schedules/{schedule_id}`         | inspect schedule     |
+| `PATCH`  | `/api/v1/schedules/{schedule_id}`         | update schedule      |
+| `DELETE` | `/api/v1/schedules/{schedule_id}`         | soft-delete schedule |
+| `POST`   | `/api/v1/schedules/{schedule_id}:pause`   | pause schedule       |
+| `POST`   | `/api/v1/schedules/{schedule_id}:resume`  | resume schedule      |
+| `POST`   | `/api/v1/schedules/{schedule_id}:trigger` | create manual fire   |
+| `GET`    | `/api/v1/schedules/{schedule_id}/fires`   | list schedule fires  |
+
+Schedule execution modes are `continue_session`, `fork_session`, and `isolate_session`.
+
+## Heartbeat
+
+Heartbeat has read-oriented console routes and an admin manual trigger route.
+
+| Method | Path                        | Purpose                                    |
+| ------ | --------------------------- | ------------------------------------------ |
+| `GET`  | `/api/v1/heartbeat/config`  | read effective heartbeat config            |
+| `GET`  | `/api/v1/heartbeat/status`  | read heartbeat runtime status              |
+| `GET`  | `/api/v1/heartbeat/fires`   | list heartbeat fires                       |
+| `POST` | `/api/v1/heartbeat:trigger` | create manual heartbeat fire for admin use |
+
+Heartbeat is runtime-owned and available through heartbeat console/admin routes.
 
 ## Profiles
 
 Profile management is available through `/api/v1/profiles` CRUD routes and `/api/v1/profiles/seed`.
-Profile records remain durable database state even when seeded from YAML.
+Profile records remain durable database state even when seeded from YAML. Seed operations create missing YAML profiles and refresh matching database profiles, including subagent definitions. Profiles absent from YAML remain in the database unless the seed request sets `prune_missing=true`.
 
 ## Authentication
 

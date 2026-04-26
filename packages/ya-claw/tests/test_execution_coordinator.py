@@ -230,6 +230,68 @@ def runtime_state() -> InMemoryRuntimeState:
     return create_runtime_state()
 
 
+def test_build_user_prompt_returns_only_mapped_user_input(tmp_path: Path, db_engine: AsyncEngine) -> None:
+    from ya_claw.controller.models import CommandPart, ModePart, TextPart
+    from ya_claw.execution.input import InputMappingResult
+
+    coordinator = StubRunCoordinator(
+        settings=ClawSettings(
+            api_token="test-token",  # noqa: S106
+            data_dir=tmp_path / "runtime-data",
+            workspace_dir=tmp_path / "workspace",
+        ),
+        session_factory=create_session_factory(db_engine),
+        runtime_state=create_runtime_state(),
+        workspace_provider=StubWorkspaceProvider(tmp_path / "workspace"),
+    )
+    mapping = InputMappingResult(
+        user_prompt=["hello"],
+        mode_parts=[ModePart(type="mode", mode="plan")],
+        command_parts=[CommandPart(type="command", name="summarize")],
+        content_parts=[TextPart(type="text", text="hello")],
+        input_preview="hello",
+    )
+
+    assert coordinator._build_user_prompt(mapping) == "hello"
+
+    mapping.user_prompt = ["hello", "world"]
+    assert coordinator._build_user_prompt(mapping) == ["hello", "world"]
+
+
+async def test_run_dispatcher_submits_with_profile_model_only(
+    tmp_path: Path,
+    db_engine: AsyncEngine,
+    runtime_state: InMemoryRuntimeState,
+) -> None:
+    from ya_claw.execution.dispatcher import RunDispatcher
+
+    seed_file = tmp_path / "profiles.yaml"
+    seed_file.write_text("profiles:\n- name: default\n  model: test\n", encoding="utf-8")
+    settings = ClawSettings(
+        api_token="test-token",  # noqa: S106
+        data_dir=tmp_path / "runtime-data",
+        workspace_dir=tmp_path / "workspace",
+        profile_seed_file=seed_file,
+        auto_seed_profiles=True,
+        execution_model=None,
+    )
+    supervisor = ExecutionSupervisor(
+        settings=settings,
+        session_factory=create_session_factory(db_engine),
+        runtime_state=runtime_state,
+        workspace_provider=StubWorkspaceProvider(settings.resolved_workspace_dir),
+        environment_factory=StubEnvironmentFactory(),
+        profile_resolver=StubProfileResolver(),
+        runtime_builder=StubRuntimeBuilder(),
+    )
+
+    result = RunDispatcher(supervisor).dispatch("run-profile-model", "async")
+
+    assert result.submitted is True
+    assert result.reason is None
+    assert runtime_state.get_background_task("run-profile-model") is not None
+
+
 async def test_execution_supervisor_claims_queued_run(
     db_session: AsyncSession,
     db_engine: AsyncEngine,

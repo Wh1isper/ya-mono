@@ -26,7 +26,11 @@ export const useLayoutStore = create<LayoutState>()(
       inspectorTab: 'summary',
       setRoute: (route) => set({ route }),
       selectSession: (selectedSessionId) =>
-        set({ selectedSessionId, route: 'chat' }),
+        set((state) => ({
+          selectedSessionId,
+          selectedRunId: selectedSessionId ? state.selectedRunId : null,
+          route: 'chat',
+        })),
       selectRun: (selectedRunId) => set({ selectedRunId, route: 'chat' }),
       selectProfile: (selectedProfileName) =>
         set({ selectedProfileName, route: 'profiles' }),

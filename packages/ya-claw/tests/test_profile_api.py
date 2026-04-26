@@ -186,6 +186,42 @@ profiles:
         assert seeded_get_response.json()["enabled_mcps"] == ["context7"]
         assert seeded_get_response.json()["mcp_servers"]["context7"]["required"] is False
 
+        seed_file.write_text(
+            """
+profiles:
+  - name: seeded
+    model: gateway@openai-responses:gpt-5.5
+    builtin_toolsets: [core, shell]
+    enabled_mcps: []
+    subagents:
+      - name: debugger
+        description: Debug runtime issues
+        system_prompt: |
+          You debug runtime issues.
+        model: inherit
+        model_settings_preset: inherit
+        model_config_preset: inherit
+""".strip(),
+            encoding="utf-8",
+        )
+        update_seed_response = client.post(
+            "/api/v1/profiles/seed",
+            headers=_auth_headers(),
+            json={"prune_missing": False},
+        )
+        assert update_seed_response.status_code == 200
+        assert update_seed_response.json()["seeded_names"] == ["seeded"]
+
+        updated_seeded_response = client.get("/api/v1/profiles/seeded", headers=_auth_headers())
+        assert updated_seeded_response.status_code == 200
+        assert updated_seeded_response.json()["model"] == "gateway@openai-responses:gpt-5.5"
+        assert updated_seeded_response.json()["builtin_toolsets"] == ["core", "shell"]
+        assert updated_seeded_response.json()["enabled_mcps"] == []
+        assert [item["name"] for item in updated_seeded_response.json()["subagents"]] == ["debugger"]
+        assert updated_seeded_response.json()["subagents"][0]["model"] == "inherit"
+        assert updated_seeded_response.json()["subagents"][0]["model_settings_preset"] == "inherit"
+        assert updated_seeded_response.json()["subagents"][0]["model_config_preset"] == "inherit"
+
         delete_response = client.delete("/api/v1/profiles/custom", headers=_auth_headers())
         assert delete_response.status_code == 204
 

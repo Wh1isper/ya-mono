@@ -7,8 +7,7 @@ YA Claw is a single-node runtime web service for `ya-agent-sdk`.
 It provides a durable local execution shell around SDK agent construction and streaming primitives with:
 
 - reusable execution profiles
-- one configured workspace root
-- opaque `project_id` input carried by applications such as bridges and the web shell
+- one configured workspace directory
 - resolver-driven workspace binding construction
 - explicit runtime assembly from binding to agent runtime
 - resumable sessions and runs
@@ -24,12 +23,11 @@ It provides a durable local execution shell around SDK agent construction and st
 
 - make local and self-hosted deployment the default operating model
 - keep runtime file and shell access bounded by one configured workspace root
-- let applications choose `project_id` and carry their own project mapping logic
 - preserve SDK capabilities such as continuation, subagents, compact, and streaming
 - keep the runtime small enough to understand and evolve quickly
 - keep active execution management inside one process for the single-node target
-- support API, schedule, and bridge ingress through one queued-run execution model
-- run bridge adapters as supervised runtime components in the single-node service shape
+- support API, schedule, heartbeat, and bridge ingress through one queued-run execution model
+- run schedule dispatchers, heartbeat dispatchers, and bridge adapters as supervised runtime components in the single-node service shape
 
 ### Non-Goals
 
@@ -62,7 +60,8 @@ flowchart TB
         ENVF[EnvironmentFactory]
         BUILD[ClawRuntimeBuilder]
         COORD[RunCoordinator]
-        SCHED[Schedule Dispatcher]
+        SCHED[ScheduleDispatcher]
+        HEART[HeartbeatDispatcher]
         BRIDGE[BridgeSupervisor]
         BADAPT[Bridge Adapters]
     end
@@ -95,7 +94,12 @@ flowchart TB
     RUNS --> SQL
     RUNS --> SUP
     SESS --> SUP
+    SCHED --> SESS
+    SCHED --> RUNS
     SCHED --> SUP
+    HEART --> SESS
+    HEART --> RUNS
+    HEART --> SUP
     BRIDGE --> SUP
 
     SUP --> REG
@@ -119,27 +123,27 @@ flowchart TB
 
 ## Runtime Boundary
 
-| Concern                       | Owner                     |
-| ----------------------------- | ------------------------- |
-| Agent execution primitives    | `ya-agent-sdk`            |
-| Workspace root enforcement    | YA Claw                   |
-| Profile resolution            | YA Claw                   |
-| Runtime assembly              | YA Claw                   |
-| Session persistence           | YA Claw                   |
-| Run orchestration             | YA Claw                   |
-| Active execution tracking     | YA Claw                   |
-| Event delivery                | YA Claw                   |
-| Committed session persistence | YA Claw                   |
-| Project mapping               | bridge or web application |
-| Channel transport             | bridge adapter            |
-| LLM provider interaction      | SDK + model provider      |
+| Concern                       | Owner                 |
+| ----------------------------- | --------------------- |
+| Agent execution primitives    | `ya-agent-sdk`        |
+| Workspace root enforcement    | YA Claw               |
+| Profile resolution            | YA Claw               |
+| Runtime assembly              | YA Claw               |
+| Session persistence           | YA Claw               |
+| Run orchestration             | YA Claw               |
+| Active execution tracking     | YA Claw               |
+| Event delivery                | YA Claw               |
+| Committed session persistence | YA Claw               |
+| Workspace selection           | YA Claw configuration |
+| Channel transport             | bridge adapter        |
+| LLM provider interaction      | SDK + model provider  |
 
 ## Core Runtime Objects
 
 The architecture revolves around a small set of runtime objects:
 
 - **Execution Profile**: reusable runtime configuration for model, prompt, tools, approvals, and policy
-- **Workspace Binding**: declarative workspace view for one run, including host path, virtual path, cwd, path policy, and metadata
+- **Workspace Binding**: declarative single-workspace view for one run, including host path, virtual path, cwd, path policy, and metadata
 - **Environment Factory**: runtime component that turns a workspace binding into a concrete SDK `Environment`
 - **ClawAgentContext**: YA Claw-specific `AgentContext` subclass that carries run, session, profile, workspace, and source metadata
 - **ClawRuntimeBuilder**: runtime component that assembles `Environment`, `ClawAgentContext`, toolsets, and agent configuration into one SDK runtime
@@ -147,6 +151,8 @@ The architecture revolves around a small set of runtime objects:
 - **Run Coordinator**: short-lived per-run executor from claim to terminal state
 - **Session**: durable conversational continuity
 - **Run**: one execution attempt inside a session
+- **Schedule**: agent-manageable or user-manageable timer resource that creates or steers runs
+- **Heartbeat**: runtime-owned timer resource that creates isolated operational runs from `HEARTBEAT.md` guidance
 - **Execution Registry**: in-memory registry of active run tasks and control signals
 
 ## Design Principle

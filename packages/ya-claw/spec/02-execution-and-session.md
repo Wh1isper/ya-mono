@@ -34,7 +34,6 @@ Suggested session fields:
 - `id`
 - `parent_session_id`
 - `profile_name`
-- `project_id`
 - `metadata`
 - `head_run_id`
 - `head_success_run_id`
@@ -68,7 +67,6 @@ Suggested run fields:
 - `status`
 - `trigger_type`
 - `profile_name`
-- `project_id`
 - `input_parts`
 - `metadata`
 - `output_text`
@@ -109,7 +107,7 @@ stateDiagram-v2
 It enables:
 
 - API acceptance before execution begins
-- unified execution for API, schedules, and bridges
+- unified execution for API, schedules, heartbeat, and bridges
 - concurrency control and future worker scaling
 - cancellation before claim
 - restart recovery and claim scans after process restart
@@ -235,6 +233,44 @@ The coordinator should:
 2. best-effort persist the latest compacted AGUI replay list for the interrupted or failed run
 3. make that run addressable through `restore_from_run_id`
 
+## Trigger Types
+
+Runs record their ingress source through `trigger_type`.
+
+Recommended trigger types:
+
+| Trigger type | Meaning                               |
+| ------------ | ------------------------------------- |
+| `api`        | direct HTTP or web console request    |
+| `bridge`     | inbound bridge adapter event          |
+| `schedule`   | schedule fire created or steered work |
+| `heartbeat`  | runtime-owned heartbeat fire          |
+
+Schedule and heartbeat trigger metadata should carry fire identifiers so operators can navigate from run history back to timer history.
+
+## Cross-session Restore
+
+A run normally restores from a committed run in the same session.
+
+Forked sessions also need to restore from an ancestor session's latest successful run. The restore validation rule should accept a restore source when:
+
+- the restore run belongs to the current session
+- the restore run belongs to an ancestor session reachable through `parent_session_id`
+
+This rule lets `schedule + fork_session` create a child session from the source session's latest successful state while preserving independent child history.
+
+## Schedule Execution Modes
+
+Schedules can dispatch work in three execution modes:
+
+| Mode               | Session relationship            | Execution behavior                                                            |
+| ------------------ | ------------------------------- | ----------------------------------------------------------------------------- |
+| `continue_session` | targets an existing session     | creates a new run under the target session or steers the active run           |
+| `fork_session`     | uses an existing source session | creates a child session and restores from the source session's latest success |
+| `isolate_session`  | creates a clean session         | creates a new session for each fire and runs from schedule input only         |
+
+The full schedule and heartbeat model is defined in [08-schedules-and-heartbeat.md](08-schedules-and-heartbeat.md).
+
 ## Concurrency Rule
 
 One active run per session is the clean default for the single-node runtime.
@@ -243,6 +279,8 @@ Parallelism should come from:
 
 - independent sessions
 - supervisor-managed background execution
-- schedules
-- bridges
+- schedules that create independent sessions
+- bridges that map to independent sessions
 - SDK subagents
+
+For `continue_session` schedules, `on_active` selects the active-session behavior: `steer`, `skip`, or `queue`.

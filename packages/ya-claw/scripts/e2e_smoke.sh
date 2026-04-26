@@ -81,8 +81,27 @@ session_id=$(printf '%s' "$create_response" | extract_json "data['session']['id'
 run_id=$(printf '%s' "$create_response" | python -c "import json,sys; data=json.load(sys.stdin); run=data.get('run') or {}; print(run.get('id',''))")
 
 if [ -n "$run_id" ]; then
-  echo "== run detail =="
-  request GET "/api/v1/runs/$run_id?include_message=true" | python -m json.tool
+  echo "== wait for run dispatch =="
+  run_detail=""
+  for _ in $(seq 1 30); do
+    run_detail=$(request GET "/api/v1/runs/$run_id?include_message=true")
+    status=$(printf '%s' "$run_detail" | extract_json "data['run']['status']")
+    echo "status=$status"
+    if [ "$status" != "queued" ]; then
+      break
+    fi
+    sleep 1
+  done
+  printf '%s\n' "$run_detail" | python -m json.tool
+  status=$(printf '%s' "$run_detail" | extract_json "data['run']['status']")
+  if [ "$status" = "queued" ]; then
+    echo "Run stayed queued after dispatch wait." >&2
+    exit 1
+  fi
+  if [ "$status" = "running" ]; then
+    echo "== cancel running smoke run =="
+    request POST "/api/v1/runs/$run_id/cancel" | python -m json.tool
+  fi
 fi
 
 echo "== session detail =="
