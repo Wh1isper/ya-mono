@@ -1,6 +1,8 @@
 import {
   Activity,
+  CalendarClock,
   Database,
+  HeartPulse,
   Server,
   Workflow,
   type LucideIcon,
@@ -9,7 +11,9 @@ import {
 import {
   useClawInfoQuery,
   useHealthQuery,
+  useHeartbeatStatusQuery,
   useProfilesQuery,
+  useSchedulesQuery,
   useSessionsQuery,
 } from '../../api/hooks'
 import { StatusBadge } from '../../components/StatusBadge'
@@ -19,6 +23,8 @@ export function OverviewPage() {
   const info = useClawInfoQuery()
   const sessions = useSessionsQuery()
   const profiles = useProfilesQuery()
+  const schedules = useSchedulesQuery()
+  const heartbeat = useHeartbeatStatusQuery()
   const activeRuns = (sessions.data ?? []).filter(
     (session) => session.status === 'queued' || session.status === 'running',
   )
@@ -59,6 +65,21 @@ export function OverviewPage() {
           label="Profiles"
           value={String(profiles.data?.length ?? 0)}
           accent="violet"
+        />
+        <MetricCard
+          icon={CalendarClock}
+          label="Schedules"
+          value={String(
+            schedules.data?.schedules.filter((item) => item.enabled).length ??
+              0,
+          )}
+          accent="blue"
+        />
+        <MetricCard
+          icon={HeartPulse}
+          label="Heartbeat"
+          value={heartbeat.data?.enabled ? 'enabled' : 'disabled'}
+          accent="emerald"
         />
       </div>
 

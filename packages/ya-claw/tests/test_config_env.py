@@ -176,6 +176,11 @@ def test_settings_workspace_docker_container_cache_dir_can_be_configured(tmp_pat
 
 
 def test_settings_resolves_bridge_and_lark_cli_environment(monkeypatch) -> None:
+    monkeypatch.delenv("LARKSUITE_CLI_APP_ID", raising=False)
+    monkeypatch.delenv("LARKSUITE_CLI_APP_SECRET", raising=False)
+    monkeypatch.delenv("LARKSUITE_CLI_BRAND", raising=False)
+    monkeypatch.delenv("LARKSUITE_CLI_DEFAULT_AS", raising=False)
+    monkeypatch.delenv("LARKSUITE_CLI_STRICT_MODE", raising=False)
     monkeypatch.delenv("LARK_APP_ID", raising=False)
     monkeypatch.delenv("LARK_APP_SECRET", raising=False)
     settings = ClawSettings(
@@ -197,16 +202,57 @@ def test_settings_resolves_bridge_and_lark_cli_environment(monkeypatch) -> None:
     ]
     assert settings.resolved_bridge_lark_profile == "lark-profile"
     assert settings.resolved_lark_cli_environment == {
+        "LARKSUITE_CLI_APP_ID": "cli_test",
+        "LARKSUITE_CLI_APP_SECRET": "secret-value",
+        "LARKSUITE_CLI_BRAND": "feishu",
+        "LARKSUITE_CLI_DEFAULT_AS": "bot",
+        "LARKSUITE_CLI_STRICT_MODE": "bot",
         "LARK_APP_ID": "cli_test",
         "LARK_APP_SECRET": "secret-value",
     }
     assert settings.resolved_workspace_environment == {
+        "LARKSUITE_CLI_APP_ID": "cli_test",
+        "LARKSUITE_CLI_APP_SECRET": "secret-value",
+        "LARKSUITE_CLI_BRAND": "feishu",
+        "LARKSUITE_CLI_DEFAULT_AS": "bot",
+        "LARKSUITE_CLI_STRICT_MODE": "bot",
         "LARK_APP_ID": "cli_test",
         "LARK_APP_SECRET": "secret-value",
     }
 
 
-def test_settings_lark_cli_environment_prefers_process_environment(monkeypatch) -> None:
+def test_settings_lark_cli_environment_prefers_official_process_environment(monkeypatch) -> None:
+    monkeypatch.setenv("LARKSUITE_CLI_APP_ID", "official-cli")
+    monkeypatch.setenv("LARKSUITE_CLI_APP_SECRET", "official-secret")
+    monkeypatch.setenv("LARKSUITE_CLI_BRAND", "lark")
+    monkeypatch.setenv("LARKSUITE_CLI_DEFAULT_AS", "user")
+    monkeypatch.setenv("LARKSUITE_CLI_STRICT_MODE", "user")
+    monkeypatch.setenv("LARK_APP_ID", "legacy-cli")
+    monkeypatch.setenv("LARK_APP_SECRET", "legacy-secret")
+    settings = ClawSettings(
+        api_token="test-token",  # noqa: S106
+        bridge_lark_app_id="settings-cli",
+        bridge_lark_app_secret="settings-secret",  # noqa: S106
+        _env_file=None,
+    )
+
+    assert settings.resolved_lark_cli_environment == {
+        "LARKSUITE_CLI_APP_ID": "official-cli",
+        "LARKSUITE_CLI_APP_SECRET": "official-secret",
+        "LARKSUITE_CLI_BRAND": "lark",
+        "LARKSUITE_CLI_DEFAULT_AS": "user",
+        "LARKSUITE_CLI_STRICT_MODE": "user",
+        "LARK_APP_ID": "official-cli",
+        "LARK_APP_SECRET": "official-secret",
+    }
+
+
+def test_settings_lark_cli_environment_accepts_legacy_process_environment(monkeypatch) -> None:
+    monkeypatch.delenv("LARKSUITE_CLI_APP_ID", raising=False)
+    monkeypatch.delenv("LARKSUITE_CLI_APP_SECRET", raising=False)
+    monkeypatch.delenv("LARKSUITE_CLI_BRAND", raising=False)
+    monkeypatch.delenv("LARKSUITE_CLI_DEFAULT_AS", raising=False)
+    monkeypatch.delenv("LARKSUITE_CLI_STRICT_MODE", raising=False)
     monkeypatch.setenv("LARK_APP_ID", "process-cli")
     monkeypatch.setenv("LARK_APP_SECRET", "process-secret")
     settings = ClawSettings(
@@ -217,6 +263,11 @@ def test_settings_lark_cli_environment_prefers_process_environment(monkeypatch) 
     )
 
     assert settings.resolved_lark_cli_environment == {
+        "LARKSUITE_CLI_APP_ID": "process-cli",
+        "LARKSUITE_CLI_APP_SECRET": "process-secret",
+        "LARKSUITE_CLI_BRAND": "feishu",
+        "LARKSUITE_CLI_DEFAULT_AS": "bot",
+        "LARKSUITE_CLI_STRICT_MODE": "bot",
         "LARK_APP_ID": "process-cli",
         "LARK_APP_SECRET": "process-secret",
     }
@@ -276,6 +327,11 @@ def test_settings_resolves_explicit_workspace_environment(monkeypatch) -> None:
 
 def test_settings_workspace_environment_combines_lark_alias_and_explicit_forwarding(monkeypatch) -> None:
     monkeypatch.setenv("MY_TOOL_API_KEY", "tool-secret")
+    monkeypatch.delenv("LARKSUITE_CLI_APP_ID", raising=False)
+    monkeypatch.delenv("LARKSUITE_CLI_APP_SECRET", raising=False)
+    monkeypatch.delenv("LARKSUITE_CLI_BRAND", raising=False)
+    monkeypatch.delenv("LARKSUITE_CLI_DEFAULT_AS", raising=False)
+    monkeypatch.delenv("LARKSUITE_CLI_STRICT_MODE", raising=False)
     monkeypatch.delenv("LARK_APP_ID", raising=False)
     monkeypatch.delenv("LARK_APP_SECRET", raising=False)
     settings = ClawSettings(
@@ -287,6 +343,11 @@ def test_settings_workspace_environment_combines_lark_alias_and_explicit_forward
     )
 
     assert settings.resolved_workspace_environment == {
+        "LARKSUITE_CLI_APP_ID": "cli_test",
+        "LARKSUITE_CLI_APP_SECRET": "secret-value",
+        "LARKSUITE_CLI_BRAND": "feishu",
+        "LARKSUITE_CLI_DEFAULT_AS": "bot",
+        "LARKSUITE_CLI_STRICT_MODE": "bot",
         "LARK_APP_ID": "cli_test",
         "LARK_APP_SECRET": "secret-value",
         "MY_TOOL_API_KEY": "tool-secret",

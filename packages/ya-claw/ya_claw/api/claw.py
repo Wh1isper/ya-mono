@@ -16,6 +16,8 @@ class ClawFeatures(BaseModel):
     run_events: bool = True
     notifications: bool = True
     profiles: bool = True
+    schedules: bool = True
+    heartbeat: bool = True
 
 
 class ClawInfo(BaseModel):
@@ -40,7 +42,7 @@ async def get_claw_info(request: Request) -> ClawInfo:
         version="0.1.0",
         public_base_url=settings.public_base_url,
         instance_id=settings.instance_id,
-        surfaces=["profiles", "sessions", "runs", "notifications"],
+        surfaces=["profiles", "sessions", "runs", "schedules", "heartbeat", "notifications"],
         workspace_provider_backend=settings.workspace_provider_backend,
         storage_model=_storage_model(settings.resolved_database_url),
     )

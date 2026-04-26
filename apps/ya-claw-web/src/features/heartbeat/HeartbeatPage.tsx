@@ -1,0 +1,201 @@
+import { Activity, FileText, Play, RadioTower } from 'lucide-react'
+
+import {
+  useHeartbeatConfigQuery,
+  useHeartbeatFiresQuery,
+  useHeartbeatStatusQuery,
+  useTriggerHeartbeatMutation,
+} from '../../api/hooks'
+import { EmptyState } from '../../components/EmptyState'
+import { StatusBadge } from '../../components/StatusBadge'
+
+export function HeartbeatPage() {
+  const config = useHeartbeatConfigQuery()
+  const status = useHeartbeatStatusQuery()
+  const fires = useHeartbeatFiresQuery()
+  const triggerHeartbeat = useTriggerHeartbeatMutation()
+
+  return (
+    <div className="space-y-6 overflow-auto p-6">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-blue-600">Runtime timer</p>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
+            Heartbeat
+          </h1>
+          <p className="mt-2 text-sm text-slate-500">
+            View heartbeat settings, guidance file status, and recent heartbeat
+            runs.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+          onClick={() => triggerHeartbeat.mutate()}
+        >
+          <Play className="h-4 w-4" />
+          Trigger
+        </button>
+      </div>
+
+      <div className="grid grid-cols-4 gap-4">
+        <Metric
+          icon={RadioTower}
+          label="Enabled"
+          value={config.data?.enabled ? 'yes' : 'no'}
+        />
+        <Metric
+          icon={Activity}
+          label="Interval"
+          value={`${config.data?.interval_seconds ?? 0}s`}
+        />
+        <Metric
+          icon={FileText}
+          label="Guidance"
+          value={config.data?.guidance_file.exists ? 'found' : 'missing'}
+        />
+        <Metric
+          icon={Activity}
+          label="Next fire"
+          value={formatDate(status.data?.next_fire_at)}
+        />
+      </div>
+
+      <section className="grid grid-cols-2 gap-4">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-sm font-semibold text-slate-950">
+            Effective config
+          </h2>
+          <dl className="mt-4 grid grid-cols-2 gap-4 text-sm">
+            <Detail
+              label="Profile"
+              value={config.data?.profile_name ?? 'unknown'}
+            />
+            <Detail
+              label="On active"
+              value={config.data?.on_active ?? 'unknown'}
+            />
+            <Detail
+              label="Guidance file"
+              value={config.data?.guidance_file.path ?? 'unknown'}
+              wide
+            />
+            <Detail label="Prompt" value={config.data?.prompt ?? ''} wide />
+          </dl>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-sm font-semibold text-slate-950">Last fire</h2>
+          {status.data?.last_fire ? (
+            <div className="mt-4 rounded-xl border border-slate-100 p-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="mono text-xs text-slate-500">
+                  {status.data.last_fire.id.slice(0, 10)}
+                </span>
+                <StatusBadge
+                  status={mapFireStatus(status.data.last_fire.status)}
+                />
+              </div>
+              <p className="mt-2 text-slate-600">
+                Run {status.data.last_fire.run_id?.slice(0, 10) ?? 'none'}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                {formatDate(status.data.last_fire.created_at)}
+              </p>
+              {status.data.last_fire.error_message ? (
+                <p className="mt-1 text-xs text-rose-600">
+                  {status.data.last_fire.error_message}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <EmptyState
+              title="No heartbeat fires"
+              description="Heartbeat has not fired yet."
+            />
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 className="text-sm font-semibold text-slate-950">Recent fires</h2>
+        <div className="mt-4 space-y-2">
+          {(fires.data?.fires ?? []).map((fire) => (
+            <div
+              key={fire.id}
+              className="grid grid-cols-[1fr_120px_160px_1fr] items-center gap-3 rounded-xl border border-slate-100 p-3 text-sm"
+            >
+              <span className="mono text-xs text-slate-500">
+                {fire.id.slice(0, 12)}
+              </span>
+              <StatusBadge status={mapFireStatus(fire.status)} />
+              <span className="text-xs text-slate-500">
+                {formatDate(fire.created_at)}
+              </span>
+              <span className="truncate text-xs text-slate-500">
+                Run {fire.run_id ?? 'none'}
+              </span>
+            </div>
+          ))}
+          {fires.data?.fires.length === 0 ? (
+            <EmptyState
+              title="No fires"
+              description="No heartbeat history yet."
+            />
+          ) : null}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function Metric({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: typeof Activity
+  label: string
+  value: string
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="inline-flex rounded-xl bg-blue-50 p-2 text-blue-600">
+        <Icon className="h-5 w-5" />
+      </div>
+      <p className="mt-4 text-sm text-slate-500">{label}</p>
+      <p className="mt-1 truncate text-2xl font-semibold text-slate-950">
+        {value}
+      </p>
+    </div>
+  )
+}
+
+function Detail({
+  label,
+  value,
+  wide,
+}: {
+  label: string
+  value: string
+  wide?: boolean
+}) {
+  return (
+    <div className={wide ? 'col-span-2' : ''}>
+      <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">
+        {label}
+      </dt>
+      <dd className="mt-1 break-all text-slate-800">{value}</dd>
+    </div>
+  )
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return 'not scheduled'
+  return new Date(value).toLocaleString()
+}
+
+function mapFireStatus(status: string) {
+  if (status === 'failed') return 'failed'
+  if (status === 'pending' || status === 'submitted') return 'running'
+  return 'completed'
+}

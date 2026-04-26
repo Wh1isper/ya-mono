@@ -416,6 +416,8 @@ class RunCoordinator:
                 base_url=self._settings.public_base_url,
                 api_token=self._settings.require_api_token(),
                 session_id=session_id,
+                run_id=run_id,
+                profile_name=profile.name,
             ),
         )
 

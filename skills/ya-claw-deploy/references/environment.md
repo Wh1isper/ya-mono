@@ -60,6 +60,21 @@ YA Claw loads settings from process environment and `.env` files. `YA_CLAW_*` va
 | `YA_CLAW_WORKSPACE_PROVIDER_DOCKER_EXTRA_MOUNTS`        | Comma-separated Docker extra mounts using host_path:container_path[:mode] |
 | `YA_CLAW_WORKSPACE_ENV_VARS`                            | Comma-separated process env names forwarded into workspace environments   |
 
+## Schedule and Heartbeat Settings
+
+| Variable                             | Default                                    | Purpose                                                                  |
+| ------------------------------------ | ------------------------------------------ | ------------------------------------------------------------------------ |
+| `YA_CLAW_SCHEDULE_DISPATCH_ENABLED`  | `true`                                     | Enables cron schedule dispatch                                           |
+| `YA_CLAW_SCHEDULE_TICK_SECONDS`      | `5`                                        | Dispatcher scan interval in seconds                                      |
+| `YA_CLAW_SCHEDULE_MAX_DUE_PER_TICK`  | `20`                                       | Maximum due schedule fires processed per scan                            |
+| `YA_CLAW_HEARTBEAT_ENABLED`          | `false`                                    | Enables the heartbeat dispatcher                                         |
+| `YA_CLAW_HEARTBEAT_INTERVAL_SECONDS` | `300`                                      | Seconds between heartbeat fires                                          |
+| `YA_CLAW_HEARTBEAT_PROFILE`          | unset                                      | Profile used for heartbeat runs; falls back to `YA_CLAW_DEFAULT_PROFILE` |
+| `YA_CLAW_HEARTBEAT_PROMPT`           | `Run heartbeat according to HEARTBEAT.md.` | Prompt submitted for heartbeat runs                                      |
+| `YA_CLAW_HEARTBEAT_ON_ACTIVE`        | `skip`                                     | Active-run policy for heartbeat dispatch                                 |
+
+Heartbeat guidance lives at `<YA_CLAW_WORKSPACE_DIR>/HEARTBEAT.md`. See [`schedules-heartbeat.md`](schedules-heartbeat.md) for deployment steps, API checks, and backup notes.
+
 ## Bridge Settings
 
 | Variable                              | Purpose                                                                       |
@@ -109,6 +124,10 @@ YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOST_WORKSPACE_DIR=/srv/ya-claw/workspace
 YA_CLAW_WORKSPACE_PROVIDER_DOCKER_IMAGE=ghcr.io/wh1isper/ya-claw-workspace:latest
 YA_CLAW_PROFILE_SEED_FILE=/etc/ya-claw/profiles.yaml
 YA_CLAW_AUTO_SEED_PROFILES=true
+YA_CLAW_SCHEDULE_DISPATCH_ENABLED=true
+YA_CLAW_HEARTBEAT_ENABLED=false
+YA_CLAW_HEARTBEAT_INTERVAL_SECONDS=300
+YA_CLAW_HEARTBEAT_PROFILE=default
 YA_CLAW_BRIDGE_DISPATCH_MODE=embedded
 YA_CLAW_BRIDGE_ENABLED_ADAPTERS=lark
 YA_CLAW_BRIDGE_LARK_APP_ID=cli_xxx

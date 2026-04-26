@@ -1,0 +1,401 @@
+import { Play, Plus, RefreshCcw, Save, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { useForm } from 'react-hook-form'
+
+import {
+  useCreateScheduleMutation,
+  useDeleteScheduleMutation,
+  useScheduleFiresQuery,
+  useSchedulesQuery,
+  useTriggerScheduleMutation,
+  useUpdateScheduleMutation,
+} from '../../api/hooks'
+import { EmptyState } from '../../components/EmptyState'
+import { StatusBadge } from '../../components/StatusBadge'
+import { cn } from '../../lib/utils'
+import type { ScheduleCreateRequest, ScheduleSummary } from '../../types'
+
+type ScheduleFormValues = {
+  name: string
+  description: string
+  prompt: string
+  cron: string
+  timezone: string
+  enabled: boolean
+  continue_current_session: boolean
+  start_from_current_session: boolean
+  steer_when_running: boolean
+}
+
+const blankSchedule: ScheduleFormValues = {
+  name: '',
+  description: '',
+  prompt: '',
+  cron: '0 9 * * *',
+  timezone: 'UTC',
+  enabled: true,
+  continue_current_session: false,
+  start_from_current_session: false,
+  steer_when_running: false,
+}
+
+const inputClass =
+  'mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-blue-600 transition focus:bg-white focus:ring-2'
+const textareaClass =
+  'w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-blue-600 transition focus:bg-white focus:ring-2'
+const checkClass =
+  'inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700'
+
+export function SchedulesPage() {
+  const schedules = useSchedulesQuery()
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const selectedSchedule = useMemo(
+    () =>
+      (schedules.data?.schedules ?? []).find(
+        (schedule) => schedule.id === selectedId,
+      ) ?? null,
+    [schedules.data?.schedules, selectedId],
+  )
+
+  useEffect(() => {
+    if (!selectedId && schedules.data?.schedules?.[0]) {
+      setSelectedId(schedules.data.schedules[0].id)
+    }
+  }, [schedules.data?.schedules, selectedId])
+
+  return (
+    <div className="flex h-full min-h-0 bg-slate-100">
+      <aside className="flex w-96 shrink-0 flex-col border-r border-slate-200 bg-white">
+        <div className="border-b border-slate-200 p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-medium text-blue-600">Cron jobs</p>
+              <h1 className="mt-1 text-xl font-semibold tracking-tight text-slate-950">
+                Schedules
+              </h1>
+            </div>
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700"
+              onClick={() => setSelectedId('__new__')}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              New
+            </button>
+          </div>
+        </div>
+        <div className="scrollbar-thin min-h-0 flex-1 overflow-auto p-3">
+          {schedules.isLoading ? <ScheduleListSkeleton /> : null}
+          {!schedules.isLoading &&
+          (schedules.data?.schedules ?? []).length === 0 ? (
+            <EmptyState
+              title="No schedules"
+              description="Create a cron job to run agent work on a schedule."
+            />
+          ) : null}
+          <div className="space-y-2">
+            {(schedules.data?.schedules ?? []).map((schedule) => (
+              <ScheduleListItem
+                key={schedule.id}
+                schedule={schedule}
+                active={selectedId === schedule.id}
+                onClick={() => setSelectedId(schedule.id)}
+              />
+            ))}
+          </div>
+        </div>
+      </aside>
+      <main className="min-w-0 flex-1 overflow-auto p-6">
+        <ScheduleEditor
+          schedule={selectedId === '__new__' ? null : selectedSchedule}
+          creating={selectedId === '__new__'}
+        />
+      </main>
+    </div>
+  )
+}
+
+function ScheduleListItem({
+  schedule,
+  active,
+  onClick,
+}: {
+  schedule: ScheduleSummary
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        'w-full rounded-2xl border p-3 text-left transition',
+        active
+          ? 'border-blue-200 bg-blue-50 shadow-sm'
+          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50',
+      )}
+      onClick={onClick}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-slate-900">
+            {schedule.name}
+          </p>
+          <p className="mt-1 truncate mono text-xs text-slate-500">
+            {schedule.cron.expr} · {schedule.cron.timezone}
+          </p>
+        </div>
+        <StatusBadge status={schedule.enabled ? 'completed' : 'cancelled'} />
+      </div>
+      <p className="mt-2 line-clamp-2 text-xs text-slate-500">
+        {schedule.prompt}
+      </p>
+      <p className="mt-2 text-xs text-slate-400">
+        Next: {formatDate(schedule.cron.next_fire_at)}
+      </p>
+    </button>
+  )
+}
+
+function ScheduleEditor({
+  schedule,
+  creating,
+}: {
+  schedule: ScheduleSummary | null
+  creating: boolean
+}) {
+  const createSchedule = useCreateScheduleMutation()
+  const updateSchedule = useUpdateScheduleMutation()
+  const deleteSchedule = useDeleteScheduleMutation()
+  const triggerSchedule = useTriggerScheduleMutation()
+  const fires = useScheduleFiresQuery(schedule?.id ?? null)
+  const form = useForm<ScheduleFormValues>({ defaultValues: blankSchedule })
+
+  useEffect(() => {
+    if (schedule) {
+      form.reset({
+        name: schedule.name,
+        description: schedule.description ?? '',
+        prompt: schedule.prompt,
+        cron: schedule.cron.expr,
+        timezone: schedule.cron.timezone,
+        enabled: schedule.enabled,
+        continue_current_session: schedule.mode.continue_current_session,
+        start_from_current_session: schedule.mode.start_from_current_session,
+        steer_when_running: schedule.mode.steer_when_running,
+      })
+    } else {
+      form.reset(blankSchedule)
+    }
+  }, [form, schedule])
+
+  const onSubmit = form.handleSubmit(async (values) => {
+    const payload: ScheduleCreateRequest = {
+      name: values.name,
+      description: values.description || null,
+      prompt: values.prompt,
+      cron: values.cron,
+      timezone: values.timezone,
+      enabled: values.enabled,
+      continue_current_session: values.continue_current_session,
+      start_from_current_session: values.start_from_current_session,
+      steer_when_running: values.steer_when_running,
+      owner_kind: 'user',
+    }
+    if (creating) {
+      await createSchedule.mutateAsync(payload)
+    } else if (schedule) {
+      await updateSchedule.mutateAsync({ scheduleId: schedule.id, payload })
+    }
+  })
+
+  if (!creating && !schedule) {
+    return (
+      <EmptyState
+        title="Select a schedule"
+        description="Choose a cron job or create a new one."
+      />
+    )
+  }
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-6">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-blue-600">
+            {creating ? 'New cron job' : 'Cron job'}
+          </p>
+          <h2 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
+            {creating ? 'Create schedule' : schedule?.name}
+          </h2>
+        </div>
+        <div className="flex gap-2">
+          {schedule ? (
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+              onClick={() =>
+                triggerSchedule.mutate({ scheduleId: schedule.id })
+              }
+            >
+              <Play className="h-4 w-4" />
+              Trigger
+            </button>
+          ) : null}
+          {schedule ? (
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-medium text-rose-700 shadow-sm transition hover:bg-rose-50"
+              onClick={() => deleteSchedule.mutate(schedule.id)}
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <form
+        className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+        onSubmit={onSubmit}
+      >
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Name">
+            <input
+              className={inputClass}
+              {...form.register('name', { required: true })}
+            />
+          </Field>
+          <Field label="Cron">
+            <input
+              className={`${inputClass} mono`}
+              {...form.register('cron', { required: true })}
+            />
+          </Field>
+          <Field label="Timezone">
+            <input
+              className={inputClass}
+              {...form.register('timezone', { required: true })}
+            />
+          </Field>
+          <Field label="Description">
+            <input className={inputClass} {...form.register('description')} />
+          </Field>
+        </div>
+        <Field label="Prompt">
+          <textarea
+            className={`${textareaClass} mt-2 min-h-40`}
+            {...form.register('prompt', { required: true })}
+          />
+        </Field>
+        <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+          <label className={checkClass}>
+            <input type="checkbox" {...form.register('enabled')} /> Enabled
+          </label>
+          <label className={checkClass}>
+            <input
+              type="checkbox"
+              {...form.register('continue_current_session')}
+            />{' '}
+            Continue current session
+          </label>
+          <label className={checkClass}>
+            <input
+              type="checkbox"
+              {...form.register('start_from_current_session')}
+            />{' '}
+            Start from current session
+          </label>
+          <label className={checkClass}>
+            <input type="checkbox" {...form.register('steer_when_running')} />{' '}
+            Steer when running
+          </label>
+        </div>
+        <div className="mt-5 flex justify-end">
+          <button
+            type="submit"
+            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+          >
+            <Save className="h-4 w-4" />
+            Save
+          </button>
+        </div>
+      </form>
+
+      {schedule ? (
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-950">
+              Recent fires
+            </h3>
+            <RefreshCcw className="h-4 w-4 text-slate-400" />
+          </div>
+          <div className="mt-4 space-y-2">
+            {(fires.data?.fires ?? []).map((fire) => (
+              <div
+                key={fire.id}
+                className="rounded-xl border border-slate-100 p-3 text-sm"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="mono text-xs text-slate-500">
+                    {fire.id.slice(0, 10)}
+                  </span>
+                  <StatusBadge status={mapFireStatus(fire.status)} />
+                </div>
+                <p className="mt-2 text-slate-600">{fire.input_preview}</p>
+                <p className="mt-1 text-xs text-slate-400">
+                  Run {fire.run_id?.slice(0, 10) ?? 'none'} ·{' '}
+                  {formatDate(fire.created_at)}
+                </p>
+                {fire.error_message ? (
+                  <p className="mt-1 text-xs text-rose-600">
+                    {fire.error_message}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+    </div>
+  )
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <label className="block text-sm font-medium text-slate-700">
+      {label}
+      {children}
+    </label>
+  )
+}
+
+function ScheduleListSkeleton() {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div
+          key={index}
+          className="h-24 animate-pulse rounded-2xl bg-slate-100"
+        />
+      ))}
+    </div>
+  )
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return 'not scheduled'
+  return new Date(value).toLocaleString()
+}
+
+function mapFireStatus(status: string) {
+  if (status === 'failed') return 'failed'
+  if (status === 'pending' || status === 'submitted' || status === 'steered')
+    return 'running'
+  return 'completed'
+}

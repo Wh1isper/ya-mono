@@ -5,6 +5,13 @@ from ya_claw.workspace.guidance import (
     format_workspace_guidance,
     load_workspace_guidance,
 )
+from ya_claw.workspace.heartbeat import (
+    HEARTBEAT_GUIDANCE_FILENAME,
+    HEARTBEAT_GUIDANCE_TAG,
+    HeartbeatGuidance,
+    format_heartbeat_guidance,
+    load_heartbeat_guidance,
+)
 from ya_claw.workspace.provider import (
     DefaultEnvironmentFactory,
     DockerEnvironmentFactory,
@@ -25,6 +32,8 @@ from ya_claw.workspace.provider import (
 )
 
 __all__ = [
+    "HEARTBEAT_GUIDANCE_FILENAME",
+    "HEARTBEAT_GUIDANCE_TAG",
     "WORKSPACE_GUIDANCE_FILENAME",
     "WORKSPACE_GUIDANCE_TAG",
     "DefaultEnvironmentFactory",
@@ -32,6 +41,7 @@ __all__ = [
     "DockerExtraMount",
     "DockerWorkspaceProvider",
     "EnvironmentFactory",
+    "HeartbeatGuidance",
     "LocalEnvironmentFactory",
     "LocalWorkspaceProvider",
     "MappedLocalEnvironment",
@@ -43,7 +53,9 @@ __all__ = [
     "build_workspace_container_ref",
     "build_workspace_sandbox_metadata",
     "extract_workspace_sandbox_metadata",
+    "format_heartbeat_guidance",
     "format_workspace_guidance",
+    "load_heartbeat_guidance",
     "load_workspace_guidance",
     "remove_workspace_sandbox_metadata",
 ]

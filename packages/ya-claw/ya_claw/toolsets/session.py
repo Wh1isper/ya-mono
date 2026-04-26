@@ -37,11 +37,15 @@ class ClawSelfClient:
         base_url: str,
         api_token: str,
         session_id: str,
+        run_id: str | None = None,
+        profile_name: str | None = None,
         timeout_seconds: float = _DEFAULT_HTTP_TIMEOUT_SECONDS,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_token = api_token
         self.session_id = session_id
+        self.run_id = run_id or ""
+        self.profile_name = profile_name
         self._timeout_seconds = timeout_seconds
 
     def close(self) -> None:
@@ -72,10 +76,57 @@ class ClawSelfClient:
             raise RuntimeError("Requested run does not belong to the current session.")
         return payload
 
+    async def list_schedules(
+        self,
+        *,
+        schedule_id: str | None,
+        include_disabled: bool,
+        include_recent_runs: bool,
+        limit: int,
+    ) -> dict[str, Any]:
+        params: dict[str, str] = {
+            "owner_session_id": self.session_id,
+            "include_deleted": "false",
+            "include_recent_runs": "true" if include_recent_runs else "false",
+            "limit": str(limit),
+        }
+        if isinstance(schedule_id, str) and schedule_id.strip() != "":
+            params["schedule_id"] = schedule_id.strip()
+        payload = await self._get_json("/api/v1/schedules", params=params)
+        if include_disabled:
+            return payload
+        schedules = payload.get("schedules") if isinstance(payload, dict) else None
+        if isinstance(schedules, list):
+            payload["schedules"] = [
+                item for item in schedules if isinstance(item, dict) and item.get("enabled") is True
+            ]
+        return payload
+
+    async def create_schedule(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._send_json("/api/v1/schedules", method="POST", payload=payload)
+
+    async def update_schedule(self, *, schedule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        path = f"/api/v1/schedules/{urllib.parse.quote(schedule_id)}"
+        return await self._send_json(path, method="PATCH", payload=payload)
+
+    async def delete_schedule(self, *, schedule_id: str) -> dict[str, Any]:
+        path = f"/api/v1/schedules/{urllib.parse.quote(schedule_id)}"
+        return await self._send_json(path, method="DELETE", payload={})
+
+    async def trigger_schedule(self, *, schedule_id: str, prompt_override: str | None) -> dict[str, Any]:
+        path = f"/api/v1/schedules/{urllib.parse.quote(schedule_id)}:trigger"
+        return await self._send_json(path, method="POST", payload={"prompt_override": prompt_override})
+
     async def _get_json(self, path: str, *, params: dict[str, str]) -> dict[str, Any]:
         payload = await asyncio.to_thread(self._get_json_sync, path, params)
         if isinstance(payload, dict):
             return payload
+        raise RuntimeError("YA Claw self API returned a non-object JSON payload.")
+
+    async def _send_json(self, path: str, *, method: str, payload: dict[str, Any]) -> dict[str, Any]:
+        response_payload = await asyncio.to_thread(self._send_json_sync, path, method, payload)
+        if isinstance(response_payload, dict):
+            return response_payload
         raise RuntimeError("YA Claw self API returned a non-object JSON payload.")
 
     def _get_json_sync(self, path: str, params: dict[str, str]) -> Any:
@@ -94,6 +145,27 @@ class ClawSelfClient:
         try:
             with urllib.request.urlopen(request, timeout=self._timeout_seconds) as response:  # noqa: S310
                 return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = _decode_error_detail(exc)
+            raise RuntimeError(f"YA Claw self API request failed with status {exc.code}: {detail}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"YA Claw self API request failed: {exc.reason}") from exc
+
+    def _send_json_sync(self, path: str, method: str, payload: dict[str, Any]) -> Any:
+        url = f"{self._base_url}{path}"
+        parsed_url = urlparse(url)
+        if parsed_url.scheme not in {"http", "https"}:
+            raise RuntimeError("YA Claw self API URL must use http or https.")
+        request = urllib.request.Request(  # noqa: S310
+            url,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Authorization": f"Bearer {self._api_token}", "Content-Type": "application/json"},
+            method=method,
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self._timeout_seconds) as response:  # noqa: S310
+                raw_body = response.read().decode("utf-8")
+                return json.loads(raw_body) if raw_body else {}
         except urllib.error.HTTPError as exc:
             detail = _decode_error_detail(exc)
             raise RuntimeError(f"YA Claw self API request failed with status {exc.code}: {detail}") from exc

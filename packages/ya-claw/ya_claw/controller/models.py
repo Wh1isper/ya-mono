@@ -29,6 +29,8 @@ class SessionStatus(StrEnum):
 class TriggerType(StrEnum):
     API = "api"
     BRIDGE = "bridge"
+    SCHEDULE = "schedule"
+    HEARTBEAT = "heartbeat"
 
 
 class TerminationReason(StrEnum):
