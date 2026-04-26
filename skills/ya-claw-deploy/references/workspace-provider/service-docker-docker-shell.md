@@ -83,11 +83,13 @@ YA_CLAW_RUN_UID=1000
 YA_CLAW_RUN_GID=1000
 ```
 
-The workspace container user can match that identity:
+The workspace container user and Docker exec identity can match that identity:
 
 ```env
 YA_CLAW_WORKSPACE_PROVIDER_DOCKER_UID=1000
 YA_CLAW_WORKSPACE_PROVIDER_DOCKER_GID=1000
+YA_CLAW_WORKSPACE_PROVIDER_DOCKER_EXEC_USER=auto
+YA_CLAW_WORKSPACE_PROVIDER_DOCKER_HOME=/home/claw
 ```
 
 Use matching ownership for `/srv/ya-claw`, including `/srv/ya-claw/data` and `/srv/ya-claw/workspace`.

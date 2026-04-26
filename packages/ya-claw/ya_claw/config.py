@@ -116,6 +116,8 @@ class ClawSettings(BaseSettings):
     workspace_provider_docker_gid: int | None = None
     workspace_provider_docker_container_cache_dir: Path | None = None
     workspace_provider_docker_extra_mounts: str = ""
+    workspace_provider_docker_exec_user: str = "auto"
+    workspace_provider_docker_home: str = "/home/claw"
     workspace_env_vars: str = ""
     bridge_dispatch_mode: BridgeDispatchMode = BridgeDispatchMode.EMBEDDED
     bridge_enabled_adapters: str = ""
@@ -185,6 +187,14 @@ class ClawSettings(BaseSettings):
     @property
     def resolved_workspace_provider_docker_extra_mounts(self) -> list[DockerExtraMount]:
         return _parse_docker_extra_mounts(self.workspace_provider_docker_extra_mounts)
+
+    @property
+    def resolved_workspace_provider_docker_exec_user(self) -> str:
+        return self.workspace_provider_docker_exec_user.strip() or "auto"
+
+    @property
+    def resolved_workspace_provider_docker_exec_default_env(self) -> dict[str, str]:
+        return {"HOME": self.workspace_provider_docker_home.strip() or "/home/claw", "USER": "claw"}
 
     @property
     def resolved_bridge_enabled_adapters(self) -> set[BridgeAdapterType]:

@@ -126,6 +126,9 @@ class ClawApplication:
             workspace_gid=self.settings.resolved_workspace_provider_docker_gid,
             workspace_environment=self.settings.resolved_workspace_environment,
             docker_container_cache_dir=self.settings.resolved_workspace_provider_docker_container_cache_dir,
+            docker_extra_mounts=self.settings.resolved_workspace_provider_docker_extra_mounts,
+            docker_exec_user=self.settings.resolved_workspace_provider_docker_exec_user,
+            docker_exec_default_env=self.settings.resolved_workspace_provider_docker_exec_default_env,
         )
 
         if app.state.db_session_factory is not None:
@@ -215,7 +218,7 @@ class ClawApplication:
     def create_workspace_provider(self) -> WorkspaceProvider:
         if self.settings.workspace_provider_backend == "docker":
             logger.info(
-                "Configuring Docker workspace provider image={} service_workspace_dir={} docker_host_workspace_dir={} extra_mounts={}",
+                "Configuring Docker workspace provider image={} service_workspace_dir={} docker_host_workspace_dir={} extra_mounts={} exec_user={}",
                 self.settings.workspace_provider_docker_image,
                 self.settings.resolved_workspace_dir,
                 self.settings.resolved_workspace_provider_docker_host_workspace_dir,
@@ -223,6 +226,7 @@ class ClawApplication:
                     (str(mount.host_path), str(mount.container_path), mount.mode)
                     for mount in self.settings.resolved_workspace_provider_docker_extra_mounts
                 ],
+                self.settings.resolved_workspace_provider_docker_exec_user,
             )
             return DockerWorkspaceProvider(
                 self.settings.resolved_workspace_dir,
@@ -241,7 +245,11 @@ class ClawApplication:
             request: Request,
             call_next: Callable[[Request], Awaitable[Response]],
         ) -> Response:
-            if request.method == "OPTIONS" or request.url.path in self.auth_exempt_paths:
+            if (
+                request.method == "OPTIONS"
+                or request.url.path in self.auth_exempt_paths
+                or self.is_public_frontend_path(request.url.path)
+            ):
                 return await call_next(request)
 
             authorization_header = request.headers.get("Authorization")
@@ -265,6 +273,16 @@ class ClawApplication:
 
         normalized_token = token.strip()
         return normalized_token or None
+
+    def is_public_frontend_path(self, request_path: str) -> bool:
+        web_dist_dir = self.settings.web_dist_dir
+        if web_dist_dir is None or not (web_dist_dir / "index.html").exists():
+            return False
+
+        normalized_path = request_path.strip("/")
+        return normalized_path not in self.reserved_frontend_paths and not any(
+            normalized_path.startswith(f"{prefix}/") for prefix in self.reserved_frontend_paths if "/" not in prefix
+        )
 
     def register_frontend(self, app: FastAPI) -> bool:
         web_dist_dir = self.settings.web_dist_dir

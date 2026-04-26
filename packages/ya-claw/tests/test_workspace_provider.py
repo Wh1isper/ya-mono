@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from ya_agent_sdk.environment import LocalFileOperator, SandboxEnvironment, VirtualMount
+from ya_agent_sdk.environment.sandbox import DockerShell
 from ya_claw.workspace import (
     DockerEnvironmentFactory,
     DockerExtraMount,
@@ -139,6 +140,7 @@ def test_service_local_plus_docker_shell_uses_virtual_paths_for_file_ops_and_she
     assert binding.metadata["workspace_uid"] == 1234
     assert binding.metadata["workspace_gid"] == 2345
     assert binding.metadata["sandbox"]["container_ref"] == environment.container_ref
+    assert environment._docker_exec_user == "1234:2345"
 
 
 async def test_reusable_sandbox_environment_passes_workspace_identity_to_docker(tmp_path: Path) -> None:
@@ -179,6 +181,44 @@ async def test_reusable_sandbox_environment_passes_workspace_identity_to_docker(
         "YA_CLAW_WORKSPACE_GID": "2345",
         "YA_CLAW_HOST_GID": "2345",
     }
+
+
+async def test_reusable_sandbox_environment_creates_shell_with_exec_user_and_home(tmp_path: Path) -> None:
+    class FakeContainer:
+        id = "container-123"
+        status = "running"
+
+        def __init__(self) -> None:
+            self.attrs = {"State": {}}
+
+        def reload(self) -> None:
+            return None
+
+    class FakeContainers:
+        def get(self, container_id: str) -> FakeContainer:
+            assert container_id == "container-123"
+            return FakeContainer()
+
+    class FakeDockerClient:
+        containers = FakeContainers()
+
+    environment = ReusableSandboxEnvironment(
+        mounts=[VirtualMount(host_path=tmp_path / "workspace", virtual_path=Path("/workspace"))],
+        work_dir="/workspace",
+        image="python:3.11",
+        container_ref="workspace-container",
+        preferred_container_id="container-123",
+        workspace_uid=1234,
+        workspace_gid=2345,
+        docker_exec_default_env={"HOME": "/home/claw", "USER": "claw"},
+    )
+    environment._client = FakeDockerClient()
+
+    await environment._setup()
+
+    assert isinstance(environment._shell, DockerShell)
+    assert environment._shell._exec_user == "1234:2345"
+    assert environment._shell._default_env == {"HOME": "/home/claw", "USER": "claw"}
 
 
 def test_workspace_sandbox_metadata_preserves_workspace_identity(tmp_path: Path) -> None:
