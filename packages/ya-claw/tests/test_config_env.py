@@ -202,8 +202,8 @@ def test_settings_resolves_bridge_and_lark_cli_environment(monkeypatch) -> None:
     ]
     assert settings.resolved_bridge_lark_profile == "lark-profile"
     assert settings.resolved_lark_cli_environment == {
-        "LARKSUITE_CLI_APP_ID": "cli_test",
-        "LARKSUITE_CLI_APP_SECRET": "secret-value",
+        "LARKSUITE_CLI_APP_ID": "",
+        "LARKSUITE_CLI_APP_SECRET": "",
         "LARKSUITE_CLI_BRAND": "feishu",
         "LARKSUITE_CLI_DEFAULT_AS": "bot",
         "LARKSUITE_CLI_STRICT_MODE": "bot",
@@ -211,8 +211,8 @@ def test_settings_resolves_bridge_and_lark_cli_environment(monkeypatch) -> None:
         "LARK_APP_SECRET": "secret-value",
     }
     assert settings.resolved_workspace_environment == {
-        "LARKSUITE_CLI_APP_ID": "cli_test",
-        "LARKSUITE_CLI_APP_SECRET": "secret-value",
+        "LARKSUITE_CLI_APP_ID": "",
+        "LARKSUITE_CLI_APP_SECRET": "",
         "LARKSUITE_CLI_BRAND": "feishu",
         "LARKSUITE_CLI_DEFAULT_AS": "bot",
         "LARKSUITE_CLI_STRICT_MODE": "bot",
@@ -237,8 +237,8 @@ def test_settings_lark_cli_environment_prefers_official_process_environment(monk
     )
 
     assert settings.resolved_lark_cli_environment == {
-        "LARKSUITE_CLI_APP_ID": "official-cli",
-        "LARKSUITE_CLI_APP_SECRET": "official-secret",
+        "LARKSUITE_CLI_APP_ID": "",
+        "LARKSUITE_CLI_APP_SECRET": "",
         "LARKSUITE_CLI_BRAND": "lark",
         "LARKSUITE_CLI_DEFAULT_AS": "user",
         "LARKSUITE_CLI_STRICT_MODE": "user",
@@ -263,8 +263,8 @@ def test_settings_lark_cli_environment_accepts_legacy_process_environment(monkey
     )
 
     assert settings.resolved_lark_cli_environment == {
-        "LARKSUITE_CLI_APP_ID": "process-cli",
-        "LARKSUITE_CLI_APP_SECRET": "process-secret",
+        "LARKSUITE_CLI_APP_ID": "",
+        "LARKSUITE_CLI_APP_SECRET": "",
         "LARKSUITE_CLI_BRAND": "feishu",
         "LARKSUITE_CLI_DEFAULT_AS": "bot",
         "LARKSUITE_CLI_STRICT_MODE": "bot",
@@ -343,8 +343,8 @@ def test_settings_workspace_environment_combines_lark_alias_and_explicit_forward
     )
 
     assert settings.resolved_workspace_environment == {
-        "LARKSUITE_CLI_APP_ID": "cli_test",
-        "LARKSUITE_CLI_APP_SECRET": "secret-value",
+        "LARKSUITE_CLI_APP_ID": "",
+        "LARKSUITE_CLI_APP_SECRET": "",
         "LARKSUITE_CLI_BRAND": "feishu",
         "LARKSUITE_CLI_DEFAULT_AS": "bot",
         "LARKSUITE_CLI_STRICT_MODE": "bot",

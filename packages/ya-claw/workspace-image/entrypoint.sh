@@ -74,6 +74,86 @@ ensure_workspace_user() {
   chown "${YA_CLAW_WORKSPACE_UID}:${YA_CLAW_WORKSPACE_GID}" /home/claw
 }
 
+ensure_lark_cli_config() {
+  local app_id="${LARK_APP_ID:-${LARKSUITE_CLI_APP_ID:-}}"
+  local app_secret="${LARK_APP_SECRET:-${LARKSUITE_CLI_APP_SECRET:-}}"
+
+  if [[ -z "${app_id}" || -z "${app_secret}" ]]; then
+    return 0
+  fi
+
+  export YA_CLAW_LARK_CLI_APP_ID="${app_id}"
+  export YA_CLAW_LARK_CLI_APP_SECRET="${app_secret}"
+  export YA_CLAW_LARK_CLI_BRAND="${LARKSUITE_CLI_BRAND:-feishu}"
+  export YA_CLAW_LARK_CLI_DEFAULT_AS="${LARKSUITE_CLI_DEFAULT_AS:-bot}"
+  export YA_CLAW_LARK_CLI_STRICT_MODE="${LARKSUITE_CLI_STRICT_MODE:-bot}"
+  export YA_CLAW_LARK_CLI_PROFILE="${YA_CLAW_LARK_CLI_PROFILE:-ya-claw-bridge}"
+  unset LARKSUITE_CLI_APP_ID
+  unset LARKSUITE_CLI_APP_SECRET
+  unset LARKSUITE_CLI_USER_ACCESS_TOKEN
+  unset LARKSUITE_CLI_TENANT_ACCESS_TOKEN
+
+  python3 <<'PY'
+import json
+import os
+import tempfile
+from pathlib import Path
+
+app_id = os.environ["YA_CLAW_LARK_CLI_APP_ID"].strip()
+app_secret = os.environ["YA_CLAW_LARK_CLI_APP_SECRET"].strip()
+brand = os.environ.get("YA_CLAW_LARK_CLI_BRAND", "feishu").strip() or "feishu"
+default_as = os.environ.get("YA_CLAW_LARK_CLI_DEFAULT_AS", "bot").strip() or "bot"
+strict_mode = os.environ.get("YA_CLAW_LARK_CLI_STRICT_MODE", "bot").strip() or "bot"
+profile = os.environ.get("YA_CLAW_LARK_CLI_PROFILE", "ya-claw-bridge").strip() or "ya-claw-bridge"
+home = Path(os.environ.get("HOME") or "/home/claw")
+config_dir = Path(os.environ.get("LARKSUITE_CLI_CONFIG_DIR") or home / ".lark-cli")
+config_path = config_dir / "config.json"
+config_dir.mkdir(parents=True, exist_ok=True)
+
+existing: dict[str, object]
+try:
+    existing_raw = json.loads(config_path.read_text(encoding="utf-8"))
+    existing = existing_raw if isinstance(existing_raw, dict) else {}
+except FileNotFoundError:
+    existing = {}
+except json.JSONDecodeError:
+    existing = {}
+
+apps_raw = existing.get("apps")
+apps = apps_raw if isinstance(apps_raw, list) else []
+managed_app = {
+    "name": profile,
+    "appId": app_id,
+    "appSecret": app_secret,
+    "brand": brand,
+    "defaultAs": default_as,
+    "strictMode": strict_mode,
+    "users": [],
+}
+updated = False
+for index, item in enumerate(apps):
+    if isinstance(item, dict) and item.get("name") == profile:
+        apps[index] = managed_app
+        updated = True
+        break
+if not updated:
+    apps.append(managed_app)
+
+existing["currentApp"] = profile
+existing["apps"] = apps
+fd, tmp_name = tempfile.mkstemp(prefix="config.", suffix=".json", dir=str(config_dir))
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
+        json.dump(existing, tmp_file, ensure_ascii=False, indent=2)
+        tmp_file.write("\n")
+    os.chmod(tmp_name, 0o600)
+    os.replace(tmp_name, config_path)
+finally:
+    if os.path.exists(tmp_name):
+        os.unlink(tmp_name)
+PY
+}
+
 copy_bundled_skills() {
   local bundled_skills_root="/opt/ya-claw/skills"
   local startup_dir="${YA_CLAW_WORKSPACE_STARTUP_DIR:-${PWD}}"
@@ -125,9 +205,12 @@ if [[ "${EUID}" -eq 0 ]]; then
   gosu "${YA_CLAW_WORKSPACE_UID}:${YA_CLAW_WORKSPACE_GID}" "$0" --copy-bundled-skills
 else
   if [[ "${1:-}" == "--copy-bundled-skills" ]]; then
+    export HOME="${HOME:-/home/claw}"
+    ensure_lark_cli_config
     copy_bundled_skills
     exit 0
   fi
+  ensure_lark_cli_config
   copy_bundled_skills
 fi
 
