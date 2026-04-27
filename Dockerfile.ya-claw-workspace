@@ -14,7 +14,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium \
     AGENT_BROWSER_ARGS=--no-sandbox,--disable-gpu,--disable-dev-shm-usage \
     AGENT_BROWSER_IDLE_TIMEOUT_MS=300000 \
-    YA_CLAW_WORKSPACE_STARTUP_DIR=/workspace
+    YA_CLAW_WORKSPACE_STARTUP_DIR=/workspace \
+    PATH=/home/claw/.bin:${PATH}
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -49,11 +50,14 @@ RUN apt-get update \
     && apt-get update \
     && apt-get install -y --no-install-recommends nodejs \
     && corepack enable \
+    && curl -LsSf https://astral.sh/uv/install.sh -o /tmp/uv-install.sh \
+    && UV_INSTALL_DIR=/usr/local/bin sh /tmp/uv-install.sh \
+    && uv --version \
     && npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
-    && mkdir -p /etc/agent-browser /opt/ya-claw/skills/agent-browser /workspace /home/claw \
+    && mkdir -p /etc/agent-browser /opt/ya-claw/skills/agent-browser /workspace /home/claw /home/claw/.bin \
     && if ! getent group "${WORKSPACE_GID}" >/dev/null; then groupadd --gid "${WORKSPACE_GID}" "claw-g${WORKSPACE_GID}"; fi \
     && if ! getent passwd "${WORKSPACE_UID}" >/dev/null; then useradd --uid "${WORKSPACE_UID}" --gid "${WORKSPACE_GID}" --home-dir /home/claw --create-home --shell /bin/bash "claw-u${WORKSPACE_UID}"; fi \
-    && chown "${WORKSPACE_UID}:${WORKSPACE_GID}" /workspace /home/claw \
+    && chown "${WORKSPACE_UID}:${WORKSPACE_GID}" /workspace /home/claw /home/claw/.bin \
     && printf '%s\n' \
         '{' \
         '  "executablePath": "/usr/bin/chromium",' \
