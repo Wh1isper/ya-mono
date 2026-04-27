@@ -1439,6 +1439,9 @@ class TUIApp:
             deferred_tool_results=deferred_results,
             usage_limits=UsageLimits(request_limit=self.config.general.max_requests),
             post_node_hook=emit_context_update,
+            resume_on_error=self.config.general.agent_stream_resume_on_error,
+            resume_max_attempts=self.config.general.agent_stream_resume_max_attempts,
+            resume_prompt=self.config.general.agent_stream_resume_prompt,
         ) as stream:
             async for event in stream:
                 self._handle_stream_event(event)

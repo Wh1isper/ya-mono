@@ -29,6 +29,9 @@ def test_default_config() -> None:
     assert config.general.is_configured is False
     assert config.is_configured is False
     assert config.general.model_settings is None
+    assert config.general.agent_stream_resume_on_error is True
+    assert config.general.agent_stream_resume_max_attempts == 2
+    assert config.general.agent_stream_resume_prompt.startswith("The previous streaming model request failed")
 
     # Display
     assert config.display.code_theme == "dark"
@@ -224,12 +227,14 @@ code_theme = "dark"
 
     os.environ["YAACLI_CODE_THEME"] = "light"
     os.environ["YAACLI_CDP_URL"] = "auto"
+    os.environ["YAACLI_AGENT_STREAM_RESUME_MAX_ATTEMPTS"] = "3"
 
     config = config_manager.load()
 
     assert config.display.code_theme == "light"
     assert config.browser.cdp_url == "auto"
     assert config.general.model == "openai:gpt-4o"
+    assert config.general.agent_stream_resume_max_attempts == 3
 
 
 def test_project_config_overrides_global(

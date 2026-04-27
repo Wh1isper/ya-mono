@@ -231,11 +231,15 @@ class AgentExecutionStartEvent(AgentEvent):
         user_prompt: The user prompt passed to the agent (str or multimodal content).
         deferred_tool_results: Results from deferred tool calls, if any.
         message_history_count: Number of messages in provided history.
+        attempt_index: Zero-based execution attempt index within a stream.
+        is_resume_attempt: Whether this start event belongs to a resume attempt.
     """
 
     user_prompt: str | Sequence[UserContent] | None = None
     deferred_tool_results: DeferredToolResults | None = None
     message_history_count: int = 0
+    attempt_index: int = 0
+    is_resume_attempt: bool = False
 
 
 @dataclass
@@ -251,11 +255,13 @@ class AgentExecutionCompleteEvent(AgentEvent):
         total_loops: Total number of model request loops executed.
         total_duration_seconds: Total execution time.
         final_message_count: Number of messages after execution.
+        attempt_index: Zero-based execution attempt index within a stream.
     """
 
     total_loops: int = 0
     total_duration_seconds: float = 0.0
     final_message_count: int = 0
+    attempt_index: int = 0
 
 
 @dataclass
@@ -270,12 +276,37 @@ class AgentExecutionFailedEvent(AgentEvent):
         error_type: Type name of the exception (e.g., "UsageLimitExceeded").
         total_loops: Number of loops completed before failure.
         total_duration_seconds: Time elapsed before failure.
+        attempt_index: Zero-based execution attempt index within a stream.
+        recoverable: Whether stream_agent will start a resume attempt.
     """
 
     error: str = ""
     error_type: str = ""
     total_loops: int = 0
     total_duration_seconds: float = 0.0
+    attempt_index: int = 0
+    recoverable: bool = False
+
+
+@dataclass
+class AgentExecutionResumeEvent(AgentEvent):
+    """Emitted before stream_agent starts a resume attempt after a recoverable error.
+
+    Attributes:
+        attempt_index: Zero-based execution attempt index that will start next.
+        previous_attempt_index: Zero-based execution attempt index that failed.
+        error: Error message that triggered resume.
+        error_type: Type name of the exception that triggered resume.
+        message_history_count: Number of messages reused for resume.
+        resume_prompt: Prompt sent to continue execution.
+    """
+
+    attempt_index: int = 0
+    previous_attempt_index: int = 0
+    error: str = ""
+    error_type: str = ""
+    message_history_count: int = 0
+    resume_prompt: str | Sequence[UserContent] | None = None
 
 
 # =============================================================================
@@ -591,6 +622,7 @@ LifecycleEvent = (
     AgentExecutionStartEvent
     | AgentExecutionCompleteEvent
     | AgentExecutionFailedEvent
+    | AgentExecutionResumeEvent
     | ModelRequestStartEvent
     | ModelRequestCompleteEvent
     | ToolCallsStartEvent

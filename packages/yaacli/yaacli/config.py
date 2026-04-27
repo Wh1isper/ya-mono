@@ -69,6 +69,18 @@ class GeneralConfig(BaseModel):
     max_requests: int = 1000
     """Maximum requests per session."""
 
+    agent_stream_resume_on_error: bool = True
+    """Resume failed streaming attempts from recovered message history."""
+
+    agent_stream_resume_max_attempts: int = 2
+    """Maximum total streaming attempts when resume is enabled."""
+
+    agent_stream_resume_prompt: str = (
+        "The previous streaming model request failed before the agent finished. "
+        "Continue the task from the available conversation history. Avoid repeating completed work."
+    )
+    """Prompt sent when resuming a failed stream attempt."""
+
     max_loop_iterations: int = 10
     """Maximum iterations for /loop command."""
 
@@ -304,6 +316,11 @@ class EnvSettings(BaseSettings):
     auto_save_history: bool | None = None
     auto_restore: bool | None = None
 
+    # Agent stream recovery
+    agent_stream_resume_on_error: bool | None = None
+    agent_stream_resume_max_attempts: int | None = None
+    agent_stream_resume_prompt: str | None = None
+
 
 # =============================================================================
 # ConfigManager
@@ -455,6 +472,17 @@ class ConfigManager:
             session["auto_restore"] = env.auto_restore
         if session:
             overrides["session"] = session
+
+        # Agent stream recovery
+        general: dict[str, Any] = {}
+        if env.agent_stream_resume_on_error is not None:
+            general["agent_stream_resume_on_error"] = env.agent_stream_resume_on_error
+        if env.agent_stream_resume_max_attempts is not None:
+            general["agent_stream_resume_max_attempts"] = env.agent_stream_resume_max_attempts
+        if env.agent_stream_resume_prompt is not None:
+            general["agent_stream_resume_prompt"] = env.agent_stream_resume_prompt
+        if general:
+            overrides["general"] = general
 
         return overrides
 
