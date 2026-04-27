@@ -1173,7 +1173,7 @@ async def stream_agent(  # noqa: C901
         effective_user_prompt: UserPromptT | None,
         effective_deferred_tool_results: DeferredToolResults | None,
         effective_message_history: Sequence[ModelMessage] | None,
-        execution_start_time: float,
+        stream_start_time: float,
         *,
         attempt_index: int,
         is_resume_attempt: bool,
@@ -1217,11 +1217,13 @@ async def stream_agent(  # noqa: C901
                 AgentExecutionCompleteEvent(
                     event_id=ctx.run_id,
                     total_loops=tracker.loop_index,
-                    total_duration_seconds=time.perf_counter() - execution_start_time,
+                    total_duration_seconds=time.perf_counter() - stream_start_time,
                     final_message_count=len(run.all_messages()),
                     attempt_index=attempt_index,
                 )
             )
+
+    failure_event_emitted = False
 
     def stringify_exception(exc: BaseException) -> str:
         try:
@@ -1313,9 +1315,33 @@ async def stream_agent(  # noqa: C901
             return resume_prompt
         return _DEFAULT_RESUME_PROMPT
 
+    async def emit_execution_failed_event(
+        exc: BaseException,
+        stream_start_time: float,
+        *,
+        attempt_index: int = 0,
+        recoverable: bool = False,
+    ) -> str:
+        nonlocal failure_event_emitted
+        error_str = stringify_exception(exc)
+        await emit_lifecycle_event(
+            AgentExecutionFailedEvent(
+                event_id=ctx.run_id,
+                error=error_str,
+                error_type=type(exc).__name__,
+                total_loops=tracker.loop_index,
+                total_duration_seconds=time.perf_counter() - stream_start_time,
+                attempt_index=attempt_index,
+                recoverable=recoverable,
+            )
+        )
+        failure_event_emitted = True
+        return error_str
+
     async def run_main_attempts(
         effective_user_prompt: UserPromptT | None,
         effective_deferred_tool_results: DeferredToolResults | None,
+        stream_start_time: float,
     ) -> None:
         max_attempts = max(1, resume_max_attempts) if resume_on_error else 1
         attempt_index = 0
@@ -1324,7 +1350,6 @@ async def stream_agent(  # noqa: C901
         current_message_history: Sequence[ModelMessage] | None = message_history
 
         while True:
-            execution_start_time = time.perf_counter()
             try:
                 attempt_message_history, attempt_user_prompt = split_resume_prompt_for_tool_call_history(
                     current_message_history,
@@ -1334,24 +1359,18 @@ async def stream_agent(  # noqa: C901
                     attempt_user_prompt,
                     current_deferred_tool_results,
                     attempt_message_history,
-                    execution_start_time,
+                    stream_start_time,
                     attempt_index=attempt_index,
                     is_resume_attempt=attempt_index > 0,
                 )
                 return
             except Exception as e:
                 recoverable = attempt_index + 1 < max_attempts
-                error_str = stringify_exception(e)
-                await emit_lifecycle_event(
-                    AgentExecutionFailedEvent(
-                        event_id=ctx.run_id,
-                        error=error_str,
-                        error_type=type(e).__name__,
-                        total_loops=tracker.loop_index,
-                        total_duration_seconds=time.perf_counter() - execution_start_time,
-                        attempt_index=attempt_index,
-                        recoverable=recoverable,
-                    )
+                error_str = await emit_execution_failed_event(
+                    e,
+                    stream_start_time,
+                    attempt_index=attempt_index,
+                    recoverable=recoverable,
                 )
                 if not recoverable:
                     raise
@@ -1415,10 +1434,12 @@ async def stream_agent(  # noqa: C901
         """Run the main agent and push events to output_queue."""
         logger.debug("Main agent task started")
 
+        stream_start_time = time.perf_counter()
+
         try:
             async with runtime:
                 effective_user_prompt, effective_deferred_tool_results = await prepare_runtime_input()
-                await run_main_attempts(effective_user_prompt, effective_deferred_tool_results)
+                await run_main_attempts(effective_user_prompt, effective_deferred_tool_results, stream_start_time)
 
         except BaseException as e:
             if isinstance(e, asyncio.CancelledError):
@@ -1438,6 +1459,8 @@ async def stream_agent(  # noqa: C901
                 return
             else:
                 logger.exception("Error in main agent task")
+                if not failure_event_emitted:
+                    await emit_execution_failed_event(e, stream_start_time)
             raise
         finally:
             logger.debug("Main agent task finished")

@@ -207,3 +207,61 @@ async def test_stream_agent_treats_retry_prompt_as_tool_call_completion(tmp_path
         isinstance(message, ModelRequest) and any(isinstance(part, RetryPromptPart) for part in message.parts)
         for message in resume_messages
     )
+
+
+async def test_stream_agent_emits_failed_event_for_runtime_setup_error(tmp_path: Path) -> None:
+    async def user_prompt_factory(_runtime):
+        raise RuntimeError("prompt factory failed")
+
+    runtime = _make_runtime(tmp_path, FunctionModel(stream_function=lambda _messages, _agent_info: iter(())))
+    events: list[Any] = []
+
+    with pytest.raises(RuntimeError, match="prompt factory failed"):
+        async with stream_agent(
+            runtime,
+            user_prompt_factory=user_prompt_factory,
+        ) as streamer:
+            async for event in streamer:
+                events.append(event.event)
+
+    failed_events = [event for event in events if isinstance(event, AgentExecutionFailedEvent)]
+    assert len(failed_events) == 1
+    assert failed_events[0].error == "prompt factory failed"
+    assert failed_events[0].error_type == "RuntimeError"
+    assert failed_events[0].recoverable is False
+
+
+async def test_stream_agent_reports_cumulative_duration_across_resume_attempts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+    clock = {"now": 100.0}
+    monkeypatch.setattr("ya_agent_sdk.agents.main.time.perf_counter", lambda: clock["now"])
+
+    async def stream_function(_messages: list[ModelMessage], _agent_info: AgentInfo):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            clock["now"] += 10.0
+            raise RuntimeError("temporary disconnect")
+        clock["now"] += 20.0
+        yield "resumed"
+
+    runtime = _make_runtime(tmp_path, FunctionModel(stream_function=stream_function))
+    events: list[Any] = []
+
+    async with stream_agent(
+        runtime,
+        "start task",
+        resume_on_error=True,
+        resume_max_attempts=2,
+    ) as streamer:
+        async for event in streamer:
+            events.append(event.event)
+        streamer.raise_if_exception()
+
+    failed_event = next(event for event in events if isinstance(event, AgentExecutionFailedEvent))
+    complete_event = next(event for event in events if event.__class__.__name__ == "AgentExecutionCompleteEvent")
+    assert failed_event.total_duration_seconds == 10.0
+    assert complete_event.total_duration_seconds == 30.0
