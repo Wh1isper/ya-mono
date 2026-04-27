@@ -484,6 +484,9 @@ class RunCoordinator:
                 runtime,
                 user_prompt_factory=lambda runtime_obj: self._build_initial_prompt(runtime_obj, input_parts),
                 message_history=restored_messages,
+                resume_on_error=self._settings.agent_stream_resume_on_error,
+                resume_max_attempts=self._settings.agent_stream_resume_max_attempts,
+                resume_prompt=self._settings.agent_stream_resume_prompt,
             ) as streamer:
                 steering_task = asyncio.create_task(
                     self._forward_runtime_signals(

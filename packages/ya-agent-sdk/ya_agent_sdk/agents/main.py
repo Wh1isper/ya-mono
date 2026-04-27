@@ -21,7 +21,15 @@ import jinja2
 from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, UsageLimits, UserError
 from pydantic_ai._agent_graph import CallToolsNode, HistoryProcessor, ModelRequestNode
 from pydantic_ai.capabilities import AbstractCapability
-from pydantic_ai.messages import BaseToolCallPart, ModelMessage, UserContent
+from pydantic_ai.messages import (
+    BaseToolCallPart,
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    RetryPromptPart,
+    ToolReturnPart,
+    UserContent,
+)
 from pydantic_ai.models import KnownModelName, Model
 from pydantic_ai.output import OutputSpec
 from pydantic_ai.run import AgentRun
@@ -47,6 +55,7 @@ from ya_agent_sdk.environment.local import LocalEnvironment
 from ya_agent_sdk.events import (
     AgentExecutionCompleteEvent,
     AgentExecutionFailedEvent,
+    AgentExecutionResumeEvent,
     AgentExecutionStartEvent,
     LifecycleEvent,
     ModelRequestCompleteEvent,
@@ -738,6 +747,13 @@ AgentCompleteHook = Callable[[AgentCompleteContext[AgentDepsT, OutputT, EnvT]], 
 NodeHook = Callable[[NodeHookContext[AgentDepsT, OutputT]], Awaitable[None]]
 EventHook = Callable[[EventHookContext[AgentDepsT, OutputT]], Awaitable[None]]
 UserPromptFactory = Callable[[AgentRuntime[AgentDepsT, OutputT, EnvT]], Awaitable[UserPromptT]]
+ResumePromptFactory = Callable[[BaseException, int, Sequence[ModelMessage]], UserPromptT | Awaitable[UserPromptT]]
+
+
+_DEFAULT_RESUME_PROMPT = """
+The previous streaming model request failed before the agent finished.
+Continue the task from the available conversation history. Avoid repeating completed work.
+""".strip()
 
 
 # =============================================================================
@@ -840,7 +856,15 @@ class AgentStreamer(Generic[AgentDepsT, OutputT]):
         Returns StopAsyncIteration when all producers are done and queue is empty.
         """
         while True:
-            # Check if any task failed - propagate exception immediately
+            # Drain queued events before surfacing producer exceptions. A task may
+            # enqueue lifecycle events immediately before raising, and callers should
+            # be able to observe those terminal events.
+            try:
+                return self._output_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+
+            # Check if any task failed after queued events have been consumed.
             self._check_task_exceptions()
 
             # Check exit condition: poll done and output queue empty
@@ -886,6 +910,10 @@ async def stream_agent(  # noqa: C901
     post_event_hook: EventHook[AgentDepsT, OutputT] | None = None,
     # Error handling
     raise_on_error: bool = True,
+    resume_on_error: bool = False,
+    resume_max_attempts: int = 2,
+    resume_prompt: UserPromptT | None = None,
+    resume_prompt_factory: ResumePromptFactory | None = None,
     # Lifecycle events
     emit_lifecycle_events: bool = True,
 ) -> AsyncIterator[AgentStreamer[AgentDepsT, OutputT]]:
@@ -931,6 +959,11 @@ async def stream_agent(  # noqa: C901
         raise_on_error: If True (default), exceptions during streaming are re-raised
             immediately. If False, exceptions are captured in streamer.exception
             and can be checked after iteration via raise_if_exception().
+        resume_on_error: If True, retry failed stream attempts inside the same stream.
+        resume_max_attempts: Maximum total attempts when resume_on_error is enabled.
+        resume_prompt: Prompt sent after a recoverable stream failure.
+        resume_prompt_factory: Callable that builds a resume prompt from the exception,
+            next attempt index, and recovered message history.
         emit_lifecycle_events: If True (default), emit built-in lifecycle events
             (AgentExecutionStartEvent, LoopStartEvent, NodeStartEvent, etc.) to the
             stream. Set to False to disable these events for cleaner output or
@@ -1139,15 +1172,21 @@ async def stream_agent(  # noqa: C901
     async def run_agent_iteration(
         effective_user_prompt: UserPromptT | None,
         effective_deferred_tool_results: DeferredToolResults | None,
-        execution_start_time: float,
+        effective_message_history: Sequence[ModelMessage] | None,
+        stream_start_time: float,
+        *,
+        attempt_index: int,
+        is_resume_attempt: bool,
     ) -> None:
-        """Run the agent iteration with hooks and lifecycle events."""
+        """Run one agent iteration attempt with hooks and lifecycle events."""
         await emit_lifecycle_event(
             AgentExecutionStartEvent(
                 event_id=ctx.run_id,
                 user_prompt=effective_user_prompt,
                 deferred_tool_results=effective_deferred_tool_results,
-                message_history_count=len(message_history) if message_history else 0,
+                message_history_count=len(effective_message_history) if effective_message_history else 0,
+                attempt_index=attempt_index,
+                is_resume_attempt=is_resume_attempt,
             )
         )
 
@@ -1155,7 +1194,7 @@ async def stream_agent(  # noqa: C901
             effective_user_prompt,
             deps=ctx,
             usage_limits=usage_limits,
-            message_history=message_history,
+            message_history=effective_message_history,
             deferred_tool_results=effective_deferred_tool_results,
         ) as run:
             streamer.run = run
@@ -1178,37 +1217,229 @@ async def stream_agent(  # noqa: C901
                 AgentExecutionCompleteEvent(
                     event_id=ctx.run_id,
                     total_loops=tracker.loop_index,
-                    total_duration_seconds=time.perf_counter() - execution_start_time,
+                    total_duration_seconds=time.perf_counter() - stream_start_time,
                     final_message_count=len(run.all_messages()),
+                    attempt_index=attempt_index,
                 )
             )
+
+    failure_event_emitted = False
+
+    def stringify_exception(exc: BaseException) -> str:
+        try:
+            error_str = str(exc)
+        except Exception:
+            error_str = repr(exc)
+        return error_str or repr(exc)
+
+    def extract_resume_history(
+        run: AgentRun[AgentDepsT, OutputT] | None,
+        fallback_history: Sequence[ModelMessage] | None,
+    ) -> list[ModelMessage]:
+        if run is not None:
+            try:
+                messages = list(run.all_messages())
+            except Exception:
+                logger.debug("Failed to extract run messages for stream resume", exc_info=True)
+            else:
+                if messages:
+                    return messages
+        return list(fallback_history or [])
+
+    def history_has_unreturned_tool_calls(history: Sequence[ModelMessage]) -> bool:
+        unreturned_tool_call_ids: set[str] = set()
+        for message in history:
+            if isinstance(message, ModelResponse):
+                for part in message.parts:
+                    if isinstance(part, BaseToolCallPart):
+                        unreturned_tool_call_ids.add(part.tool_call_id)
+            elif isinstance(message, ModelRequest):
+                for part in message.parts:
+                    if isinstance(part, ToolReturnPart | RetryPromptPart):
+                        unreturned_tool_call_ids.discard(part.tool_call_id)
+        return bool(unreturned_tool_call_ids)
+
+    def split_resume_prompt_for_tool_call_history(
+        history: Sequence[ModelMessage] | None,
+        prompt: UserPromptT | None,
+    ) -> tuple[Sequence[ModelMessage] | None, UserPromptT | None]:
+        if prompt is None or not history or not history_has_unreturned_tool_calls(history):
+            return history, prompt
+        return close_unreturned_tool_calls(history, "new user prompt requested before tool results"), prompt
+
+    def close_unreturned_tool_calls(history: Sequence[ModelMessage], error_message: str) -> list[ModelMessage]:
+        unreturned_tool_calls: dict[str, str] = {}
+        for message in history:
+            if isinstance(message, ModelResponse):
+                for part in message.parts:
+                    if isinstance(part, BaseToolCallPart):
+                        unreturned_tool_calls[part.tool_call_id] = part.tool_name
+            elif isinstance(message, ModelRequest):
+                for part in message.parts:
+                    if isinstance(part, ToolReturnPart | RetryPromptPart):
+                        unreturned_tool_calls.pop(part.tool_call_id, None)
+
+        normalized_history = list(history)
+        if not unreturned_tool_calls:
+            return normalized_history
+
+        normalized_history.append(
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        tool_name=tool_name,
+                        tool_call_id=tool_call_id,
+                        content=(
+                            "Tool execution was interrupted by a stream error before a result was available. "
+                            f"stream_error={error_message}"
+                        ),
+                        outcome="failed",
+                    )
+                    for tool_call_id, tool_name in unreturned_tool_calls.items()
+                ]
+            )
+        )
+        return normalized_history
+
+    async def resolve_resume_prompt(
+        exc: BaseException,
+        attempt_index: int,
+        history: Sequence[ModelMessage],
+    ) -> UserPromptT:
+        if resume_prompt_factory is not None:
+            value = resume_prompt_factory(exc, attempt_index, history)
+            if inspect.isawaitable(value):
+                value = await value
+            return cast(UserPromptT, value)
+        if resume_prompt is not None:
+            return resume_prompt
+        return _DEFAULT_RESUME_PROMPT
+
+    async def emit_execution_failed_event(
+        exc: BaseException,
+        stream_start_time: float,
+        *,
+        attempt_index: int = 0,
+        recoverable: bool = False,
+    ) -> str:
+        nonlocal failure_event_emitted
+        error_str = stringify_exception(exc)
+        await emit_lifecycle_event(
+            AgentExecutionFailedEvent(
+                event_id=ctx.run_id,
+                error=error_str,
+                error_type=type(exc).__name__,
+                total_loops=tracker.loop_index,
+                total_duration_seconds=time.perf_counter() - stream_start_time,
+                attempt_index=attempt_index,
+                recoverable=recoverable,
+            )
+        )
+        failure_event_emitted = True
+        return error_str
+
+    async def run_main_attempts(
+        effective_user_prompt: UserPromptT | None,
+        effective_deferred_tool_results: DeferredToolResults | None,
+        stream_start_time: float,
+    ) -> None:
+        max_attempts = max(1, resume_max_attempts) if resume_on_error else 1
+        attempt_index = 0
+        current_user_prompt = effective_user_prompt
+        current_deferred_tool_results = effective_deferred_tool_results
+        current_message_history: Sequence[ModelMessage] | None = message_history
+
+        while True:
+            try:
+                attempt_message_history, attempt_user_prompt = split_resume_prompt_for_tool_call_history(
+                    current_message_history,
+                    current_user_prompt,
+                )
+                await run_agent_iteration(
+                    attempt_user_prompt,
+                    current_deferred_tool_results,
+                    attempt_message_history,
+                    stream_start_time,
+                    attempt_index=attempt_index,
+                    is_resume_attempt=attempt_index > 0,
+                )
+                return
+            except Exception as e:
+                recoverable = attempt_index + 1 < max_attempts
+                error_str = await emit_execution_failed_event(
+                    e,
+                    stream_start_time,
+                    attempt_index=attempt_index,
+                    recoverable=recoverable,
+                )
+                if not recoverable:
+                    raise
+
+                next_attempt_index = attempt_index + 1
+                resume_history = close_unreturned_tool_calls(
+                    extract_resume_history(streamer.run, current_message_history),
+                    error_str,
+                )
+                if resume_history:
+                    next_user_prompt = await resolve_resume_prompt(e, next_attempt_index, resume_history)
+                    next_message_history: Sequence[ModelMessage] | None = resume_history
+                else:
+                    next_user_prompt = current_user_prompt
+                    next_message_history = current_message_history
+
+                await emit_lifecycle_event(
+                    AgentExecutionResumeEvent(
+                        event_id=ctx.run_id,
+                        attempt_index=next_attempt_index,
+                        previous_attempt_index=attempt_index,
+                        error=error_str,
+                        error_type=type(e).__name__,
+                        message_history_count=len(next_message_history) if next_message_history else 0,
+                        resume_prompt=next_user_prompt,
+                    )
+                )
+                logger.warning(
+                    "Resuming stream_agent after error attempt_index=%s next_attempt_index=%s max_attempts=%s error_type=%s error=%s",
+                    attempt_index,
+                    next_attempt_index,
+                    max_attempts,
+                    type(e).__name__,
+                    error_str,
+                )
+                attempt_index = next_attempt_index
+                current_user_prompt = next_user_prompt
+                current_deferred_tool_results = None
+                current_message_history = next_message_history
+
+    async def prepare_runtime_input() -> tuple[UserPromptT | None, DeferredToolResults | None]:
+        effective_user_prompt = user_prompt
+        effective_deferred_tool_results = deferred_tool_results
+        if user_prompt_factory:
+            effective_user_prompt = await user_prompt_factory(runtime)
+
+        if on_runtime_ready:
+            ready_ctx = RuntimeReadyContext(
+                runtime=runtime,
+                agent_info=main_agent_info,
+                output_queue=output_queue,
+                user_prompt=effective_user_prompt,
+                deferred_tool_results=effective_deferred_tool_results,
+            )
+            await on_runtime_ready(ready_ctx)
+            effective_user_prompt = ready_ctx.user_prompt
+            effective_deferred_tool_results = ready_ctx.deferred_tool_results
+        return effective_user_prompt, effective_deferred_tool_results
 
     async def run_main() -> None:
         """Run the main agent and push events to output_queue."""
         logger.debug("Main agent task started")
 
-        effective_user_prompt = user_prompt
-        effective_deferred_tool_results = deferred_tool_results
-        execution_start_time = time.perf_counter()
+        stream_start_time = time.perf_counter()
 
         try:
             async with runtime:
-                if user_prompt_factory:
-                    effective_user_prompt = await user_prompt_factory(runtime)
-
-                if on_runtime_ready:
-                    ready_ctx = RuntimeReadyContext(
-                        runtime=runtime,
-                        agent_info=main_agent_info,
-                        output_queue=output_queue,
-                        user_prompt=effective_user_prompt,
-                        deferred_tool_results=effective_deferred_tool_results,
-                    )
-                    await on_runtime_ready(ready_ctx)
-                    effective_user_prompt = ready_ctx.user_prompt
-                    effective_deferred_tool_results = ready_ctx.deferred_tool_results
-
-                await run_agent_iteration(effective_user_prompt, effective_deferred_tool_results, execution_start_time)
+                effective_user_prompt, effective_deferred_tool_results = await prepare_runtime_input()
+                await run_main_attempts(effective_user_prompt, effective_deferred_tool_results, stream_start_time)
 
         except BaseException as e:
             if isinstance(e, asyncio.CancelledError):
@@ -1228,22 +1459,8 @@ async def stream_agent(  # noqa: C901
                 return
             else:
                 logger.exception("Error in main agent task")
-                # Use repr() as fallback: some exceptions (e.g., ModelAPIError with
-                # message=None from upstream) have __str__ that returns None,
-                # causing str() to raise TypeError.
-                try:
-                    error_str = str(e)
-                except Exception:
-                    error_str = repr(e)
-                await emit_lifecycle_event(
-                    AgentExecutionFailedEvent(
-                        event_id=ctx.run_id,
-                        error=error_str or repr(e),
-                        error_type=type(e).__name__,
-                        total_loops=tracker.loop_index,
-                        total_duration_seconds=time.perf_counter() - execution_start_time,
-                    )
-                )
+                if not failure_event_emitted:
+                    await emit_execution_failed_event(e, stream_start_time)
             raise
         finally:
             logger.debug("Main agent task finished")

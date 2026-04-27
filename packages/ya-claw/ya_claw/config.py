@@ -131,6 +131,12 @@ class ClawSettings(BaseSettings):
     bridge_lark_reply_identity: Literal["bot", "user"] = "bot"
     bridge_lark_domain: str = "https://open.feishu.cn"
     default_profile: str = "default"
+    agent_stream_resume_on_error: bool = True
+    agent_stream_resume_max_attempts: int = 2
+    agent_stream_resume_prompt: str = (
+        "The previous streaming model request failed before the agent finished. "
+        "Continue the task from the available conversation history. Avoid repeating completed work."
+    )
     profile_seed_file: Path | None = None
     auto_seed_profiles: bool = False
     schedule_dispatch_enabled: bool = True
