@@ -4,7 +4,7 @@ import asyncio
 from unittest.mock import MagicMock
 
 import pytest
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.messages import BuiltinToolCallPart, ModelResponse, TextPart, ToolCallPart
 from ya_agent_sdk.agents.main import AgentStreamer, _has_tool_call_parts
 from ya_agent_sdk.context import StreamEvent
 
@@ -14,12 +14,14 @@ def _make_event(name: str = "test") -> StreamEvent:
     return StreamEvent(agent_id="main", agent_name=name, event=MagicMock())
 
 
-def test_has_tool_call_parts_only_matches_model_tool_calls() -> None:
+def test_has_tool_call_parts_matches_tool_call_parts() -> None:
     text_response = ModelResponse(parts=[TextPart(content="hello")])
     tool_response = ModelResponse(parts=[ToolCallPart(tool_name="shell_exec", args={"command": "pwd"})])
+    builtin_tool_response = ModelResponse(parts=[BuiltinToolCallPart(tool_name="output", args={"value": "done"})])
 
     assert _has_tool_call_parts(text_response.parts) is False
     assert _has_tool_call_parts(tool_response.parts) is True
+    assert _has_tool_call_parts(builtin_tool_response.parts) is True
 
 
 def _make_streamer(

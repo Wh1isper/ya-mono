@@ -21,7 +21,7 @@ import jinja2
 from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, UsageLimits, UserError
 from pydantic_ai._agent_graph import CallToolsNode, HistoryProcessor, ModelRequestNode
 from pydantic_ai.capabilities import AbstractCapability
-from pydantic_ai.messages import ModelMessage, ToolCallPart, UserContent
+from pydantic_ai.messages import BaseToolCallPart, ModelMessage, UserContent
 from pydantic_ai.models import KnownModelName, Model
 from pydantic_ai.output import OutputSpec
 from pydantic_ai.run import AgentRun
@@ -86,7 +86,7 @@ class AgentInterrupted(Exception):
 
 
 def _has_tool_call_parts(parts: Sequence[object]) -> bool:
-    return any(isinstance(part, ToolCallPart) for part in parts)
+    return any(isinstance(part, BaseToolCallPart) for part in parts)
 
 
 def _suspend_current_task_cancellation() -> tuple[asyncio.Task[Any] | None, int]:
