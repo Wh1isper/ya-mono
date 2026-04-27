@@ -855,7 +855,15 @@ class AgentStreamer(Generic[AgentDepsT, OutputT]):
         Returns StopAsyncIteration when all producers are done and queue is empty.
         """
         while True:
-            # Check if any task failed - propagate exception immediately
+            # Drain queued events before surfacing producer exceptions. A task may
+            # enqueue lifecycle events immediately before raising, and callers should
+            # be able to observe those terminal events.
+            try:
+                return self._output_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+
+            # Check if any task failed after queued events have been consumed.
             self._check_task_exceptions()
 
             # Check exit condition: poll done and output queue empty
