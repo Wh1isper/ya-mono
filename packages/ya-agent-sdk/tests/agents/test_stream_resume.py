@@ -6,7 +6,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart, UserPromptPart
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    RetryPromptPart,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from ya_agent_sdk.agents.main import create_agent, stream_agent
 from ya_agent_sdk.environment.local import LocalEnvironment
@@ -141,3 +149,61 @@ async def test_stream_agent_closes_unreturned_tool_calls_before_resume(tmp_path:
     resume_request = resume_messages[-1]
     assert isinstance(resume_request, ModelRequest)
     assert any(isinstance(part, UserPromptPart) for part in resume_request.parts)
+
+
+async def test_stream_agent_treats_retry_prompt_as_tool_call_completion(tmp_path: Path) -> None:
+    calls: list[list[ModelMessage]] = []
+    history = [
+        ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="shell_exec",
+                    args={"command": "pytest"},
+                    tool_call_id="call-1",
+                )
+            ]
+        ),
+        ModelRequest(
+            parts=[
+                RetryPromptPart(
+                    tool_name="shell_exec",
+                    tool_call_id="call-1",
+                    content="retry with corrected arguments",
+                )
+            ]
+        ),
+    ]
+
+    async def stream_function(messages: list[ModelMessage], _agent_info: AgentInfo):
+        calls.append(list(messages))
+        if len(calls) == 1:
+            raise RuntimeError("simulated retry stream disconnect")
+        yield "resumed after retry prompt"
+
+    runtime = _make_runtime(tmp_path, FunctionModel(stream_function=stream_function))
+
+    async with stream_agent(
+        runtime,
+        "continue task",
+        message_history=history,
+        resume_on_error=True,
+        resume_max_attempts=2,
+    ) as streamer:
+        async for _event in streamer:
+            pass
+        streamer.raise_if_exception()
+
+    assert len(calls) == 2
+    resume_messages = calls[1]
+    synthetic_tool_returns = [
+        part
+        for message in resume_messages
+        if isinstance(message, ModelRequest)
+        for part in message.parts
+        if isinstance(part, ToolReturnPart)
+    ]
+    assert synthetic_tool_returns == []
+    assert any(
+        isinstance(message, ModelRequest) and any(isinstance(part, RetryPromptPart) for part in message.parts)
+        for message in resume_messages
+    )

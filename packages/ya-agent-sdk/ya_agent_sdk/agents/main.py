@@ -26,6 +26,7 @@ from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    RetryPromptPart,
     ToolReturnPart,
     UserContent,
 )
@@ -1252,7 +1253,7 @@ async def stream_agent(  # noqa: C901
                         unreturned_tool_call_ids.add(part.tool_call_id)
             elif isinstance(message, ModelRequest):
                 for part in message.parts:
-                    if isinstance(part, ToolReturnPart):
+                    if isinstance(part, ToolReturnPart | RetryPromptPart):
                         unreturned_tool_call_ids.discard(part.tool_call_id)
         return bool(unreturned_tool_call_ids)
 
@@ -1273,7 +1274,7 @@ async def stream_agent(  # noqa: C901
                         unreturned_tool_calls[part.tool_call_id] = part.tool_name
             elif isinstance(message, ModelRequest):
                 for part in message.parts:
-                    if isinstance(part, ToolReturnPart):
+                    if isinstance(part, ToolReturnPart | RetryPromptPart):
                         unreturned_tool_calls.pop(part.tool_call_id, None)
 
         normalized_history = list(history)
