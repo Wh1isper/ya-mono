@@ -27,11 +27,11 @@ def _request_hook(api_key: str) -> Callable[[httpx.Request], Awaitable[httpx.Req
     return _hook
 
 
-# DeepSeek V4 thinking models return reasoning tokens through the OpenAI-compatible
-# `reasoning_content` field. The chat alias routes to the current DeepSeek chat
-# model family, so it receives the same profile patch. R1/deepseek-reasoner use a
-# different strict input contract and are intentionally handled by pydantic-ai's
-# built-in DeepSeek profile.
+# DeepSeek V4 and MiMo V2.5 thinking models return reasoning tokens through the
+# OpenAI-compatible `reasoning_content` field. The chat alias routes to the
+# current DeepSeek chat model family, so it receives the same profile patch.
+# R1/deepseek-reasoner use a different strict input contract and are
+# intentionally handled by pydantic-ai's built-in DeepSeek profile.
 _DEEPSEEK_V4_MODEL_KEYWORDS: tuple[str, ...] = (
     "deepseek-v4",
     "deepseek_v4",
@@ -43,6 +43,12 @@ _DEEPSEEK_EXCLUDED_MODEL_KEYWORDS: tuple[str, ...] = (
     "deepseek-r1",
     "deepseek_r1",
 )
+_MIMO_V2_5_MODEL_KEYWORDS: tuple[str, ...] = (
+    "mimo-v2.5",
+    "mimo_v2.5",
+    "mimo-v2-5",
+    "mimo_v2_5",
+)
 
 
 def _is_deepseek_model(model_name: str) -> bool:
@@ -53,14 +59,23 @@ def _is_deepseek_model(model_name: str) -> bool:
     return any(keyword in lower for keyword in _DEEPSEEK_V4_MODEL_KEYWORDS)
 
 
-def _build_deepseek_profile():
-    """Build the OpenAI profile required by DeepSeek V4 thinking mode.
+def _is_mimo_model(model_name: str) -> bool:
+    """Return whether ``model_name`` should use the MiMo V2.5 profile patch."""
+    lower = model_name.lower()
+    return any(keyword in lower for keyword in _MIMO_V2_5_MODEL_KEYWORDS)
 
-    pydantic-ai's bundled ``deepseek_model_profile`` currently models R1 and
-    returns a plain ``ModelProfile``. DeepSeek V4 thinking mode emits reasoning
-    through the OpenAI-compatible ``reasoning_content`` field, and assistant
-    messages that performed tool calls must send that field back in subsequent
-    requests.
+
+def _requires_reasoning_content_profile(model_name: str) -> bool:
+    """Return whether ``model_name`` needs field-mode reasoning round-tripping."""
+    return _is_deepseek_model(model_name) or _is_mimo_model(model_name)
+
+
+def _build_reasoning_content_profile():
+    """Build the OpenAI profile required by reasoning_content thinking mode.
+
+    DeepSeek V4 and MiMo V2.5 thinking modes emit reasoning through the
+    OpenAI-compatible ``reasoning_content`` field, and assistant messages that
+    performed tool calls must send that field back in subsequent requests.
 
     Setting ``openai_chat_thinking_field`` lets ``OpenAIChatModel`` read incoming
     reasoning from ``reasoning_content``. Setting
@@ -80,10 +95,10 @@ def _build_deepseek_profile():
 
 
 def _build_openai_chat_model(model_name: str, provider: Provider[Any]) -> Model:
-    """Construct an OpenAIChatModel with the DeepSeek profile patch when needed."""
+    """Construct an OpenAIChatModel with reasoning profile patches when needed."""
     from pydantic_ai.models.openai import OpenAIChatModel
 
-    profile = _build_deepseek_profile() if _is_deepseek_model(model_name) else None
+    profile = _build_reasoning_content_profile() if _requires_reasoning_content_profile(model_name) else None
     return OpenAIChatModel(model_name=model_name, provider=provider, profile=profile)
 
 
@@ -189,16 +204,17 @@ def infer_model(gateway_name: str, model: str, extra_headers: dict[str, str] | N
     Returns:
         The inferred Model instance.
 
-    DeepSeek V4:
-        When ``model`` looks like a DeepSeek V4 thinking model and uses an
-        OpenAI-compatible chat provider, the gateway constructs the
-        ``OpenAIChatModel`` directly with a corrected ``OpenAIModelProfile``.
-        This preserves ``reasoning_content`` round-tripping for tool-call turns.
+    DeepSeek V4 / MiMo V2.5:
+        When ``model`` looks like a thinking model that emits reasoning through
+        ``reasoning_content`` and uses an OpenAI-compatible chat provider, the
+        gateway constructs the ``OpenAIChatModel`` directly with a corrected
+        ``OpenAIModelProfile``. This preserves reasoning round-tripping for
+        tool-call turns.
     """
     provider_factory = make_gateway_provider(gateway_name, extra_headers)
 
     provider_prefix, model_name = _split_provider_and_model(model)
-    if provider_prefix in ("openai", "openai-chat", "chat") and _is_deepseek_model(model_name):
+    if provider_prefix in ("openai", "openai-chat", "chat") and _requires_reasoning_content_profile(model_name):
         provider = provider_factory(provider_prefix)
         return _build_openai_chat_model(model_name, provider)
 

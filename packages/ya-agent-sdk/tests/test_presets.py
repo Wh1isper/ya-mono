@@ -71,6 +71,8 @@ from ya_agent_sdk.presets import (
     DEEPSEEK_V4_MAX,
     DEEPSEEK_V4_OFF,
     INHERIT,
+    MIMO_V2_5_DEFAULT,
+    MIMO_V2_5_PRO_DEFAULT,
     OPENAI_DEFAULT,
     OPENAI_HIGH,
     OPENAI_LOW,
@@ -368,6 +370,14 @@ def test_deepseek_v4_presets_structure() -> None:
     assert "openai_reasoning_effort" not in DEEPSEEK_V4_OFF
 
 
+def test_mimo_v2_5_presets_structure() -> None:
+    """Test that MiMo V2.5 presets have expected structure."""
+    for preset in [MIMO_V2_5_DEFAULT, MIMO_V2_5_PRO_DEFAULT]:
+        assert preset["extra_body"] == {"thinking": {"type": "enabled"}}
+        assert "openai_reasoning_effort" not in preset
+        assert "max_tokens" not in preset
+
+
 def test_get_model_settings_by_enum() -> None:
     """Test getting model settings by enum."""
     settings = get_model_settings(ModelSettingsPreset.ANTHROPIC_HIGH)
@@ -389,6 +399,9 @@ def test_get_model_settings_by_enum() -> None:
     settings_deepseek = get_model_settings(ModelSettingsPreset.DEEPSEEK_V4_MAX)
     assert settings_deepseek == DEEPSEEK_V4_MAX
 
+    settings_mimo = get_model_settings(ModelSettingsPreset.MIMO_V2_5_PRO_DEFAULT)
+    assert settings_mimo == MIMO_V2_5_PRO_DEFAULT
+
 
 def test_get_model_settings_by_string() -> None:
     """Test getting model settings by string name."""
@@ -404,6 +417,9 @@ def test_get_model_settings_by_string() -> None:
 
     settings_deepseek = get_model_settings("deepseek_v4_max")
     assert settings_deepseek == DEEPSEEK_V4_MAX
+
+    settings_mimo = get_model_settings("mimo_v2_5_pro")
+    assert settings_mimo == MIMO_V2_5_PRO_DEFAULT
 
 
 def test_get_model_settings_by_alias() -> None:
@@ -453,6 +469,15 @@ def test_get_model_settings_by_alias() -> None:
 
     settings = get_model_settings("deepseek_v4")
     assert settings == DEEPSEEK_V4_DEFAULT
+
+    settings = get_model_settings("mimo")
+    assert settings == MIMO_V2_5_PRO_DEFAULT
+
+    settings = get_model_settings("mimo_v2.5")
+    assert settings == MIMO_V2_5_DEFAULT
+
+    settings = get_model_settings("mimo_v2.5_pro")
+    assert settings == MIMO_V2_5_PRO_DEFAULT
 
 
 def test_get_model_settings_invalid() -> None:
@@ -582,6 +607,11 @@ def test_list_presets() -> None:
         "high",
         "low",
         "medium",
+        "mimo",
+        "mimo_v2.5",
+        "mimo_v2.5_pro",
+        "mimo_v2_5",
+        "mimo_v2_5_pro",
         "openai",
         "openai_default",
         "openai_high",
@@ -767,6 +797,14 @@ def test_model_cfg_presets_structure() -> None:
     assert cfg_deepseek_v4_1m["image_split_max_height"] == 4096
     assert cfg_deepseek_v4_1m["image_split_overlap"] == 50
 
+    cfg_mimo_pro = get_model_cfg("mimo_v2_5_pro_1m")
+    assert cfg_mimo_pro["context_window"] == 1_000_000
+    assert cfg_mimo_pro["max_images"] == 0
+    assert cfg_mimo_pro["max_videos"] == 0
+    assert cfg_mimo_pro["split_large_images"] is False
+    assert cfg_mimo_pro["image_split_max_height"] == 4096
+    assert cfg_mimo_pro["image_split_overlap"] == 50
+
 
 def test_model_cfg_capabilities() -> None:
     """Test that ModelConfig presets have correct capabilities."""
@@ -793,6 +831,19 @@ def test_model_cfg_capabilities() -> None:
 
     cfg_deepseek_v4 = get_model_cfg("deepseek_v4_1m")
     assert cfg_deepseek_v4["capabilities"] == {ModelCapability.reasoning_required}
+
+    # MiMo V2.5: reasoning round-trip required and foreign thinking stripped
+    cfg_mimo = get_model_cfg("mimo_v2_5")
+    assert cfg_mimo["capabilities"] == {
+        ModelCapability.reasoning_required,
+        ModelCapability.reasoning_foreign_incompatible,
+    }
+
+    cfg_mimo_pro = get_model_cfg("mimo_v2_5_pro")
+    assert cfg_mimo_pro["capabilities"] == {
+        ModelCapability.reasoning_required,
+        ModelCapability.reasoning_foreign_incompatible,
+    }
 
     # Gemini: vision + video + document
     cfg_gemini = get_model_cfg("gemini_1m")
@@ -821,6 +872,10 @@ def test_get_model_cfg_by_enum() -> None:
     cfg_deepseek_v4 = get_model_cfg(ModelConfigPreset.DEEPSEEK_V4_1M)
     assert cfg_deepseek_v4["context_window"] == 1_000_000
     assert cfg_deepseek_v4["max_videos"] == 0
+
+    cfg_mimo_pro = get_model_cfg(ModelConfigPreset.MIMO_V2_5_PRO_1M)
+    assert cfg_mimo_pro["context_window"] == 1_000_000
+    assert cfg_mimo_pro["max_videos"] == 0
 
     cfg_gemini = get_model_cfg(ModelConfigPreset.GEMINI_1M)
     assert cfg_gemini["context_window"] == 1_000_000
@@ -852,6 +907,14 @@ def test_get_model_cfg_by_string() -> None:
     assert cfg_deepseek_v4["context_window"] == 1_000_000
     assert cfg_deepseek_v4["max_videos"] == 0
 
+    cfg_mimo = get_model_cfg("mimo_v2_5_1m")
+    assert cfg_mimo["context_window"] == 1_000_000
+    assert cfg_mimo["max_videos"] == 0
+
+    cfg_mimo_pro = get_model_cfg("mimo_v2_5_pro_1m")
+    assert cfg_mimo_pro["context_window"] == 1_000_000
+    assert cfg_mimo_pro["max_videos"] == 0
+
 
 def test_get_model_cfg_by_alias() -> None:
     """Test getting model config by alias."""
@@ -878,6 +941,21 @@ def test_get_model_cfg_by_alias() -> None:
     assert cfg["context_window"] == 1_000_000
 
     cfg = get_model_cfg("deepseek_v4")
+    assert cfg["context_window"] == 1_000_000
+
+    cfg = get_model_cfg("mimo")
+    assert cfg["context_window"] == 1_000_000
+
+    cfg = get_model_cfg("mimo_v2.5")
+    assert cfg["context_window"] == 1_000_000
+
+    cfg = get_model_cfg("mimo_v2.5_pro")
+    assert cfg["context_window"] == 1_000_000
+
+    cfg = get_model_cfg("mimo_v2_5")
+    assert cfg["context_window"] == 1_000_000
+
+    cfg = get_model_cfg("mimo_v2_5_pro")
     assert cfg["context_window"] == 1_000_000
 
 
@@ -941,5 +1019,12 @@ def test_list_model_cfg_presets() -> None:
         "gpt5",
         "gpt5_1m",
         "gpt5_270k",
+        "mimo",
+        "mimo_v2.5",
+        "mimo_v2.5_pro",
+        "mimo_v2_5",
+        "mimo_v2_5_1m",
+        "mimo_v2_5_pro",
+        "mimo_v2_5_pro_1m",
         "openai",
     ])
