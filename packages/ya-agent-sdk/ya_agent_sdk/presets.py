@@ -310,6 +310,10 @@ class ModelSettingsPreset(StrEnum):
     DEEPSEEK_V4_MAX = "deepseek_v4_max"
     DEEPSEEK_V4_OFF = "deepseek_v4_off"
 
+    # MiMo V2.5 presets (OpenAI-compatible API)
+    MIMO_V2_5_DEFAULT = "mimo_v2_5"
+    MIMO_V2_5_PRO_DEFAULT = "mimo_v2_5_pro"
+
     # Gemini thinking_budget presets (for Gemini 2.5)
     GEMINI_THINKING_BUDGET_DEFAULT = "gemini_thinking_budget_default"
     GEMINI_THINKING_BUDGET_HIGH = "gemini_thinking_budget_high"
@@ -792,6 +796,42 @@ DEEPSEEK_V4_OFF: dict[str, Any] = _deepseek_v4_settings(
 
 
 # =============================================================================
+# MiMo V2.5 Presets (OpenAI-compatible API)
+# =============================================================================
+
+
+def _mimo_v2_5_settings(
+    *,
+    max_tokens: int | None = None,
+) -> dict[str, Any]:
+    """Create MiMo V2.5 OpenAI-compatible model settings.
+
+    MiMo V2.5 thinking mode is enabled through the OpenAI-compatible
+    ``extra_body.thinking`` payload. The API uses fixed thinking mode, so
+    reasoning effort is omitted.
+
+    Args:
+        max_tokens: Maximum output tokens.
+
+    Returns:
+        Dict suitable for OpenAI Chat Completions model settings.
+    """
+    settings: dict[str, Any] = {
+        "extra_body": {"thinking": {"type": "enabled"}},
+    }
+    if max_tokens is not None:
+        settings["max_tokens"] = max_tokens
+    return settings
+
+
+MIMO_V2_5_DEFAULT: dict[str, Any] = _mimo_v2_5_settings()
+"""MiMo V2.5 default: thinking enabled."""
+
+MIMO_V2_5_PRO_DEFAULT: dict[str, Any] = _mimo_v2_5_settings()
+"""MiMo V2.5 Pro default: thinking enabled."""
+
+
+# =============================================================================
 # Gemini thinking_budget Presets (for Gemini 2.5)
 # =============================================================================
 
@@ -1010,6 +1050,9 @@ _PRESET_REGISTRY: dict[str, dict[str, Any]] = {
     ModelSettingsPreset.DEEPSEEK_V4_HIGH.value: DEEPSEEK_V4_HIGH,
     ModelSettingsPreset.DEEPSEEK_V4_MAX.value: DEEPSEEK_V4_MAX,
     ModelSettingsPreset.DEEPSEEK_V4_OFF.value: DEEPSEEK_V4_OFF,
+    # MiMo V2.5
+    ModelSettingsPreset.MIMO_V2_5_DEFAULT.value: MIMO_V2_5_DEFAULT,
+    ModelSettingsPreset.MIMO_V2_5_PRO_DEFAULT.value: MIMO_V2_5_PRO_DEFAULT,
     # Gemini thinking_budget (for Gemini 2.5)
     ModelSettingsPreset.GEMINI_THINKING_BUDGET_DEFAULT.value: GEMINI_THINKING_BUDGET_DEFAULT,
     ModelSettingsPreset.GEMINI_THINKING_BUDGET_HIGH.value: GEMINI_THINKING_BUDGET_HIGH,
@@ -1042,6 +1085,9 @@ _PRESET_ALIASES: dict[str, str] = {
     "openai_responses": ModelSettingsPreset.OPENAI_RESPONSES_DEFAULT.value,
     "deepseek": ModelSettingsPreset.DEEPSEEK_V4_DEFAULT.value,
     "deepseek_v4": ModelSettingsPreset.DEEPSEEK_V4_DEFAULT.value,
+    "mimo": ModelSettingsPreset.MIMO_V2_5_PRO_DEFAULT.value,
+    "mimo_v2.5": ModelSettingsPreset.MIMO_V2_5_DEFAULT.value,
+    "mimo_v2.5_pro": ModelSettingsPreset.MIMO_V2_5_PRO_DEFAULT.value,
     "gemini_2.5": ModelSettingsPreset.GEMINI_THINKING_BUDGET_DEFAULT.value,
     "gemini_3": ModelSettingsPreset.GEMINI_THINKING_LEVEL_DEFAULT.value,
     "gemini": ModelSettingsPreset.GEMINI_THINKING_LEVEL_DEFAULT.value,  # Default to Gemini 3
@@ -1165,6 +1211,10 @@ class ModelConfigPreset(StrEnum):
     DEEPSEEK_V4_400K = "deepseek_v4_400k"
     DEEPSEEK_V4_1M = "deepseek_v4_1m"
 
+    # MiMo models
+    MIMO_V2_5_1M = "mimo_v2_5_1m"
+    MIMO_V2_5_PRO_1M = "mimo_v2_5_pro_1m"
+
     # Gemini models
     GEMINI_200K = "gemini_200k"
     GEMINI_1M = "gemini_1m"
@@ -1245,6 +1295,33 @@ _MODEL_CFG_REGISTRY: dict[str, dict[str, Any]] = {
         "image_split_overlap": 50,
         "capabilities": {ModelCapability.reasoning_required},
     },
+    # MiMo V2.5 models (text-only reasoning models)
+    ModelConfigPreset.MIMO_V2_5_1M.value: {
+        "context_window": 1_000_000,
+        "max_images": 0,
+        "max_videos": 0,
+        "support_gif": False,
+        "split_large_images": False,
+        "image_split_max_height": 4096,
+        "image_split_overlap": 50,
+        "capabilities": {
+            ModelCapability.reasoning_required,
+            ModelCapability.reasoning_foreign_incompatible,
+        },
+    },
+    ModelConfigPreset.MIMO_V2_5_PRO_1M.value: {
+        "context_window": 1_000_000,
+        "max_images": 0,
+        "max_videos": 0,
+        "support_gif": False,
+        "split_large_images": False,
+        "image_split_max_height": 4096,
+        "image_split_overlap": 50,
+        "capabilities": {
+            ModelCapability.reasoning_required,
+            ModelCapability.reasoning_foreign_incompatible,
+        },
+    },
     # Gemini models (vision + video support)
     ModelConfigPreset.GEMINI_200K.value: {
         "context_window": 200_000,
@@ -1288,6 +1365,11 @@ _MODEL_CFG_ALIASES: dict[str, str] = {
     "deepseek": ModelConfigPreset.DEEPSEEK_V4_1M.value,
     "deepseek_400k": ModelConfigPreset.DEEPSEEK_V4_400K.value,
     "deepseek_v4": ModelConfigPreset.DEEPSEEK_V4_1M.value,
+    "mimo": ModelConfigPreset.MIMO_V2_5_PRO_1M.value,
+    "mimo_v2.5": ModelConfigPreset.MIMO_V2_5_1M.value,
+    "mimo_v2.5_pro": ModelConfigPreset.MIMO_V2_5_PRO_1M.value,
+    "mimo_v2_5": ModelConfigPreset.MIMO_V2_5_1M.value,
+    "mimo_v2_5_pro": ModelConfigPreset.MIMO_V2_5_PRO_1M.value,
     "gemini": ModelConfigPreset.GEMINI_200K.value,
 }
 
