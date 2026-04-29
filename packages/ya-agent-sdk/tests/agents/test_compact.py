@@ -850,6 +850,7 @@ def test_strip_incompatible_settings_removes_cache_keys() -> None:
         "max_tokens": 4096,
         "anthropic_cache_instructions": True,
         "anthropic_cache_messages": True,
+        "anthropic_cache": "1h",
         "anthropic_cache_tool_definitions": "5m",
     }
     result = _strip_incompatible_settings(settings)
@@ -922,6 +923,7 @@ def test_strip_incompatible_settings_full_preset() -> None:
         "anthropic_effort": "high",
         "anthropic_cache_instructions": True,
         "anthropic_cache_messages": True,
+        "anthropic_cache": True,
         "extra_headers": {
             "anthropic-beta": "context-1m-2025-08-07,interleaved-thinking-2025-05-14,context-management-2025-06-27",
         },
@@ -997,6 +999,7 @@ def test_strip_incompatible_settings_known_keys() -> None:
     assert "anthropic_cache_tool_definitions" in _COMPACT_STRIP_KEYS
     assert "anthropic_cache_instructions" in _COMPACT_STRIP_KEYS
     assert "anthropic_cache_messages" in _COMPACT_STRIP_KEYS
+    assert "anthropic_cache" in _COMPACT_STRIP_KEYS
     assert "thinking" in _COMPACT_STRIP_KEYS
     assert "anthropic_thinking" in _COMPACT_STRIP_KEYS
     assert "anthropic_effort" in _COMPACT_STRIP_KEYS
