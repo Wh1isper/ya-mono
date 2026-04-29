@@ -78,6 +78,7 @@ _COMPACT_STRIP_KEYS = frozenset({
     "anthropic_cache_tool_definitions",
     "anthropic_cache_instructions",
     "anthropic_cache_messages",
+    "anthropic_cache",
     # Thinking keys (incompatible with ToolOutput)
     "thinking",
     "anthropic_thinking",
