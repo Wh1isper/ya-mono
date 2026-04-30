@@ -9,10 +9,11 @@ import contextlib
 import glob as glob_module
 import os
 import shutil
+import signal
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import anyio
 from y_agent_environment import (
@@ -33,6 +34,57 @@ from y_agent_environment import (
 
 if TYPE_CHECKING:
     pass
+
+
+def _process_group_kwargs() -> dict[str, Any]:
+    """Return subprocess kwargs that isolate a command tree for lifecycle control."""
+    if os.name == "posix":
+        return {"start_new_session": True}
+    return {}
+
+
+def _send_process_tree_signal(process: asyncio.subprocess.Process, sig: int) -> None:
+    """Send a signal to the whole process tree when process groups are available."""
+    if process.pid is None:
+        return
+
+    if os.name == "posix":
+        with contextlib.suppress(ProcessLookupError, OSError):
+            os.killpg(os.getpgid(process.pid), sig)
+            return
+
+    with contextlib.suppress(ProcessLookupError, OSError):
+        process.send_signal(sig)
+
+
+async def _terminate_process_tree(
+    process: asyncio.subprocess.Process,
+    *,
+    timeout: float = 5.0,
+) -> None:
+    """Terminate a process tree gracefully, then force kill if it keeps running."""
+    if process.returncode is not None:
+        return
+
+    _send_process_tree_signal(process, signal.SIGTERM)
+    try:
+        await asyncio.wait_for(process.wait(), timeout=timeout)
+        return
+    except TimeoutError:
+        pass
+
+    await _kill_process_tree(process)
+
+
+async def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
+    """Force kill a process tree and wait for the root process to be reaped."""
+    if process.returncode is None:
+        _send_process_tree_signal(process, signal.SIGKILL)
+        if os.name != "posix":
+            with contextlib.suppress(ProcessLookupError, OSError):
+                process.kill()
+    with contextlib.suppress(ProcessLookupError, OSError):
+        await process.wait()
 
 
 class LocalFileOperator(FileOperator):
@@ -956,6 +1008,7 @@ class LocalShell(Shell):
                 stderr=asyncio.subprocess.PIPE,
                 cwd=resolved_cwd,
                 env=effective_env,
+                **_process_group_kwargs(),
             )
 
             try:
@@ -967,14 +1020,7 @@ class LocalShell(Shell):
                 else:
                     stdout_bytes, stderr_bytes = await process.communicate()
             except TimeoutError as e:
-                # Try graceful termination first
-                process.terminate()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=5.0)
-                except TimeoutError:
-                    # Force kill if graceful termination fails
-                    process.kill()
-                    await process.wait()
+                await _terminate_process_tree(process)
                 raise ShellTimeoutError(command, effective_timeout or 0) from e
 
             stdout = stdout_bytes.decode("utf-8", errors="replace")
@@ -1021,6 +1067,7 @@ class LocalShell(Shell):
                 stderr=asyncio.subprocess.PIPE,
                 cwd=resolved_cwd,
                 env=effective_env,
+                **_process_group_kwargs(),
             )
         except Exception as e:
             raise ShellExecutionError(command, stderr=str(e)) from e
@@ -1033,13 +1080,10 @@ class LocalShell(Shell):
             return process.returncode or 0
 
         async def _kill() -> None:
-            with contextlib.suppress(ProcessLookupError):
-                process.kill()
+            await _kill_process_tree(process)
 
         async def _send_signal(sig: int) -> None:
-            if process.pid is not None:
-                with contextlib.suppress(ProcessLookupError, OSError):
-                    os.kill(process.pid, sig)
+            _send_process_tree_signal(process, sig)
 
         stdin = StdinAdapter(process.stdin) if process.stdin is not None else None
 
