@@ -7,6 +7,7 @@ from ya_agent_sdk.toolsets.core.base import BaseTool
 from ya_agent_sdk.toolsets.core.filesystem._types import (
     BatchMkdirResponse,
     CopyResult,
+    DeleteResult,
     EditItem,
     FileInfo,
     FileInfoWithStats,
@@ -20,6 +21,7 @@ from ya_agent_sdk.toolsets.core.filesystem._types import (
     ViewSegment,
     ViewTruncationInfo,
 )
+from ya_agent_sdk.toolsets.core.filesystem.delete import DeleteTool
 from ya_agent_sdk.toolsets.core.filesystem.edit import EditTool, MultiEditTool
 from ya_agent_sdk.toolsets.core.filesystem.glob import GlobTool
 from ya_agent_sdk.toolsets.core.filesystem.grep import GrepTool
@@ -40,12 +42,15 @@ tools: list[type[BaseTool]] = [
     MkdirTool,
     MoveTool,
     CopyTool,
+    DeleteTool,
 ]
 
 __all__ = [
     "BatchMkdirResponse",
     "CopyResult",
     "CopyTool",
+    "DeleteResult",
+    "DeleteTool",
     "EditItem",
     "EditTool",
     "FileInfo",

@@ -449,6 +449,9 @@ class FileChangeAction(StrEnum):
     copied = "copied"
     """A file was copied."""
 
+    deleted = "deleted"
+    """A file or directory was deleted."""
+
 
 @dataclass
 class TextReplacement:
@@ -482,10 +485,10 @@ class FileChange:
 
 @dataclass
 class FileChangeEvent(AgentEvent):
-    """Emitted when files are created, modified, moved, or copied.
+    """Emitted when files are created, modified, moved, copied, or deleted.
 
     One event per tool call, may contain multiple file changes
-    (e.g., multi_edit edits one file, move/copy handle multiple pairs).
+    (e.g., multi_edit edits one file, move/copy/delete handle multiple items).
 
     Only emitted on successful operations. Failed operations (file not found,
     text not matched, etc.) do not produce events.

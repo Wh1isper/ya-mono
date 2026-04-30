@@ -85,26 +85,22 @@ def _make_contextvar_cleanup_error() -> ValueError:
     )
 
 
-class _RaisingTask:
-    def __init__(self, exc: Exception) -> None:
-        self.exc = exc
-        self.cancel_called = False
-
-    def done(self) -> bool:
-        return False
-
-    def cancel(self) -> None:
-        self.cancel_called = True
-
-    def __await__(self):
-        async def _raise():
-            raise self.exc
-
-        return _raise().__await__()
+async def _raise_on_cancel(exc: Exception) -> None:
+    try:
+        await asyncio.sleep(3600)
+    except asyncio.CancelledError:
+        raise exc from None
 
 
 async def _sleep_forever() -> None:
     await asyncio.sleep(3600)
+
+
+async def _ignore_cancel_until_released(release: asyncio.Event) -> None:
+    try:
+        await asyncio.sleep(3600)
+    except asyncio.CancelledError:
+        await release.wait()
 
 
 # =============================================================================
@@ -988,12 +984,14 @@ async def test_tui_app_cancel_agent_task_suppresses_benign_contextvar_cleanup_er
     config_manager = MockConfigManager()
 
     app = TUIApp(config=config, config_manager=config_manager)
-    task = _RaisingTask(_make_contextvar_cleanup_error())
+    task = asyncio.create_task(_raise_on_cancel(_make_contextvar_cleanup_error()))
     app._agent_task = task
 
+    await asyncio.sleep(0)
     await app._cancel_agent_task()
 
-    assert task.cancel_called is True
+    assert task.cancelled() is False
+    assert task.done() is True
     assert app._agent_task is None
 
 
@@ -1011,6 +1009,51 @@ async def test_tui_app_cancel_managed_tasks_cleans_up_fire_and_forget_tasks():
 
     assert task.cancelled() is True
     assert app._managed_tasks == set()
+
+
+@pytest.mark.asyncio
+async def test_tui_app_cancel_managed_tasks_retains_timed_out_tasks(monkeypatch: pytest.MonkeyPatch):
+    """Shutdown should keep references to managed tasks that outlive the cancellation wait."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+
+    app = TUIApp(config=config, config_manager=config_manager)
+    release = asyncio.Event()
+    task = app._track_managed_task(asyncio.create_task(_ignore_cancel_until_released(release)))
+    monkeypatch.setattr("yaacli.app.tui._SHUTDOWN_MANAGED_TASKS_TIMEOUT", 0.001)
+
+    await asyncio.sleep(0)
+    await app._cancel_managed_tasks()
+
+    assert task in app._managed_tasks
+
+    release.set()
+    await task
+    await asyncio.sleep(0)
+    assert app._managed_tasks == set()
+
+
+@pytest.mark.asyncio
+async def test_tui_app_cancel_agent_task_retains_timed_out_task(monkeypatch: pytest.MonkeyPatch):
+    """Shutdown should keep the agent task reference when cancellation outlives the wait."""
+    config = MockConfig()
+    config_manager = MockConfigManager()
+
+    app = TUIApp(config=config, config_manager=config_manager)
+    release = asyncio.Event()
+    task = asyncio.create_task(_ignore_cancel_until_released(release))
+    app._agent_task = task
+    monkeypatch.setattr("yaacli.app.tui._SHUTDOWN_AGENT_TASK_TIMEOUT", 0.001)
+
+    await asyncio.sleep(0)
+    await app._cancel_agent_task()
+
+    assert app._agent_task is task
+
+    release.set()
+    await task
+    await asyncio.sleep(0)
+    assert app._agent_task is None
 
 
 def test_tui_app_recover_tui_screen_resets_redraws_and_invalidates() -> None:

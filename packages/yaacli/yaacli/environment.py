@@ -61,7 +61,12 @@ class TUIEnvironment(LocalEnvironment):
         self.resources.set(BACKGROUND_MONITOR_KEY, self._background_monitor)
 
     async def _teardown(self) -> None:
-        self._background_monitor = None
+        """Clean up environment resources.
+
+        Keep _background_monitor set until Environment.__aexit__ closes the
+        resource registry, so BackgroundMonitor.close() can stop its polling
+        task and cancel tracked background tasks.
+        """
         await super()._teardown()
 
     @property

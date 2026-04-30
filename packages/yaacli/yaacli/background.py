@@ -52,6 +52,7 @@ BACKGROUND_MONITOR_KEY = "background_monitor"
 
 
 _SHELL_POLL_INTERVAL = 1.0  # seconds
+_SHUTDOWN_BACKGROUND_TASKS_TIMEOUT = 5.0
 
 
 @dataclass
@@ -471,7 +472,13 @@ class BackgroundMonitor(BaseResource):
         for task in tasks:
             task.cancel()
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            _done, pending = await asyncio.wait(tasks, timeout=_SHUTDOWN_BACKGROUND_TASKS_TIMEOUT)
+            if pending:
+                logger.warning(
+                    "%d background task(s) did not finish within %.1fs during shutdown",
+                    len(pending),
+                    _SHUTDOWN_BACKGROUND_TASKS_TIMEOUT,
+                )
             logger.debug("Cancelled %d background tasks", len(tasks))
 
         # Clear all state
