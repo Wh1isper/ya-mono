@@ -339,8 +339,39 @@ class TUIApp:
     def _track_managed_task(self, task: asyncio.Task[Any]) -> asyncio.Task[Any]:
         """Track a fire-and-forget task so it can be cancelled on shutdown."""
         self._managed_tasks.add(task)
-        task.add_done_callback(self._managed_tasks.discard)
+        task.add_done_callback(self._on_managed_task_done)
         return task
+
+    def _on_managed_task_done(self, task: asyncio.Future[Any]) -> None:
+        """Release a managed task and consume exceptions from fire-and-forget work."""
+        self._managed_tasks.discard(cast(asyncio.Task[Any], task))
+        self._log_managed_task_exception(task, during_shutdown=False)
+
+    def _log_managed_task_exception(self, task: asyncio.Future[Any], *, during_shutdown: bool) -> None:
+        """Log managed task exceptions after the task has completed."""
+        if task.cancelled():
+            return
+
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            return
+
+        if exc is None:
+            return
+        if _is_benign_contextvar_cleanup_error(exc):
+            logger.debug(
+                "Suppressed ContextVar cleanup error during managed task%s: %s",
+                " shutdown" if during_shutdown else "",
+                _safe_exception_str(exc),
+            )
+            return
+
+        logger.debug(
+            "Managed task ended with exception%s: %s",
+            " during shutdown" if during_shutdown else "",
+            _safe_exception_str(exc),
+        )
 
     def _show_shutdown_status(self, message: str) -> None:
         """Show shutdown progress in the TUI, with stderr fallback after it exits."""
@@ -352,6 +383,11 @@ class TUIApp:
             return
 
         print(f"Shutdown: {message}", file=sys.stderr, flush=True)
+
+    def _on_agent_task_shutdown_done(self, task: asyncio.Future[None]) -> None:
+        """Release a timed-out agent task after cancellation eventually completes."""
+        if self._agent_task is task:
+            self._agent_task = None
 
     async def _cancel_agent_task(self) -> None:
         """Cancel and await the current agent task with a bounded deadline."""
@@ -370,6 +406,7 @@ class TUIApp:
                         _SHUTDOWN_AGENT_TASK_TIMEOUT,
                     )
                     self._show_shutdown_status("agent task cleanup timed out; continuing shutdown")
+                    task.add_done_callback(self._on_agent_task_shutdown_done)
                 for completed in done:
                     if not completed.cancelled():
                         exc = completed.exception()
@@ -383,7 +420,8 @@ class TUIApp:
             else:
                 raise
         finally:
-            self._agent_task = None
+            if self._agent_task is task and task.done():
+                self._agent_task = None
 
     async def _cancel_managed_tasks(self) -> None:
         """Cancel and await fire-and-forget UI tasks created by the TUI."""
@@ -405,20 +443,7 @@ class TUIApp:
             )
             self._show_shutdown_status("UI task cleanup timed out; continuing shutdown")
 
-        results = [task.exception() for task in done if not task.cancelled()]
-        for result in results:
-            if isinstance(result, BaseException):
-                if isinstance(result, asyncio.CancelledError):
-                    continue
-                if _is_benign_contextvar_cleanup_error(result):
-                    logger.debug(
-                        "Suppressed ContextVar cleanup error during managed task shutdown: %s",
-                        _safe_exception_str(result),
-                    )
-                    continue
-                logger.debug("Managed task ended with exception during shutdown: %s", _safe_exception_str(result))
-
-        self._managed_tasks.clear()
+        self._managed_tasks.difference_update(done)
 
     def _recover_tui_screen(self) -> None:
         """Force-clear and fully redraw the TUI after terminal corruption."""
