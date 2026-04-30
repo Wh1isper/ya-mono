@@ -104,7 +104,7 @@ async def test_notes_restore_via_with_state():
 
 
 async def test_notes_in_context_instructions():
-    """Test that note entries appear in runtime instructions XML."""
+    """Test that note keys appear in runtime instructions XML."""
     from ya_agent_sdk.context import AgentContext
 
     async with AgentContext() as ctx:
@@ -112,11 +112,12 @@ async def test_notes_in_context_instructions():
         ctx.note_manager.set("os", "macOS")
 
         instructions = await ctx.get_context_instructions(is_user_prompt=True)
-        assert "<notes>" in instructions
+        assert "<notes" in instructions
+        assert "note_get" in instructions
         assert 'key="lang"' in instructions
-        assert "Chinese" in instructions
+        assert "Chinese" not in instructions
         assert 'key="os"' in instructions
-        assert "macOS" in instructions
+        assert "macOS" not in instructions
 
 
 async def test_notes_not_in_instructions_when_empty():
@@ -125,7 +126,7 @@ async def test_notes_not_in_instructions_when_empty():
 
     async with AgentContext() as ctx:
         instructions = await ctx.get_context_instructions(is_user_prompt=True)
-        assert "<notes>" not in instructions
+        assert "<notes" not in instructions
 
 
 async def test_notes_not_in_instructions_for_tool_response():
@@ -136,4 +137,4 @@ async def test_notes_not_in_instructions_for_tool_response():
         ctx.note_manager.set("lang", "Chinese")
 
         instructions = await ctx.get_context_instructions(is_user_prompt=False)
-        assert "<notes>" not in instructions
+        assert "<notes" not in instructions
