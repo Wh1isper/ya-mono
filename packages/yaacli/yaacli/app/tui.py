@@ -363,21 +363,18 @@ class TUIApp:
             if not task.done():
                 self._show_shutdown_status("cancelling agent task")
                 task.cancel()
-                if isinstance(task, asyncio.Task):
-                    done, pending = await asyncio.wait({task}, timeout=_SHUTDOWN_AGENT_TASK_TIMEOUT)
-                    if pending:
-                        logger.warning(
-                            "Agent task did not finish within %.1fs during shutdown",
-                            _SHUTDOWN_AGENT_TASK_TIMEOUT,
-                        )
-                        self._show_shutdown_status("agent task cleanup timed out; continuing shutdown")
-                    for completed in done:
-                        if not completed.cancelled():
-                            exc = completed.exception()
-                            if exc is not None:
-                                raise exc
-                else:
-                    await task
+                done, pending = await asyncio.wait({task}, timeout=_SHUTDOWN_AGENT_TASK_TIMEOUT)
+                if pending:
+                    logger.warning(
+                        "Agent task did not finish within %.1fs during shutdown",
+                        _SHUTDOWN_AGENT_TASK_TIMEOUT,
+                    )
+                    self._show_shutdown_status("agent task cleanup timed out; continuing shutdown")
+                for completed in done:
+                    if not completed.cancelled():
+                        exc = completed.exception()
+                        if exc is not None:
+                            raise exc
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -2509,14 +2506,23 @@ class TUIApp:
         process: asyncio.subprocess.Process | None = None
 
         try:
-            process = await asyncio.create_subprocess_shell(
-                command_str,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=self.working_dir,
-                env=os.environ.copy(),
-                **({"start_new_session": True} if os.name == "posix" else {}),
-            )
+            if os.name == "posix":
+                process = await asyncio.create_subprocess_shell(
+                    command_str,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=self.working_dir,
+                    env=os.environ.copy(),
+                    start_new_session=True,
+                )
+            else:
+                process = await asyncio.create_subprocess_shell(
+                    command_str,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=self.working_dir,
+                    env=os.environ.copy(),
+                )
 
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
             elapsed = time.time() - start_time
