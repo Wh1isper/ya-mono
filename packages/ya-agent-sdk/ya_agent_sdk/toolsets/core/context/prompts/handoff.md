@@ -37,12 +37,19 @@ Do NOT use technical jargon like "context reset", "context window", or "token li
    - Review existing tasks with `task_list`
    - Create new tasks for pending items with `task_create`
 
-2. **Identify key files** being actively edited or referenced
+2. **Organize notes before summarizing** if note tools are available:
+   - Review note keys shown in runtime context
+   - Use `note_get` for keys whose values may affect continuity
+   - Delete stale or oversized notes with `note`
+   - Keep compact index-style notes that point to files or stable decisions
 
-3. **Note important decisions** -- architecture choices, user preferences
+3. **Identify key files** being actively edited or referenced
+
+4. **Note important decisions** -- architecture choices, user preferences
 
 Task states are automatically preserved. Creating tasks ensures structured
-continuity in the new context.
+continuity in the new context. Note entries are automatically preserved, so clean
+up notes before summarizing to prevent stale or oversized session state from carrying forward.
 </before-summarizing>
 
 <content-structure>

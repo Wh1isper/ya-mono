@@ -510,6 +510,73 @@ async def test_get_context_instructions_with_handoff_warning(tmp_path: Path) -> 
             assert "summarize" in instructions
 
 
+async def test_get_context_instructions_handoff_warning_includes_note_cleanup(tmp_path: Path) -> None:
+    """Should include note cleanup guidance when threshold exceeded and notes exist."""
+    from unittest.mock import MagicMock
+
+    from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+    from pydantic_ai.usage import RequestUsage
+    from ya_agent_sdk.context import ModelConfig
+
+    async with LocalEnvironment(
+        allowed_paths=[tmp_path],
+        default_path=tmp_path,
+        tmp_base_dir=tmp_path,
+    ) as env:
+        async with AgentContext(
+            env=env,
+            model_cfg=ModelConfig(
+                context_window=200000,
+                proactive_context_management_threshold=0.5,
+            ),
+        ) as ctx:
+            ctx.context_manage_tool_names = ["summarize"]
+            ctx.note_manager.set("project", "large value")
+            mock_run_context = MagicMock()
+            mock_run_context.deps = ctx
+            mock_run_context.messages = [
+                ModelRequest(parts=[UserPromptPart(content="Hello")]),
+                ModelResponse(
+                    parts=[TextPart(content="Hi")],
+                    usage=RequestUsage(input_tokens=80000, output_tokens=30000),
+                ),
+            ]
+
+            instructions = await ctx.get_context_instructions(mock_run_context)
+
+            assert "Review note keys" in instructions
+            assert "note_get" in instructions
+            assert "delete stale or oversized notes" in instructions
+
+
+async def test_get_context_instructions_with_notes_lists_keys_only(env: LocalEnvironment) -> None:
+    """Should include note keys in runtime context and omit note values."""
+    async with AgentContext(env=env) as ctx:
+        ctx.note_manager.set("language", "Chinese communication")
+        ctx.note_manager.set("project", "Secret implementation details")
+
+        instructions = await ctx.get_context_instructions(is_user_prompt=True)
+
+        assert "<notes" in instructions
+        assert "note_get" in instructions
+        assert 'key="language"' in instructions
+        assert 'key="project"' in instructions
+        assert "Chinese communication" not in instructions
+        assert "Secret implementation details" not in instructions
+
+
+async def test_get_context_instructions_with_notes_non_user_prompt(env: LocalEnvironment) -> None:
+    """Should omit note keys on non-user prompts."""
+    async with AgentContext(env=env) as ctx:
+        ctx.note_manager.set("language", "Chinese communication")
+
+        instructions = await ctx.get_context_instructions(is_user_prompt=False)
+
+        assert "<notes" not in instructions
+        assert "language" not in instructions
+        assert "Chinese communication" not in instructions
+
+
 async def test_get_context_instructions_no_handoff_warning_below_threshold(tmp_path: Path) -> None:
     """Should not include reminder when below threshold."""
     from unittest.mock import MagicMock

@@ -1,10 +1,14 @@
 <note-guidelines>
 
 <overview>
-Note tool for persisting key-value information across conversation turns.
-Stored entries are automatically injected into your context on every user message.
-Use this to remember important facts, decisions, and preferences within the session.
+Note tools persist key-value information across conversation turns.
+Runtime context includes note keys so you know what is available, and note values are read on demand with `note_get`.
 </overview>
+
+<tools>
+- `note`: Create, update, or delete a note entry.
+- `note_get`: Read a note entry by key, or omit key to read all note entries.
+</tools>
 
 <when-to-use>
 - User states a preference that should be remembered for this session
@@ -15,9 +19,9 @@ Use this to remember important facts, decisions, and preferences within the sess
 
 <best-practices>
 - Use descriptive, stable keys (e.g., "user-language", "project-framework")
-- Keep values concise -- notes are injected every turn
-- Delete entries when they are no longer relevant
-- Do not store large data -- use files instead
+- Keep values concise and delete entries when they are stale
+- Use `note_get` when runtime context lists a relevant note key and the value is needed for the current task
+- Store large data in files and keep only the file path or index in notes
 </best-practices>
 
 </note-guidelines>
