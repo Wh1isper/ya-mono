@@ -1,5 +1,10 @@
 """Tests for LocalFileOperator and LocalShell."""
 
+import asyncio
+import contextlib
+import os
+import shlex
+import signal
 from pathlib import Path
 
 import pytest
@@ -342,6 +347,33 @@ README.md
 # --- LocalShell Tests ---
 
 
+def _process_is_running(pid: int) -> bool:
+    """Return whether a process is still running, treating zombies as stopped."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+    proc_stat = Path(f"/proc/{pid}/stat")
+    if proc_stat.exists():
+        parts = proc_stat.read_text().split()
+        if len(parts) >= 3 and parts[2] == "Z":
+            return False
+
+    return True
+
+
+async def _wait_until_stopped(pid: int, *, timeout: float = 2.0) -> bool:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while asyncio.get_running_loop().time() < deadline:
+        if not _process_is_running(pid):
+            return True
+        await asyncio.sleep(0.05)
+    return not _process_is_running(pid)
+
+
 def test_shell_default_initialization(tmp_path: Path) -> None:
     """Should initialize with provided default_cwd."""
     shell = LocalShell(default_cwd=tmp_path)
@@ -393,6 +425,32 @@ async def test_shell_execute_timeout(tmp_path: Path) -> None:
     shell = LocalShell(default_cwd=tmp_path, allowed_paths=[tmp_path])
     with pytest.raises(ShellTimeoutError):
         await shell.execute("sleep 10", timeout=0.1)
+
+
+async def test_shell_background_kill_terminates_child_process(tmp_path: Path) -> None:
+    """Killing a background shell process should terminate spawned child processes."""
+    shell = LocalShell(default_cwd=tmp_path, allowed_paths=[tmp_path])
+    pidfile = tmp_path / "child.pid"
+    child_pid: int | None = None
+
+    process_id = await shell.start(f"sleep 100 & echo $! > {shlex.quote(str(pidfile))}; wait")
+    try:
+        for _ in range(40):
+            if pidfile.exists():
+                break
+            await asyncio.sleep(0.05)
+
+        child_pid = int(pidfile.read_text().strip())
+        assert _process_is_running(child_pid)
+
+        await shell.kill_process(process_id)
+
+        assert await _wait_until_stopped(child_pid)
+    finally:
+        if child_pid is not None and _process_is_running(child_pid):
+            with contextlib.suppress(ProcessLookupError, OSError):
+                os.kill(child_pid, signal.SIGKILL)
+        await shell.close()
 
 
 async def test_shell_execute_command_not_found(tmp_path: Path) -> None:
