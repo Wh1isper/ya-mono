@@ -1458,10 +1458,14 @@ class AgentContext(BaseModel):
         usage_pct = int(request_usage.total_tokens / self.model_cfg.context_window * 100)
         compact_pct = int(self.model_cfg.compact_threshold * 100)
         tool_names = ", ".join(f"`{n}`" for n in self.context_manage_tool_names)
+        note_guidance = ""
+        if self.note_manager.entries:
+            note_guidance = " Review note keys, read needed values with `note_get`, and delete stale or oversized notes before summarizing."
         reminder_text = (
             f"Context usage is at {usage_pct}% ({request_usage.total_tokens:,} / {self.model_cfg.context_window:,} tokens). "
             f"Auto-compaction will trigger at {compact_pct}%. "
             f"Please use the {tool_names} tool to summarize progress and continue when appropriate."
+            f"{note_guidance}"
         )
 
         reminder_root = Element("system-reminder")
@@ -1474,20 +1478,20 @@ class AgentContext(BaseModel):
 
         Args:
             parent: Parent XML element to append to.
-            is_user_prompt: Only include notes on user prompts to reduce noise.
+            is_user_prompt: Only include note keys on user prompts to reduce noise.
         """
         if not is_user_prompt:
             return
 
-        entries = self.note_manager.list_all()
-        if not entries:
+        keys = self.note_manager.list_keys()
+        if not keys:
             return
 
         notes_elem = SubElement(parent, "notes")
-        for key, value in entries:
+        notes_elem.set("hint", "Note values are omitted from runtime context. Use note_get to read values by key.")
+        for key in keys:
             entry_elem = SubElement(notes_elem, "entry")
             entry_elem.set("key", key)
-            entry_elem.text = value
 
     def prepare_new_run(self) -> Self:
         """Create a fresh context copy for a new agent run.

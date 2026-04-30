@@ -299,11 +299,12 @@ def test_enhance_module_exports() -> None:
     assert hasattr(enhance, "TodoReadTool")
     assert hasattr(enhance, "TodoWriteTool")
     assert hasattr(enhance, "tools")
-    # 4 task tools + 1 memory tool are enabled by default
-    assert len(enhance.tools) == 5
+    # 4 task tools + 2 note tools are enabled by default
+    assert len(enhance.tools) == 6
     # Also check new task tools are exported
     assert hasattr(enhance, "TaskCreateTool")
     assert hasattr(enhance, "TaskGetTool")
     assert hasattr(enhance, "TaskUpdateTool")
     assert hasattr(enhance, "TaskListTool")
+    assert hasattr(enhance, "NoteGetTool")
     assert hasattr(enhance, "NoteTool")

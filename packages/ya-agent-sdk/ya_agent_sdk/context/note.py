@@ -1,8 +1,8 @@
 """Note management for agent sessions.
 
 This module provides a simple key-value note store that persists
-across turns and sessions. Note entries are injected into runtime
-instructions so the agent always has access to stored context.
+across turns and sessions. Runtime instructions expose note keys and
+agents can read note values on demand through the note tools.
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ class NoteManager(BaseModel):
     """Manager for session-persistent note entries.
 
     Provides a simple key-value store that the agent can read/write.
-    Entries are injected into runtime instructions on every user prompt,
-    giving the agent persistent recall across turns.
+    Runtime instructions expose keys on every user prompt, giving the
+    agent persistent recall without injecting full note values.
 
     NoteManager is shared between parent and subagent contexts (shallow copy),
     providing a unified note view across the agent hierarchy.
@@ -74,6 +74,14 @@ class NoteManager(BaseModel):
             List of (key, value) tuples sorted by key.
         """
         return sorted(self.entries.items())
+
+    def list_keys(self) -> list[str]:
+        """Get all entry keys sorted alphabetically.
+
+        Returns:
+            List of note entry keys.
+        """
+        return sorted(self.entries)
 
     def export_notes(self) -> dict[str, str]:
         """Export entries for serialization.
