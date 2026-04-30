@@ -9,6 +9,7 @@ from ya_agent_sdk.context import AgentContext
 from ya_agent_sdk.environment.local import LocalEnvironment
 from ya_agent_sdk.events import FileChangeAction, FileChangeEvent, TextReplacement
 from ya_agent_sdk.toolsets.core.filesystem._types import EditItem
+from ya_agent_sdk.toolsets.core.filesystem.delete import DeleteTool
 from ya_agent_sdk.toolsets.core.filesystem.edit import EditTool, MultiEditTool
 from ya_agent_sdk.toolsets.core.filesystem.move_copy import CopyTool, MoveTool
 from ya_agent_sdk.toolsets.core.filesystem.write import WriteTool
@@ -380,4 +381,67 @@ async def test_copy_failure_does_not_emit_event(tmp_path: Path) -> None:
         tool = CopyTool()
 
         await tool.call(run_ctx, pairs=[{"src": "nonexistent.txt", "dst": "copy.txt"}])
+        assert await _collect_events(ctx) == []
+
+
+# =============================================================================
+# DeleteTool events
+# =============================================================================
+
+
+async def test_delete_emits_deleted_event(tmp_path: Path) -> None:
+    """DeleteTool should emit FileChangeEvent with 'deleted' action."""
+    async with AsyncExitStack() as stack:
+        ctx, run_ctx = await _make_ctx(stack, tmp_path)
+        tool = DeleteTool()
+
+        (tmp_path / "target.txt").write_text("content")
+        await tool.call(run_ctx, paths=["target.txt"])
+
+        events = await _collect_events(ctx)
+        assert len(events) == 1
+        event = events[0]
+        assert event.tool_name == "delete"
+
+        change = event.changes[0]
+        assert change.path == "target.txt"
+        assert change.action == FileChangeAction.deleted
+        assert change.destination is None
+        assert change.replacements == []
+
+
+async def test_delete_batch_emits_single_event(tmp_path: Path) -> None:
+    """DeleteTool batch operation should emit one event with multiple changes."""
+    async with AsyncExitStack() as stack:
+        ctx, run_ctx = await _make_ctx(stack, tmp_path)
+        tool = DeleteTool()
+
+        (tmp_path / "a.txt").write_text("a")
+        (tmp_path / "b.txt").write_text("b")
+        await tool.call(run_ctx, paths=["a.txt", "b.txt"])
+
+        events = await _collect_events(ctx)
+        assert len(events) == 1
+        assert len(events[0].changes) == 2
+        assert events[0].changes[0].path == "a.txt"
+        assert events[0].changes[1].path == "b.txt"
+
+
+async def test_delete_failure_does_not_emit_event(tmp_path: Path) -> None:
+    """DeleteTool should not emit events when all operations fail."""
+    async with AsyncExitStack() as stack:
+        ctx, run_ctx = await _make_ctx(stack, tmp_path)
+        tool = DeleteTool()
+
+        await tool.call(run_ctx, paths=["missing.txt"])
+        assert await _collect_events(ctx) == []
+
+
+async def test_delete_force_missing_does_not_emit_event(tmp_path: Path) -> None:
+    """DeleteTool should not emit events for force-ignored missing paths."""
+    async with AsyncExitStack() as stack:
+        ctx, run_ctx = await _make_ctx(stack, tmp_path)
+        tool = DeleteTool()
+
+        await tool.call(run_ctx, paths=["missing.txt"], force=True)
         assert await _collect_events(ctx) == []

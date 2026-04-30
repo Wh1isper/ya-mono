@@ -20,8 +20,11 @@ Example:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import os
 import shutil
+import signal
 import sys
 import time
 import traceback
@@ -102,6 +105,10 @@ if TYPE_CHECKING:
     from y_agent_environment import BackgroundProcess
 
 logger = get_logger(__name__)
+
+_SHUTDOWN_AGENT_TASK_TIMEOUT = 8.0
+_SHUTDOWN_MANAGED_TASKS_TIMEOUT = 5.0
+_DIRECT_SHELL_TERMINATE_TIMEOUT = 2.0
 
 
 # =============================================================================
@@ -271,6 +278,10 @@ class TUIApp:
     _current_input_backup: str = field(default="", init=False)
     _pending_attachments: list[PendingAttachment] = field(default_factory=list, init=False)
 
+    # Shutdown visibility
+    _shutdown_status: str | None = field(default=None, init=False)
+    _tui_running: bool = field(default=False, init=False)
+
     # Streaming text tracking for markdown rendering
     _streaming_text: str = field(default="", init=False)
     _streaming_line_index: int | None = field(default=None, init=False)
@@ -331,16 +342,42 @@ class TUIApp:
         task.add_done_callback(self._managed_tasks.discard)
         return task
 
+    def _show_shutdown_status(self, message: str) -> None:
+        """Show shutdown progress in the TUI, with stderr fallback after it exits."""
+        self._shutdown_status = message
+        logger.info("Shutdown: %s", message)
+
+        if self._app is not None and self._tui_running:
+            self._app.invalidate()
+            return
+
+        print(f"Shutdown: {message}", file=sys.stderr, flush=True)
+
     async def _cancel_agent_task(self) -> None:
-        """Cancel and await the current agent task."""
+        """Cancel and await the current agent task with a bounded deadline."""
         task = self._agent_task
         if task is None:
             return
 
         try:
             if not task.done():
+                self._show_shutdown_status("cancelling agent task")
                 task.cancel()
-                await task
+                if isinstance(task, asyncio.Task):
+                    done, pending = await asyncio.wait({task}, timeout=_SHUTDOWN_AGENT_TASK_TIMEOUT)
+                    if pending:
+                        logger.warning(
+                            "Agent task did not finish within %.1fs during shutdown",
+                            _SHUTDOWN_AGENT_TASK_TIMEOUT,
+                        )
+                        self._show_shutdown_status("agent task cleanup timed out; continuing shutdown")
+                    for completed in done:
+                        if not completed.cancelled():
+                            exc = completed.exception()
+                            if exc is not None:
+                                raise exc
+                else:
+                    await task
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -358,10 +395,20 @@ class TUIApp:
             self._managed_tasks.clear()
             return
 
+        self._show_shutdown_status(f"cancelling {len(tasks)} UI task(s)")
         for task in tasks:
             task.cancel()
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        done, pending = await asyncio.wait(tasks, timeout=_SHUTDOWN_MANAGED_TASKS_TIMEOUT)
+        if pending:
+            logger.warning(
+                "%d managed task(s) did not finish within %.1fs during shutdown",
+                len(pending),
+                _SHUTDOWN_MANAGED_TASKS_TIMEOUT,
+            )
+            self._show_shutdown_status("UI task cleanup timed out; continuing shutdown")
+
+        results = [task.exception() for task in done if not task.cancelled()]
         for result in results:
             if isinstance(result, BaseException):
                 if isinstance(result, asyncio.CancelledError):
@@ -484,6 +531,7 @@ class TUIApp:
     ) -> bool | None:
         """Cleanup resources."""
         # Clear completion callback
+        self._show_shutdown_status("starting shutdown")
         bg_monitor = self._get_background_monitor()
         if bg_monitor:
             bg_monitor.set_completion_callback(None)
@@ -497,8 +545,10 @@ class TUIApp:
 
         if self._exit_stack:
             try:
+                self._show_shutdown_status("closing runtime resources")
                 result = await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
                 self._exit_stack = None
+                self._show_shutdown_status("shutdown complete")
                 return result
             except (RuntimeError, GeneratorExit, BaseExceptionGroup) as e:
                 # Suppress MCP stdio client cleanup errors
@@ -506,6 +556,7 @@ class TUIApp:
                 logger.debug("Suppressed cleanup error: %s", e)
                 self._exit_stack = None
                 return None
+        self._show_shutdown_status("shutdown complete")
         return None
 
     # =========================================================================
@@ -975,6 +1026,13 @@ class TUIApp:
 
     def _get_status_text(self) -> list[tuple[str, str]]:
         """Get formatted status bar text."""
+        if self._shutdown_status:
+            return [
+                ("class:status-bar.warning", " SHUTDOWN "),
+                ("class:status-bar", " | "),
+                ("class:status-bar", self._shutdown_status),
+            ]
+
         mode_style = f"class:status-bar.mode-{self._mode.value}"
         state_text = "RUNNING" if self._state == TUIState.RUNNING else "IDLE"
         attachment_label = self._format_pending_attachments_label()
@@ -2170,6 +2228,7 @@ class TUIApp:
             else:
                 # Idle: double-press to exit, single-press to clear input
                 if current_time - self._last_ctrl_c_time < self._ctrl_c_exit_timeout:
+                    self._show_shutdown_status("exit requested")
                     event.app.exit()
                 else:
                     self._append_output("[Press Ctrl+C again to exit, or Ctrl+D to exit immediately]")
@@ -2180,6 +2239,7 @@ class TUIApp:
         @kb.add("c-d")
         def handle_ctrl_d(event: KeyPressEvent) -> None:
             """Handle Ctrl+D - exit."""
+            self._show_shutdown_status("exit requested")
             event.app.exit()
 
         # Scroll functions
@@ -2347,6 +2407,7 @@ class TUIApp:
             case "/exit":
                 self._append_user_input(command)
                 if self._app:
+                    self._show_shutdown_status("exit requested")
                     self._app.exit()
             case "/act":
                 self._append_user_input(command)
@@ -2404,10 +2465,36 @@ class TUIApp:
                     self._agent_task = asyncio.create_task(self._run_agent(command))
                     self._agent_task.add_done_callback(self._on_agent_task_done)
 
+    async def _terminate_direct_shell_process(self, process: asyncio.subprocess.Process | None) -> None:
+        """Terminate a direct !command subprocess during timeout or shutdown."""
+        if process is None or process.returncode is not None:
+            return
+
+        if os.name == "posix" and process.pid is not None:
+            with contextlib.suppress(ProcessLookupError, OSError):
+                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+        else:
+            with contextlib.suppress(ProcessLookupError):
+                process.terminate()
+
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(process.wait(), timeout=_DIRECT_SHELL_TERMINATE_TIMEOUT)
+
+        if process.returncode is not None:
+            return
+
+        if os.name == "posix" and process.pid is not None:
+            with contextlib.suppress(ProcessLookupError, OSError):
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        else:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(process.wait(), timeout=_DIRECT_SHELL_TERMINATE_TIMEOUT)
+
     async def _execute_shell_command(self, command_str: str) -> None:
         """Execute a shell command directly and display output."""
-        import os
-
         if not command_str.strip():
             self._append_system_output("Usage: !<command>")
             return
@@ -2419,6 +2506,7 @@ class TUIApp:
         self._append_output(self._renderer.render(cmd_text).rstrip())
 
         start_time = time.time()
+        process: asyncio.subprocess.Process | None = None
 
         try:
             process = await asyncio.create_subprocess_shell(
@@ -2427,6 +2515,7 @@ class TUIApp:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.working_dir,
                 env=os.environ.copy(),
+                **({"start_new_session": True} if os.name == "posix" else {}),
             )
 
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
@@ -2461,7 +2550,11 @@ class TUIApp:
             self._append_output(f"({elapsed:.1f}s)")
 
         except TimeoutError:
+            await self._terminate_direct_shell_process(process)
             self._append_system_output("Command timed out (300s)")
+        except asyncio.CancelledError:
+            await self._terminate_direct_shell_process(process)
+            raise
         except Exception as e:
             self._append_system_output(f"Error: {type(e).__name__}: {e}")
         finally:
@@ -3171,11 +3264,14 @@ class TUIApp:
 
         # Run with error handling
         try:
+            self._tui_running = True
             await self._app.run_async()
         except Exception as e:
             # Re-raise to be caught by cli.py with proper error display
             raise RuntimeError(f"TUI crashed: {e}") from e
         finally:
+            self._tui_running = False
+            self._show_shutdown_status("leaving TUI")
             # Restore original prompt_toolkit exception handler
             self._app._handle_exception = original_handle_exception  # type: ignore[assignment]
             # Log performance report on shutdown

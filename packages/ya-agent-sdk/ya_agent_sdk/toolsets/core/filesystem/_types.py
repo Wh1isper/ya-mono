@@ -180,9 +180,21 @@ class CopyResult(TypedDict):
     """Success or error message."""
 
 
+class DeleteResult(TypedDict):
+    """Result of delete operation for a single path."""
+
+    path: str
+    """Path that was deleted or skipped."""
+    success: bool
+    """True if delete was successful."""
+    message: str
+    """Success or error message."""
+
+
 __all__ = [
     "BatchMkdirResponse",
     "CopyResult",
+    "DeleteResult",
     "EditItem",
     "FileInfo",
     "FileInfoWithStats",
