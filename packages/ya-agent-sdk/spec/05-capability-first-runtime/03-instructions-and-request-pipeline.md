@@ -62,9 +62,10 @@ factory.
 
 ### 2.3 Request projections and canonical context snapshots
 
-Pydantic AI 2.21 exposes canonical messages through `wrap_model_request`. Runtime and
-Environment context processors intentionally mutate those messages before the model is
-called so each generated snapshot becomes part of canonical history:
+Runtime and Environment context processors return copy-on-write replacements from
+`before_model_request`, after lifecycle reduction and native system-prompt reinjection.
+Pydantic AI commits these replacements to canonical graph history before native message
+cleanup/merging, model preparation, and `wrap_model_request` projections. They persist:
 
 - elapsed time and usage;
 - context-window pressure and reminders;
@@ -76,7 +77,16 @@ called so each generated snapshot becomes part of canonical history:
 Each later model request replays prior snapshots byte-for-byte and adds a fresh snapshot
 to only the current `ModelRequest`. This preserves the provider's common prompt prefix;
 projecting context into a request-only copy would make the next request omit the prior
-snapshot and reduce cache reuse to the system prompt and tool schema.
+snapshot and shorten the reusable prefix. A wrapper must not depend on request messages
+sharing object identity with graph history: native consecutive-request merging and media
+or file-inspection projection can all produce independent objects.
+
+The `ya:environment_context` and `ya:runtime_context` request metadata markers record
+snapshot ownership. Retrying or restoring an unanswered request reuses its original
+snapshot, without adding another copy. Lifecycle reconstruction creates new requests
+without these markers. Runtime usage/pressure rendering reads the post-lifecycle message
+view, not the stale `RunContext.messages` from before history replacement. Injected user
+parts preserve all leading system parts and follow tool returns/retry parts.
 
 Only one-shot or provider-compatibility transformations remain request-only:
 
@@ -194,12 +204,13 @@ flowchart TD
     Pending[Pydantic AI drains enqueued messages] --> Repair[Canonical normalization and repair]
     Repair --> Lifecycle[Handoff, compaction, and cold-start lifecycle]
     Lifecycle --> Prompt[Canonical system prompt reinjection]
-    Prompt --> Canonical[Canonical request history]
-    Canonical --> Copy[Request-only message projection]
+    Prompt --> Context[Canonical Environment and runtime snapshots]
+    Context --> Canonical[Commit canonical request history]
+    Canonical --> Prepare[Native cleanup, merging and model preparation]
+    Prepare --> Copy[Request-only message projection]
     Copy --> Media[Media shaping and model/provider compatibility]
     Media --> FeatureInputs[One-shot request-envelope inputs]
-    FeatureInputs --> Context[Environment and runtime envelope context]
-    Context --> Model[Model request handler]
+    FeatureInputs --> Model[Model request handler]
     Model --> Response[Model response]
     Response --> ToolIds[Normalize provider-emitted tool IDs]
     ToolIds --> Stored[Canonical response history]
@@ -216,11 +227,12 @@ The semantic stages are:
    input already drained into the current bound native request from `RunInputLedger`.
 4. **System prompt boundary**: Pydantic AI `ReinjectSystemPrompt` restores the
    configured prompt after reconstruction or reset.
-5. **Request projection**: `wrap_model_request` creates a request-only message view.
-6. **Media compatibility**: retained media is shaped, uploaded when configured, and
-   filtered for the selected model only in the request view.
-7. **Envelope context**: one-shot reminders, process summaries, and
-   Environment/runtime data decorate the request view.
+5. **Context snapshots**: Environment/runtime data, including process summaries, are
+   added to canonical request replacements before graph history is committed.
+6. **Native preparation**: Pydantic AI merges requests and applies model-specific
+   preparation without changing the canonical snapshot contract.
+7. **Request projection**: `wrap_model_request` shapes retained media for the selected
+   provider and adds one-shot file reminders only to the request view.
 8. **Response normalization**: provider-emitted tool IDs become stable YA IDs before
    persistence and host event emission.
 
@@ -233,12 +245,14 @@ Canonical YA tool IDs are reused for subsequent provider requests and host event
 3. System prompt reinjection runs after every capability that can replace retained
    canonical history.
 4. Request-envelope decorators run only after canonical processing has finished.
-5. Compact and handoff never observe request-envelope Environment/runtime context.
+5. Compact and handoff reduce historical context before fresh Environment/runtime
+   snapshots are added; history trimming removes old injected context from summaries.
 6. Media upload follows local resize/compression and precedes unsupported-media
    filtering in the request view.
 7. One-shot request input is added after lifecycle reset selects retained history.
-8. Environment envelope context precedes runtime envelope context unless a provider
-   protocol requires a different part order.
+8. Environment snapshot processing precedes runtime snapshot processing. Both preserve
+   leading system prompts and tool-result/retry ordering; runtime text is inserted
+   before the Environment/user text at that boundary.
 9. Provider-emitted tool IDs are normalized before persistence or host emission.
 10. Compact and handoff restore each applied run input exactly once. They also retain
     current-request-delivered input while its application event is pending, without
@@ -287,6 +301,12 @@ The canonical `before_model_request` relationships are:
 | `HandoffCapability` | `ContextCompactionCapability`, `ColdStartCapability`, Pydantic AI `ReinjectSystemPrompt` | apply the handoff transition before later reduction and prompt restoration |
 | `ContextCompactionCapability` | `ColdStartCapability`, Pydantic AI `ReinjectSystemPrompt` | compact before cold-start trimming and prompt restoration |
 | `ColdStartCapability` | Pydantic AI `ReinjectSystemPrompt` | finish history reduction before prompt restoration |
+| `EnvironmentContextCapability` | `RuntimeContextCapability` | commit Environment context before runtime context |
+
+Both context capabilities additionally declare `wrapped_by=(HandoffCapability,
+ContextCompactionCapability, ColdStartCapability, ReinjectSystemPrompt)`. Direct edges
+keep snapshots after every active reducer and reinjection even when other optional
+leaves are absent.
 
 Every later optional leaf whose relative order matters appears directly in `wraps`.
 The graph therefore remains correct if, for example, compaction is absent between
@@ -308,16 +328,13 @@ relationships are:
 
 | Capability | `wraps` | Reason |
 | --- | --- | --- |
-| `MediaCompatibilityCapability` | `FileInspectionCapability`, `ShellCapability`, `EnvironmentContextCapability`, `RuntimeContextCapability` | finish provider-specific media projection before adding textual envelopes |
-| `FileInspectionCapability` | `EnvironmentContextCapability`, `RuntimeContextCapability` | place the one-shot reminder before general context even when Environment context is absent |
-| `ShellCapability` | `EnvironmentContextCapability`, `RuntimeContextCapability` | place transient process status before general context even when Environment context is absent |
-| `EnvironmentContextCapability` | `RuntimeContextCapability` | preserve the stable Environment-before-runtime envelope contract |
+| `MediaCompatibilityCapability` | `FileInspectionCapability` | finish provider-specific media projection before adding the one-shot reminder |
 
-`FileInspectionCapability` and `ShellCapability` have the same active predecessor and
-successor constraints; caller order within their ready batch determines their relative
-part order. Active agent/subagent summaries belong to
-`RuntimeContextCapability`, so delegation does not introduce another envelope stage.
-Capabilities with no request/history behavior omit these constraints.
+`ShellCapability` uses `before_model_request` to enqueue completed results and declares
+`wraps=(EnvironmentContextCapability, RuntimeContextCapability)`. Active process and
+agent/subagent summaries belong to the canonical `RuntimeContextCapability` snapshot;
+there is no additional request-only process-status stage. Capabilities with no
+request/history behavior omit these constraints.
 
 ### 7.4 Node-terminal boundary
 
@@ -384,10 +401,9 @@ The capability:
 
 `ShellCapability` and background delegation capabilities enqueue completed results as
 canonical exactly-once content. They own completion correlation IDs, output truncation
-and overflow-file storage, and feature-specific delivery events. `ShellCapability` also
-owns its request-only process-status summary. `RuntimeContextCapability` renders active
-agent/subagent status from the shared registry; delegation does not add a second request
-envelope.
+and overflow-file storage, and feature-specific delivery events.
+`RuntimeContextCapability` renders process and active agent/subagent status in its
+canonical context snapshot; delegation does not add a second request envelope.
 
 They depend on the root `LogicalRunInputRouter`; they do not create or retain a second
 input queue.
@@ -400,9 +416,11 @@ a typed notification event is never a substitute for canonical delivery.
 
 ## 10. Request and Retention Budgets
 
-Pydantic AI 2.21 performs its normal pre-request token check before
-`wrap_model_request` decorators add request-only context. The SDK therefore reserves a
-bounded envelope budget in context-lifecycle calculations.
+Pydantic AI performs its normal pre-request token check after canonical context
+snapshots and model preparation, but before `wrap_model_request` adds request-only
+media/file projections. Canonical snapshot tokens are therefore included when native
+pre-request token counting is enabled. Lifecycle calculations still need headroom for
+fresh snapshots and request-only projections.
 
 - `RuntimeFoundationCapability` configures `request_envelope_token_reserve` and a
   logical-run user-input retention budget.
@@ -414,8 +432,8 @@ bounded envelope budget in context-lifecycle calculations.
 - Tests count the fully decorated request and prove it remains within the configured
   context window.
 
-The envelope cannot grow without affecting lifecycle pressure, even though it is absent
-from canonical history. User ingress cannot exceed the retention budget and then make
+Request-only projections are absent from canonical history, while retained context
+snapshots contribute to subsequent lifecycle pressure. User ingress cannot exceed the retention budget and then make
 verbatim compact restoration impossible; it receives explicit backpressure before
 acceptance.
 
@@ -426,7 +444,11 @@ uses server-authoritative replacement when history originates from an untrusted 
 surface; otherwise existing trusted system prompt parts remain authoritative.
 
 Ordering constraints place reinjection after compact, handoff, and cold-start history
-replacement. SDK code does not maintain a second system-prompt reconstruction path.
+replacement, and before canonical Environment/runtime snapshots. Handoff and compact
+builders do not fabricate placeholder system parts: an absent system prompt lets native
+reinjection restore the configured prompt, including an intentionally empty prompt.
+Existing trusted system parts remain authoritative under the default non-replacing
+policy. SDK code does not maintain a second system-prompt reconstruction path.
 
 ## 12. Verification
 
@@ -437,7 +459,9 @@ The instruction/request pipeline is complete when:
 - no wrapper recursively scans child instructions;
 - static guidance is stable across requests;
 - catalog refresh performs I/O only after generation invalidation;
-- transient context does not appear in exported canonical history;
+- Environment/runtime snapshots survive canonical export/restore and replay unchanged;
+- request-only media transformations and file reminders do not leak into canonical history;
+- real system prompts remain system content across tool loops and lifecycle reduction;
 - canonical asynchronous results survive compact/export/restore according to ordinary
   history rules;
 - every applied initial, `steer`, and `queue` input is restored in order across repeated

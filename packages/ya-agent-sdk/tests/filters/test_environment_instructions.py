@@ -3,7 +3,16 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolReturnPart, UserPromptPart
+import pytest
+from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
+    RetryPromptPart,
+    SystemPromptPart,
+    TextPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 from ya_agent_sdk.environment.local import LocalEnvironment
 from ya_agent_sdk.filters.environment_instructions import create_environment_instructions_filter
 
@@ -156,3 +165,33 @@ async def test_inject_environment_instructions_force_inject_with_tool_response(t
         assert len(request.parts) == 2
         assert isinstance(request.parts[0], ToolReturnPart)
         assert isinstance(request.parts[1], UserPromptPart)
+
+
+@pytest.mark.parametrize("system_count", [0, 1, 3])
+@pytest.mark.parametrize("result_kinds", [(), ("tool",), ("retry",), ("tool", "retry", "tool")])
+async def test_environment_context_preserves_system_and_result_prefix(
+    tmp_path: Path, system_count: int, result_kinds: tuple[str, ...]
+) -> None:
+    """Forced context must not displace leading system parts or tool/retry results."""
+    async with LocalEnvironment(allowed_paths=[tmp_path], default_path=tmp_path, tmp_base_dir=tmp_path) as env:
+        system_parts = [SystemPromptPart(content=f"REAL SYSTEM {index}") for index in range(system_count)]
+        result_parts = [
+            ToolReturnPart(tool_name="test_tool", content="result", tool_call_id=f"call_{index}")
+            if kind == "tool"
+            else RetryPromptPart(content="Try again", tool_name="test_tool", tool_call_id=f"call_{index}")
+            for index, kind in enumerate(result_kinds)
+        ]
+        prefix = [*system_parts, *result_parts]
+        user_part = UserPromptPart(content="Continue")
+        request = ModelRequest(parts=[*prefix, user_part])
+        mock_ctx = MagicMock()
+        mock_ctx.deps.force_inject_instructions = True
+
+        await create_environment_instructions_filter(env)(mock_ctx, [request])
+
+        assert len(request.parts) == len(prefix) + 2
+        assert all(actual is expected for actual, expected in zip(request.parts, prefix, strict=False))
+        context_part = request.parts[len(prefix)]
+        assert isinstance(context_part, UserPromptPart)
+        assert "<file-system>" in context_part.content or "<shell" in context_part.content
+        assert request.parts[-1] is user_part

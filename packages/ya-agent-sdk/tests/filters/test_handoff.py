@@ -54,7 +54,7 @@ async def test_process_handoff_with_handoff_message(tmp_path: Path) -> None:
 
             restored = result[0]
             assert isinstance(restored, ModelRequest)
-            assert any(isinstance(p, SystemPromptPart) for p in restored.parts)
+            assert not any(isinstance(p, SystemPromptPart) for p in restored.parts)
 
             user_parts = [p for p in restored.parts if isinstance(p, UserPromptPart)]
             assert any("Previous context summary here" in p.content for p in user_parts)
@@ -267,7 +267,7 @@ def test_build_handoff_messages_basic() -> None:
 
     restored = result[0]
     assert isinstance(restored, ModelRequest)
-    assert any(isinstance(p, SystemPromptPart) for p in restored.parts)
+    assert not any(isinstance(p, SystemPromptPart) for p in restored.parts)
     user_parts = [p for p in restored.parts if isinstance(p, UserPromptPart)]
     assert any(p.content == "Test summary" for p in user_parts)
     assert any("context-restored" in p.content for p in user_parts)
