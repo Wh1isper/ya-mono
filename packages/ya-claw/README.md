@@ -401,6 +401,23 @@ make web-dev
 
 ## Docker
 
+The `YA Claw Image` workflow publishes `ghcr.io/wh1isper/ya-claw:dev` on matching
+pushes to `main`. Its push and pull-request filters include the full YA Claw,
+Environment, SDK, stream-protocol, OAuth/provider, and ripgrep-core package trees,
+plus all workspace package manifests, frontend sources, lockfiles, and image build
+configuration. Package assets and build metadata are covered alongside source code.
+Pull requests validate the image without publishing it.
+
+To rebuild `dev` from `main` without a new source commit:
+
+```bash
+gh workflow run claw-image.yaml --ref main
+```
+
+Manual runs publish only when the selected ref is `main`; other refs do not publish
+images. Release events independently publish the release tag and `latest`, not
+`dev`. Publishing an image does not restart an existing service deployment.
+
 Build the YA Claw service image from the repository root:
 
 ```bash
