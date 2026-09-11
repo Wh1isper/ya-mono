@@ -193,6 +193,25 @@ The coordinator persists every stable checkpoint before terminal commit or HITL 
 Usage limits remain cumulative across continuation segments. Runtime locks cover only a
 native segment and are released before waiting for actions.
 
+Usage snapshots also accumulate across native segments: the host combines a fixed
+completed-segment base with the current segment's cumulative snapshot. Repeated live
+updates replace the current segment contribution rather than adding it again. Root
+usage events forwarded to the TUI/headless sink use the logical-run ID and these
+logical-run totals; the live context and checkpoint/revision `session_snapshot` also
+include the previously committed session head. Requests, input/output tokens, cache
+read/write counters, and recorded cost estimates follow the same aggregation boundary.
+Cache counters remain detail fields: the status cache ratio denominator is still
+`input_tokens + output_tokens`.
+
+A stable completed or deferred outcome advances the base exactly once. Controlled
+failure, cancellation, or interruption reconciles the current SDK context's latest
+ledger against that base, including updates not yet forwarded as live events. A request
+interrupted before its SDK ledger report can already appear in raw `RunUsage`; session
+snapshots retain reported usage only and do not infer missing tokens or costs. If safe
+recovery capture fails, or the process restarts, only the last stable checkpoint is
+authoritative; its cumulative session usage is retained without replaying or estimating
+unobserved work. Session totals remain host-owned and outside portable `ResumableState`.
+
 YAACLI never replays an arbitrary in-flight graph segment after restart:
 
 - pending accepted work remains dispatchable;

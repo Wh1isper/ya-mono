@@ -8,7 +8,7 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -30,7 +30,7 @@ from ya_agent_sdk.events import UsageSnapshotEvent
 from ya_agent_sdk.execution import AgentExecutionHarness, AgentSegment, AgentSegmentRequest, AgentSegmentStatus
 from ya_agent_sdk.inputs import ActiveRunRegistry, InputDisposition, InputOrigin, RunInputLedger
 from ya_agent_sdk.subagents import DelegationCapability
-from ya_agent_sdk.usage import UsageSnapshot
+from ya_agent_sdk.usage import UsageSnapshot, combine_usage_snapshots
 
 from yaacli.display_replay import BoundedDisplayReplay
 from yaacli.durable.bindings import runtime_bindings
@@ -267,6 +267,7 @@ class LocalExecutionCoordinator:
         latest_context = plan.runtime.ctx
         resume_state: ResumableState | None = None
         cumulative_usage = RunUsage()
+        completed_usage_snapshot: UsageSnapshot | None = None
         session_usage = SessionUsage()
         segment_index = 0
         deferred_results: DeferredToolResults | None = None
@@ -281,6 +282,9 @@ class LocalExecutionCoordinator:
                 if remaining_requests <= 0:
                     raise RuntimeError(f"Execution exhausted the cumulative model request limit of {request_limit}.")
 
+                # Fixed for the whole segment: live snapshots already accumulate
+                # within that segment and must replace, not add to, each other.
+                segment_base_usage_snapshot = completed_usage_snapshot
                 async with runtime_lock:
                     context = self._new_execution_context(run, plan.runtime)
                     if segment_index == 0:
@@ -289,6 +293,7 @@ class LocalExecutionCoordinator:
                     elif resume_state is not None:
                         restore_resumable_state_safely(resume_state, context)
                         context.run_input_ledger.logical_run_id = run.logical_run_id
+                    context.session_usage_snapshot = session_usage.export_snapshot(run_id=f"session:{run.session_id}")
                     context.durable_binding_ref = execution_binding_ref
                     context.durable_logical_run_id = run.logical_run_id
                     context.delegation_scope_id = run.session_id
@@ -332,13 +337,16 @@ class LocalExecutionCoordinator:
                                         and isinstance(event.event, UsageSnapshotEvent)
                                         and event.event.snapshot is not None
                                     ):
-                                        snapshot = event.event.snapshot.model_copy(
-                                            update={"run_id": run.logical_run_id}
+                                        snapshot = combine_usage_snapshots(
+                                            segment_base_usage_snapshot,
+                                            event.event.snapshot,
+                                            run_id=run.logical_run_id,
                                         )
                                         session_usage.set_run_snapshot(snapshot)
-                                        context.session_usage_snapshot = session_usage.export_snapshot(
+                                        plan.runtime.ctx.session_usage_snapshot = session_usage.export_snapshot(
                                             run_id=f"session:{run.session_id}"
                                         )
+                                        event = replace(event, event=replace(event.event, snapshot=snapshot))
                                     if self.event_sink is not None:
                                         await self.event_sink(event)
                                 segment.raise_if_exception()
@@ -346,11 +354,13 @@ class LocalExecutionCoordinator:
                             except BaseException:
                                 terminal_recovery = self._capture_terminal_recovery(
                                     run,
-                                    context,
+                                    plan.runtime.ctx,
                                     segment,
                                     stable_history=latest_history or [],
                                     current_prompt=current_prompt,
                                     cumulative_usage=cumulative_usage,
+                                    segment_base_usage_snapshot=segment_base_usage_snapshot,
+                                    session_usage=session_usage,
                                 )
                                 raise
                     finally:
@@ -359,8 +369,12 @@ class LocalExecutionCoordinator:
                 latest_context = plan.runtime.ctx
                 latest_history = list(outcome.checkpoint.messages)
                 resume_state = outcome.checkpoint.state
-                run_snapshot = outcome.checkpoint.usage.model_copy(update={"run_id": run.logical_run_id})
-                session_usage.set_run_snapshot(run_snapshot)
+                completed_usage_snapshot = combine_usage_snapshots(
+                    segment_base_usage_snapshot,
+                    outcome.checkpoint.usage,
+                    run_id=run.logical_run_id,
+                )
+                session_usage.set_run_snapshot(completed_usage_snapshot)
                 latest_context.session_usage_snapshot = session_usage.export_snapshot(
                     run_id=f"session:{run.session_id}"
                 )
@@ -720,6 +734,8 @@ class LocalExecutionCoordinator:
         stable_history: Sequence[ModelMessage],
         current_prompt: str | Sequence[UserContent] | None,
         cumulative_usage: RunUsage,
+        segment_base_usage_snapshot: UsageSnapshot | None,
+        session_usage: SessionUsage,
     ) -> RevisionPayload | None:
         """Capture safe process-local state for one controlled terminal exit."""
         try:
@@ -732,6 +748,16 @@ class LocalExecutionCoordinator:
             usage.incr(cumulative_usage)
             if segment.run is not None:
                 usage.incr(segment.run.usage)
+            # The ledger may contain a final update not yet delivered to the
+            # event sink. Reconcile against the same completed-segment base.
+            session_usage.set_run_snapshot(
+                combine_usage_snapshots(
+                    segment_base_usage_snapshot,
+                    context.build_usage_snapshot(),
+                    run_id=run.logical_run_id,
+                )
+            )
+            context.session_usage_snapshot = session_usage.export_snapshot(run_id=f"session:{run.session_id}")
             payload = self._revision_payload(context, run, history, usage, {})
             return self._sanitize_terminal_recovery(run, payload)
         except Exception:

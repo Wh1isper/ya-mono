@@ -19,7 +19,6 @@ from uuid import uuid4
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
-    SystemPromptPart,
     UserPromptPart,
 )
 from pydantic_ai.tools import RunContext
@@ -67,9 +66,8 @@ def _build_handoff_messages(
     """
     keep_metadata = {KEEP_TAG_KEY: KEEP_HANDOFF}
 
-    # Placeholder will be replaced by create_system_prompt_filter downstream.
-    request_parts: list[SystemPromptPart | UserPromptPart] = [
-        SystemPromptPart(content="Placeholder system prompt"),
+    # Leave system restoration to the downstream native ReinjectSystemPrompt capability.
+    request_parts: list[UserPromptPart] = [
         UserPromptPart(content=summary),
         build_context_restored_part(),
         UserPromptPart(

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
+from dataclasses import asdict
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal
@@ -9,15 +12,23 @@ from typing import Any, Literal
 import pytest
 from pydantic_ai import DeferredToolRequests, Tool
 from pydantic_ai.capabilities import Toolset as NativeToolsetCapability
-from pydantic_ai.messages import ModelMessage, ModelRequest, RetryPromptPart, ToolReturnPart, UserPromptPart
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    RetryPromptPart,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.toolsets import FunctionToolset
 from pydantic_ai.usage import RunUsage
 from ya_agent_sdk.agents.main import create_agent
-from ya_agent_sdk.context import ResumableState
-from ya_agent_sdk.execution import AgentSegment
-from ya_agent_sdk.usage import UsageAgentTotal, UsageSnapshot
+from ya_agent_sdk.context import ResumableState, StreamEvent
+from ya_agent_sdk.events import UsageSnapshotEvent
+from ya_agent_sdk.execution import AgentExecutionCheckpoint, AgentSegment, AgentSegmentOutcome, AgentSegmentStatus
+from ya_agent_sdk.usage import CostEstimate, UsageAgentTotal, UsageSnapshot
 from yaacli.durable.application import SessionApplicationService
 from yaacli.durable.bindings import runtime_bindings
 from yaacli.durable.capabilities import DurableInboxPumpCapability
@@ -26,7 +37,7 @@ from yaacli.durable.models import InputState, LogicalRunStatus
 from yaacli.durable.sqlite import SQLiteSessionStore
 from yaacli.environment import TUIEnvironment
 from yaacli.session import TUIContext
-from yaacli.usage import SESSION_USAGE_SNAPSHOT_REVISION_KEY
+from yaacli.usage import SESSION_USAGE_SNAPSHOT_REVISION_KEY, SessionUsage
 
 
 def _runtime_spec(
@@ -690,6 +701,9 @@ async def test_suspended_run_does_not_block_another_session(tmp_path: Path) -> N
         revision = store.get_revision_for_run(first_run.logical_run_id)
         assert revision is not None
         assert revision.usage["requests"] == 2
+        session_snapshot = UsageSnapshot.model_validate(revision.usage[SESSION_USAGE_SNAPSHOT_REVISION_KEY])
+        assert session_snapshot.total_usage.requests == 2
+        assert session_snapshot.total_usage.input_tokens == revision.usage["input_tokens"]
     finally:
         await worker.close()
         store.close()
@@ -796,6 +810,9 @@ async def test_controlled_interruption_of_continuation_segment_keeps_safe_partia
         assert batch is not None
         await service.decide_action(batch.items[0].action_item_id, {"approved": True})
         await asyncio.wait_for(continuation_started.wait(), timeout=5)
+        checkpoint = store.get_execution_checkpoint(run.execution_id)
+        assert checkpoint is not None
+        stable_usage = UsageSnapshot.model_validate(checkpoint.payload.usage[SESSION_USAGE_SNAPSHOT_REVISION_KEY])
 
         await service.cancel(run.logical_run_id, reason="stop continuation")
 
@@ -806,6 +823,12 @@ async def test_controlled_interruption_of_continuation_segment_keeps_safe_partia
         assert model_calls == 2
         assert history.count("start approved continuation") == 1
         assert history.count("continuation partial output") == 1
+        session_snapshot = UsageSnapshot.model_validate(revision.usage[SESSION_USAGE_SNAPSHOT_REVISION_KEY])
+        # A still-streaming request can appear in raw run.usage before the SDK
+        # reports it to the ledger. All previously checkpointed usage survives.
+        for field in ("requests", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"):
+            assert getattr(stable_usage.total_usage, field) <= getattr(session_snapshot.total_usage, field)
+            assert getattr(session_snapshot.total_usage, field) <= revision.usage[field]
     finally:
         release_continuation.set()
         await worker.close()
@@ -863,5 +886,215 @@ async def test_terminal_recovery_capture_failure_uses_last_stable_revision(
         assert "discarded partial answer" not in str(revision.message_history)
     finally:
         release_failure.set()
+        await worker.close()
+        store.close()
+
+
+def _segment_usage(requests: int, units: int) -> RunUsage:
+    return RunUsage(
+        requests=requests,
+        input_tokens=100 * units,
+        output_tokens=20 * units,
+        cache_read_tokens=40 * units,
+        cache_write_tokens=10 * units,
+    )
+
+
+def _assert_segment_usage(snapshot: UsageSnapshot, *, requests: int, units: int) -> None:
+    expected = _segment_usage(requests, units)
+    assert snapshot.total_usage == expected
+    assert snapshot.model_usages == {"usage-model": expected}
+    assert len(snapshot.agent_usages) == 1
+    assert next(iter(snapshot.agent_usages.values())).usage == expected
+    cost = CostEstimate(
+        input_amount=Decimal("0.02") * units,
+        output_amount=Decimal("0.01") * units,
+        total_amount=Decimal("0.03") * units,
+        priced_requests=requests,
+    )
+    assert snapshot.total_cost_estimate == cost
+    assert snapshot.model_cost_estimates == {"usage-model": cost}
+    assert next(iter(snapshot.agent_usages.values())).cost_estimate == cost
+    session_usage = SessionUsage()
+    session_usage.restore_snapshot(snapshot)
+    # Cache counters are details, not additional tokens in the denominator.
+    assert session_usage.total_tokens == 120 * units
+
+
+class _UsageSegment:
+    def __init__(self, context: TUIContext, history: list[ModelMessage], index: int, ending: str, coordinator: Any):
+        self.context = context
+        self.history = history
+        self.index = index
+        self.ending = ending
+        self.coordinator = coordinator
+        self.run = SimpleNamespace(usage=RunUsage())
+
+    def update_usage(self, requests: int) -> UsageSnapshot:
+        units = (self.index + 1) * requests
+        usage = _segment_usage(requests, units)
+        self.run.usage = usage
+        return self.context.update_usage_snapshot_entry(
+            agent_id=self.context.agent_id,
+            agent_name="main",
+            model_id="usage-model",
+            usage=usage,
+            cost_estimate=CostEstimate(
+                input_amount=Decimal("0.02") * units,
+                output_amount=Decimal("0.01") * units,
+                total_amount=Decimal("0.03") * units,
+                priced_requests=requests,
+            ),
+        )
+
+    async def __aiter__(self) -> AsyncIterator[StreamEvent]:
+        # Repeated cumulative events must not be summed together.
+        for requests in (1, 2, 2):
+            yield StreamEvent(
+                agent_id=self.context.agent_id,
+                agent_name="main",
+                event=UsageSnapshotEvent(
+                    event_id=f"usage-{self.index}-{requests}", snapshot=self.update_usage(requests)
+                ),
+            )
+        # Final ledger update deliberately has no corresponding event.
+        self.update_usage(3)
+        if self.index == 3 and self.ending != "completed":
+            if self.ending == "cancelled":
+                self.coordinator.accept_cancel(self.context.durable_logical_run_id, "usage test")
+            if self.ending in {"cancelled", "interrupted"}:
+                raise asyncio.CancelledError
+            raise RuntimeError("usage test failure")
+
+    def raise_if_exception(self) -> None:
+        pass
+
+    def recoverable_messages(self) -> list[ModelMessage]:
+        if self.index == 3 and self.ending == "fallback":
+            raise RuntimeError("recovery unavailable")
+        return self.history
+
+    def outcome(self) -> AgentSegmentOutcome[Any]:
+        deferred = self.index in {1, 2}
+        return AgentSegmentOutcome(
+            status=AgentSegmentStatus.suspended if deferred else AgentSegmentStatus.completed,
+            output=(
+                DeferredToolRequests(approvals=[ToolCallPart("guarded_effect", {}, tool_call_id=f"call-{self.index}")])
+                if deferred
+                else "done"
+            ),
+            checkpoint=AgentExecutionCheckpoint(
+                messages=tuple(self.history),
+                state=self.context.export_state(include_usage_ledger=True),
+                usage=self.context.build_usage_snapshot(),
+            ),
+        )
+
+
+@pytest.mark.parametrize("ending", ["completed", "failed", "cancelled", "interrupted", "fallback"])
+async def test_segment_usage_accumulates_live_checkpoints_and_terminal_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    ending: str,
+) -> None:
+    store = SQLiteSessionStore(tmp_path / "product.sqlite3")
+    worker = await _create_worker(store, tmp_path, _runtime_spec(tmp_path, TestModel()))
+    service = SessionApplicationService(store, worker.coordinator)
+    segment_index = -1
+    checkpoints = []
+    live_snapshots: list[UsageSnapshot] = []
+    original_put_checkpoint = store.put_execution_checkpoint
+
+    def put_checkpoint(checkpoint: Any) -> None:
+        checkpoints.append(checkpoint)
+        original_put_checkpoint(checkpoint)
+
+    async def event_sink(event: StreamEvent) -> None:
+        if isinstance(event.event, UsageSnapshotEvent) and event.event.snapshot is not None:
+            live_snapshots.append(event.event.snapshot)
+            # The SDK replaces runtime.ctx on entry: update the live context,
+            # not the pre-stream context retained for binding cleanup.
+            session_snapshot = worker.runtime.ctx.session_usage_snapshot
+            assert session_snapshot is not None
+            base_requests = segment_index * 3
+            base_units = 3 * segment_index * (segment_index + 1) // 2
+            current_requests = 1 if len(live_snapshots) % 3 == 1 else 2
+            _assert_segment_usage(
+                session_snapshot,
+                requests=base_requests + current_requests,
+                units=base_units + (segment_index + 1) * current_requests,
+            )
+
+    @asynccontextmanager
+    async def stream_segment(runtime: Any, request: Any) -> AsyncIterator[Any]:
+        nonlocal segment_index
+        segment_index += 1
+        index = segment_index
+        # Mirror the native harness's isolated per-segment context and ledger.
+        runtime.ctx = runtime.ctx.prepare_new_run()
+        context = runtime.ctx
+        if request.on_runtime_ready is not None:
+            await request.on_runtime_ready(SimpleNamespace(runtime=runtime))
+        history = list(request.message_history or [])
+        if request.user_prompt is not None:
+            history.append(ModelRequest(parts=[UserPromptPart(content=request.user_prompt)]))
+
+        yield _UsageSegment(context, history, index, ending, worker.coordinator)
+
+    monkeypatch.setattr(store, "put_execution_checkpoint", put_checkpoint)
+    monkeypatch.setattr(worker.coordinator.execution_harness, "stream_segment", stream_segment)
+    worker.coordinator.event_sink = event_sink
+    try:
+        session = service.create_session(str(tmp_path), session_id="segment-usage")
+        seed = await service.run_turn(session.session_id, ["previous turn"])
+        _assert_segment_usage(
+            UsageSnapshot.model_validate(seed.usage[SESSION_USAGE_SNAPSHOT_REVISION_KEY]),
+            requests=3,
+            units=3,
+        )
+        run = await service.start_turn(session.session_id, ["multi-segment turn"])
+        if ending in {"failed", "fallback"}:
+            with pytest.raises(RuntimeError, match="usage test failure"):
+                await service.wait(run.logical_run_id)
+        else:
+            await service.wait(run.logical_run_id)
+
+        # Each suspended checkpoint includes all earlier native segments plus
+        # the committed previous turn, even before a terminal revision exists.
+        for index, checkpoint in enumerate(checkpoints):
+            _assert_segment_usage(
+                UsageSnapshot.model_validate(checkpoint.payload.usage[SESSION_USAGE_SNAPSHOT_REVISION_KEY]),
+                requests=3 * (index + 1),
+                units=3 * (index + 1) * (index + 2) // 2,
+            )
+        for index, snapshot in enumerate(live_snapshots[3:]):
+            segment = index // 3 + 1
+            requests = 1 if index % 3 == 0 else 2
+            assert snapshot.run_id == run.logical_run_id
+            _assert_segment_usage(
+                snapshot,
+                requests=(segment - 1) * 3 + requests,
+                units=3 * (segment - 1) * (segment + 2) // 2 + (segment + 1) * requests,
+            )
+
+        revision = store.get_revision_for_run(run.logical_run_id)
+        assert revision is not None
+        assert revision.terminal["status"] == ("failed" if ending == "fallback" else ending)
+        requests, units = (6, 15) if ending == "fallback" else (9, 27)
+        assert {key: value for key, value in revision.usage.items() if key != SESSION_USAGE_SNAPSHOT_REVISION_KEY} == (
+            asdict(_segment_usage(requests, units))
+        )
+        _assert_segment_usage(
+            UsageSnapshot.model_validate(revision.usage[SESSION_USAGE_SNAPSHOT_REVISION_KEY]),
+            requests=requests + 3,
+            units=units + 3,
+        )
+        assert "session_usage_snapshot" not in revision.resumable_state
+        restored = worker.coordinator._new_execution_context(run, worker.runtime)
+        next_run = service.accept_turn(session.session_id, ["restore terminal totals"])
+        worker.coordinator._restore_head(next_run, restored)
+        assert restored.session_usage_snapshot is not None
+        _assert_segment_usage(restored.session_usage_snapshot, requests=requests + 3, units=units + 3)
+    finally:
         await worker.close()
         store.close()

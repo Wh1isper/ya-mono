@@ -12,6 +12,7 @@ from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    SystemPromptPart,
     TextPart,
     ToolCallPart,
     ToolReturnPart,
@@ -1548,3 +1549,23 @@ async def test_compact_filter_returns_original_history_when_iter_fails(agent_con
     while not queue.empty():
         events.append(queue.get_nowait())
     assert [event.__class__.__name__ for event in events] == ["CompactStartEvent", "CompactFailedEvent"]
+
+
+@pytest.mark.parametrize("retain_input", [False, True])
+def test_build_compacted_messages_does_not_fabricate_system_prompt(retain_input: bool) -> None:
+    """Only native ReinjectSystemPrompt should restore the configured prompt."""
+    retained = [ModelRequest(parts=[UserPromptPart(content="Continue")])] if retain_input else []
+
+    messages = compact_module._build_compacted_messages("Summary text", retained)
+
+    assert not any(
+        isinstance(part, SystemPromptPart)
+        for message in messages
+        if isinstance(message, ModelRequest)
+        for part in message.parts
+    )
+    assert "Placeholder" not in str(messages)
+    assert isinstance(messages[0], ModelRequest)
+    assert isinstance(messages[0].parts[0], UserPromptPart)
+    assert isinstance(messages[1], ModelResponse)
+    assert messages[1].parts == [TextPart(content="Summary text")]

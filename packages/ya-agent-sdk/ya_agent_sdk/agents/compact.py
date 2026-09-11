@@ -27,7 +27,6 @@ from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
     ModelResponse,
-    SystemPromptPart,
     TextPart,
     UserPromptPart,
 )
@@ -530,8 +529,8 @@ def _build_compacted_messages(
     """
     keep_metadata = {KEEP_TAG_KEY: KEEP_COMPACT}
 
-    request_parts: list[SystemPromptPart | UserPromptPart] = [
-        SystemPromptPart(content="Placeholder system prompt"),
+    # Leave system restoration to the downstream native ReinjectSystemPrompt capability.
+    request_parts: list[UserPromptPart] = [
         UserPromptPart(
             content="You have exceeded the maximum token limit for this conversation. "
             "Please provide a summary of the conversation so far and what you should work on next "

@@ -9,7 +9,14 @@ context-restored), and this module centralizes those patterns to avoid duplicati
 from collections.abc import Sequence
 
 from pydantic_ai import UserContent
-from pydantic_ai.messages import ModelMessage, UserPromptPart
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequestPart,
+    RetryPromptPart,
+    SystemPromptPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 
 # =============================================================================
 # Keep Tag Constants
@@ -28,6 +35,15 @@ KEEP_HANDOFF = "handoff"
 # =============================================================================
 # Shared Message Part Builders
 # =============================================================================
+
+
+def context_insertion_index(parts: Sequence[ModelRequestPart]) -> int:
+    """Keep leading system prompts and all tool/retry results ahead of context."""
+    insert_at = next((index for index, part in enumerate(parts) if not isinstance(part, SystemPromptPart)), len(parts))
+    for index, part in enumerate(parts):
+        if isinstance(part, (ToolReturnPart, RetryPromptPart)):
+            insert_at = index + 1
+    return insert_at
 
 
 def build_original_request_parts(

@@ -1,4 +1,4 @@
-"""Request-envelope capabilities for media and runtime context projection."""
+"""Canonical context snapshots and request-only media/file projections."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from pydantic_ai import RunContext
-from pydantic_ai.capabilities import AbstractCapability, CapabilityOrdering
+from pydantic_ai.capabilities import AbstractCapability, CapabilityOrdering, ReinjectSystemPrompt
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from pydantic_ai.models import ModelRequestContext
 
@@ -27,7 +27,8 @@ from ya_agent_sdk.filters.image import (
 )
 from ya_agent_sdk.filters.runtime_instructions import inject_runtime_instructions
 
-from ._request import copy_request_context, persist_history_projection, project_history
+from ._request import apply_context_snapshot, copy_request_context, project_history
+from .history import ColdStartCapability, ContextCompactionCapability, HandoffCapability
 
 ModelHandler = Callable[[ModelRequestContext], Awaitable[Any]]
 
@@ -58,16 +59,7 @@ class MediaCompatibilityCapability(AbstractCapability[AgentContext]):
     id: str | None = "media_compatibility"
 
     def get_ordering(self) -> CapabilityOrdering:
-        from ya_agent_sdk.capabilities.features.shell import ShellCapability
-
-        return CapabilityOrdering(
-            wraps=(
-                FileInspectionCapability,
-                ShellCapability,
-                EnvironmentContextCapability,
-                RuntimeContextCapability,
-            )
-        )
+        return CapabilityOrdering(wraps=(FileInspectionCapability,))
 
     async def wrap_model_request(
         self,
@@ -84,9 +76,6 @@ class FileInspectionCapability(AbstractCapability[AgentContext]):
     """Inject a one-shot file-inspection reminder and commit after success."""
 
     id: str | None = "file_inspection"
-
-    def get_ordering(self) -> CapabilityOrdering:
-        return CapabilityOrdering(wraps=(EnvironmentContextCapability, RuntimeContextCapability))
 
     async def wrap_model_request(
         self,
@@ -128,20 +117,21 @@ class EnvironmentContextCapability(AbstractCapability[AgentContext]):
     id: str | None = "environment_context"
 
     def get_ordering(self) -> CapabilityOrdering:
-        return CapabilityOrdering(wraps=(RuntimeContextCapability,))
+        return CapabilityOrdering(
+            wrapped_by=(HandoffCapability, ContextCompactionCapability, ColdStartCapability, ReinjectSystemPrompt),
+            wraps=(RuntimeContextCapability,),
+        )
 
-    async def wrap_model_request(
+    async def before_model_request(
         self,
         ctx: RunContext[AgentContext],
-        *,
         request_context: ModelRequestContext,
-        handler: ModelHandler,
-    ) -> Any:
+    ) -> ModelRequestContext:
         env = ctx.deps.env
         if env is None:
-            return await handler(request_context)
+            return request_context
         processor = create_environment_instructions_filter(env)
-        return await persist_history_projection(processor, ctx, request_context, handler)
+        return await apply_context_snapshot(processor, ctx, request_context, snapshot_key="ya:environment_context")
 
 
 @dataclass(kw_only=True)
@@ -150,11 +140,16 @@ class RuntimeContextCapability(AbstractCapability[AgentContext]):
 
     id: str | None = "runtime_context"
 
-    async def wrap_model_request(
+    def get_ordering(self) -> CapabilityOrdering:
+        return CapabilityOrdering(
+            wrapped_by=(HandoffCapability, ContextCompactionCapability, ColdStartCapability, ReinjectSystemPrompt),
+        )
+
+    async def before_model_request(
         self,
         ctx: RunContext[AgentContext],
-        *,
         request_context: ModelRequestContext,
-        handler: ModelHandler,
-    ) -> Any:
-        return await persist_history_projection(inject_runtime_instructions, ctx, request_context, handler)
+    ) -> ModelRequestContext:
+        return await apply_context_snapshot(
+            inject_runtime_instructions, ctx, request_context, snapshot_key="ya:runtime_context"
+        )

@@ -42,10 +42,17 @@ Example::
         result = await agent.run('Your prompt here', deps=ctx)
 """
 
-from pydantic_ai.messages import ModelMessage, ModelRequest, RetryPromptPart, ToolReturnPart, UserPromptPart
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    RetryPromptPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 from pydantic_ai.tools import RunContext
 
 from ya_agent_sdk.context import AgentContext
+from ya_agent_sdk.filters._builders import context_insertion_index
 
 
 async def inject_runtime_instructions(
@@ -104,13 +111,10 @@ async def inject_runtime_instructions(
     if not instructions:
         return message_history
 
-    # Insert before ordinary user prompt content, while keeping any tool responses
-    # and retry prompts before injected instructions for protocol-required ordering.
+    # Preserve leading system prompts and keep tool/retry results before context.
+    # Non-inline providers demote system parts that follow user content.
     runtime_part = UserPromptPart(content=instructions)
-    insert_at = 0
-    for index, part in enumerate(last_request.parts):
-        if isinstance(part, (ToolReturnPart, RetryPromptPart)):
-            insert_at = index + 1
+    insert_at = context_insertion_index(last_request.parts)
     last_request.parts = [*last_request.parts[:insert_at], runtime_part, *last_request.parts[insert_at:]]
 
     return message_history

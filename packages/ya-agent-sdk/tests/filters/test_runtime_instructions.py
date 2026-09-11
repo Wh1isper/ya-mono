@@ -3,7 +3,15 @@
 from pathlib import Path
 
 import pytest
-from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolReturnPart, UserPromptPart
+from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
+    RetryPromptPart,
+    SystemPromptPart,
+    TextPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 from ya_agent_sdk.context import AgentContext, ModelConfig
 from ya_agent_sdk.environment.local import LocalEnvironment
 
@@ -201,3 +209,37 @@ async def test_inject_runtime_instructions_only_response_in_history(tmp_path: Pa
 
             assert result == history
             assert len(response.parts) == 1
+
+
+@pytest.mark.parametrize("system_count", [0, 1, 3])
+@pytest.mark.parametrize("result_kinds", [(), ("tool",), ("retry",), ("tool", "retry", "tool")])
+async def test_runtime_context_preserves_system_and_result_prefix(
+    agent_context: AgentContext, system_count: int, result_kinds: tuple[str, ...]
+) -> None:
+    """Context must follow every leading system part and every tool/retry result."""
+    from unittest.mock import MagicMock
+
+    from ya_agent_sdk.filters.runtime_instructions import inject_runtime_instructions
+
+    system_parts = [SystemPromptPart(content=f"REAL SYSTEM {index}") for index in range(system_count)]
+    result_parts = [
+        ToolReturnPart(tool_name="test_tool", content="result", tool_call_id=f"call_{index}")
+        if kind == "tool"
+        else RetryPromptPart(content="Try again", tool_name="test_tool", tool_call_id=f"call_{index}")
+        for index, kind in enumerate(result_kinds)
+    ]
+    prefix = [*system_parts, *result_parts]
+    user_part = UserPromptPart(content="Continue")
+    request = ModelRequest(parts=[*prefix, user_part])
+    mock_ctx = MagicMock()
+    mock_ctx.deps = agent_context
+    agent_context.force_inject_instructions = True
+
+    await inject_runtime_instructions(mock_ctx, [request])
+
+    assert len(request.parts) == len(prefix) + 2
+    assert all(actual is expected for actual, expected in zip(request.parts, prefix, strict=False))
+    context_part = request.parts[len(prefix)]
+    assert isinstance(context_part, UserPromptPart)
+    assert "<runtime-context>" in context_part.content
+    assert request.parts[-1] is user_part
