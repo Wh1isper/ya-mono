@@ -22,6 +22,25 @@ flowchart TB
 - `Dockerfile.ya-claw` builds the server image and bundles the Docker CLI required by Docker shell execution. It does not run a Docker daemon.
 - `Dockerfile.ya-claw-workspace` builds the workspace image used by the Docker workspace provider.
 
+The service image has separate publication channels:
+
+- `ghcr.io/wh1isper/ya-claw:dev` follows matching `main` pushes. The workflow covers
+  the service and its installed workspace dependency package trees, including SDK
+  and Environment sources and packaged assets, plus workspace manifests, frontend
+  sources, lockfiles, and image build configuration.
+- Release events publish the release tag and `latest`; they do not update `dev`.
+- Pull requests build the image for validation without publishing.
+
+Maintainers can rebuild `dev` without a new commit:
+
+```bash
+gh workflow run claw-image.yaml --ref main
+```
+
+The manual publish job accepts only the `main` ref. Publishing does not restart
+running deployments; pull the chosen tag and recreate the service when ready to
+upgrade. See the package README's Docker section for the repository build contract.
+
 Build locally:
 
 ```bash

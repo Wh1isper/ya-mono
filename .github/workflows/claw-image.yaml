@@ -1,6 +1,7 @@
 name: YA Claw Image
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -8,19 +9,16 @@ on:
       - "Dockerfile.ya-claw"
       - ".dockerignore"
       - "apps/ya-claw-web/**"
-      - "packages/ya-agent-environment/pyproject.toml"
-      - "packages/ya-agent-sdk/pyproject.toml"
-      - "packages/ya-agent-stream-protocol/ya_agent_stream_protocol/**"
-      - "packages/ya-agent-stream-protocol/pyproject.toml"
-      - "packages/ya-oauth/pyproject.toml"
-      - "packages/ya-oauth-provider/pyproject.toml"
-      - "packages/yaacli/pyproject.toml"
-      - "packages/ya-claw/ya_claw/**"
-      - "packages/ya-claw/scripts/**"
-      - "packages/ya-claw/docker-entrypoint.sh"
-      - "packages/ya-claw/profiles.yaml"
-      - "packages/ya-claw/pyproject.toml"
-      - "packages/ya-ripgrep-core/pyproject.toml"
+      # Include sources, packaged assets, and build metadata for installed packages.
+      - "packages/ya-agent-environment/**"
+      - "packages/ya-agent-sdk/**"
+      - "packages/ya-agent-stream-protocol/**"
+      - "packages/ya-oauth/**"
+      - "packages/ya-oauth-provider/**"
+      - "packages/ya-claw/**"
+      - "packages/ya-ripgrep-core/**"
+      # uv also reads manifests for workspace members not installed in this image.
+      - "packages/*/pyproject.toml"
       - "pyproject.toml"
       - "uv.lock"
       - "pnpm-lock.yaml"
@@ -32,19 +30,16 @@ on:
       - "Dockerfile.ya-claw"
       - ".dockerignore"
       - "apps/ya-claw-web/**"
-      - "packages/ya-agent-environment/pyproject.toml"
-      - "packages/ya-agent-sdk/pyproject.toml"
-      - "packages/ya-agent-stream-protocol/ya_agent_stream_protocol/**"
-      - "packages/ya-agent-stream-protocol/pyproject.toml"
-      - "packages/ya-oauth/pyproject.toml"
-      - "packages/ya-oauth-provider/pyproject.toml"
-      - "packages/yaacli/pyproject.toml"
-      - "packages/ya-claw/ya_claw/**"
-      - "packages/ya-claw/scripts/**"
-      - "packages/ya-claw/docker-entrypoint.sh"
-      - "packages/ya-claw/profiles.yaml"
-      - "packages/ya-claw/pyproject.toml"
-      - "packages/ya-ripgrep-core/pyproject.toml"
+      # Include sources, packaged assets, and build metadata for installed packages.
+      - "packages/ya-agent-environment/**"
+      - "packages/ya-agent-sdk/**"
+      - "packages/ya-agent-stream-protocol/**"
+      - "packages/ya-oauth/**"
+      - "packages/ya-oauth-provider/**"
+      - "packages/ya-claw/**"
+      - "packages/ya-ripgrep-core/**"
+      # uv also reads manifests for workspace members not installed in this image.
+      - "packages/*/pyproject.toml"
       - "pyproject.toml"
       - "uv.lock"
       - "pnpm-lock.yaml"
@@ -94,7 +89,7 @@ jobs:
 
   publish-dev:
     name: Publish YA Claw Dev Image
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Check out
