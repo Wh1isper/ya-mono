@@ -25,6 +25,7 @@ YA_CLAW_BRIDGE_GITHUB_ALLOWED_SENDERS=alice,bob
 YA_CLAW_BRIDGE_GITHUB_DEFAULT_PROFILE=default
 YA_CLAW_BRIDGE_GITHUB_API_URL=https://api.github.com
 YA_CLAW_BRIDGE_GITHUB_POLL_INTERVAL_SECONDS=60
+YA_CLAW_BRIDGE_GITHUB_MAX_SOURCE_NOTIFICATION_DELAY_SECONDS=600
 YA_CLAW_BRIDGE_GITHUB_INITIAL_LOOKBACK_SECONDS=0
 YA_CLAW_BRIDGE_GITHUB_MARK_READ=true
 ```
@@ -32,6 +33,8 @@ YA_CLAW_BRIDGE_GITHUB_MARK_READ=true
 `YA_CLAW_BRIDGE_GITHUB_ALLOWED_SENDERS` accepts comma-separated, case-insensitive exact GitHub logins. Use `*` to accept every Issue/PR notification even when its triggering actor cannot be attributed. The authenticated account is ignored when it can be identified as the sender.
 
 `YA_CLAW_BRIDGE_GITHUB_INITIAL_LOOKBACK_SECONDS=0` starts from bridge initialization time and avoids creating sessions from historical notifications. Set a positive value to process a bounded initial lookback.
+
+`YA_CLAW_BRIDGE_GITHUB_MAX_SOURCE_NOTIFICATION_DELAY_SECONDS` controls sender attribution delay tolerance, not polling frequency or cursor overlap. It defaults to `600` seconds, accepts non-negative integers, and requires identical timestamps when set to `0`. A larger window also widens the heuristic association with an older source; it does not make subject edits attributable.
 
 ## Notification and Session Behavior
 
@@ -45,7 +48,7 @@ GitHub notifications are mutable thread snapshots rather than individual events.
 
 Later updates to one Issue or Pull Request therefore continue the same session while retaining distinct idempotency keys. The session omits a custom workspace binding and inherits `YA_CLAW_WORKSPACE_DIR` or the configured default mount set.
 
-The adapter follows `latest_comment_url` when available. A distinct comment source is attributable to its author when the notification follows the comment's `updated_at` within one minute, accounting for GitHub's asynchronous notification generation for new and updated comments. GitHub may return the subject URL itself as `latest_comment_url` for a newly created Issue; the adapter recognizes normalized equivalent URLs as the subject. Subject `mention` and `team_mention` notifications can attribute the subject author when `created_at` equals `updated_at` and the notification follows within one minute. Other subject-only reasons and later subject edits cannot reliably identify the actor; explicit sender allowlists reject them, while `*` accepts them.
+The adapter follows `latest_comment_url` when available. A distinct comment source is attributable to its author when the notification follows the comment's `updated_at` within the configured delay window (10 minutes by default), accounting for GitHub's asynchronous notification generation for new and updated comments. GitHub may return the subject URL itself as `latest_comment_url` for a newly created Issue; the adapter recognizes normalized equivalent URLs as the subject. Subject `mention` and `team_mention` notifications can attribute the subject author when `created_at` equals `updated_at` and the notification follows within the configured delay window (10 minutes by default). Other subject-only reasons and later subject edits cannot reliably identify the actor; explicit sender allowlists reject them, while `*` accepts them.
 
 ## Polling and Cursor
 

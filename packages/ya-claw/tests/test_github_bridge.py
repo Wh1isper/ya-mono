@@ -282,8 +282,8 @@ async def test_github_adapter_rejects_stale_comment_actor_and_authenticated_acco
             stale.subject.latest_comment_url or "": {
                 "id": 504,
                 "body": "older allowed comment",
-                "created_at": "2026-08-26T07:58:30Z",
-                "updated_at": "2026-08-26T07:58:30Z",
+                "created_at": "2026-08-26T07:49:59Z",
+                "updated_at": "2026-08-26T07:49:59Z",
                 "user": {"login": "alice", "id": 1, "type": "User"},
             },
             own.subject.latest_comment_url or "": {
@@ -320,7 +320,9 @@ async def test_github_adapter_rejects_stale_comment_actor_and_authenticated_acco
 
 
 async def test_github_adapter_attributes_new_subject_mention_to_subject_author(db_engine: AsyncEngine) -> None:
-    notification = _notification(thread_id="171", reason="mention", latest_comment=False)
+    notification = _notification(
+        thread_id="171", reason="mention", latest_comment=False, updated_at=datetime(2026, 8, 26, 8, 10, tzinfo=UTC)
+    )
     assert notification.subject.url is not None
     client = _FakeGitHubClient(
         notifications=[notification],
@@ -364,7 +366,7 @@ async def test_github_adapter_attributes_delayed_new_issue_mention_when_latest_c
     notification = _notification(
         thread_id="25310933989",
         reason="mention",
-        updated_at=datetime(2026, 8, 26, 13, 47, 29, tzinfo=UTC),
+        updated_at=datetime(2026, 8, 26, 13, 57, 8, tzinfo=UTC),
         latest_comment=False,
     )
     assert notification.subject.url is not None
@@ -411,7 +413,7 @@ async def test_github_adapter_attributes_delayed_latest_comment_sender(db_engine
     notification = _notification(
         thread_id="25310933989",
         reason="mention",
-        updated_at=datetime(2026, 8, 26, 15, 21, 3, tzinfo=UTC),
+        updated_at=datetime(2026, 8, 26, 15, 30, 40, tzinfo=UTC),
     )
     assert notification.subject.latest_comment_url is not None
     client = _FakeGitHubClient(
@@ -447,6 +449,63 @@ async def test_github_adapter_attributes_delayed_latest_comment_sender(db_engine
     await asyncio.wait_for(task, timeout=5)
 
     assert [message.sender_id for message in handler.messages] == ["Wh1isper"]
+
+
+@pytest.mark.parametrize("source_kind", ["comment", "subject", "subject_alias"])
+@pytest.mark.parametrize(
+    ("max_delay_seconds", "delay_seconds", "accepted"),
+    [
+        (60, 61, False),
+        (600, 600, True),
+        (600, 601, False),
+        (1200, 900, True),
+        (600, -1, False),
+        (0, 0, True),
+        (0, 1, False),
+    ],
+)
+async def test_github_adapter_applies_configured_source_notification_delay(
+    db_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+    source_kind: str,
+    max_delay_seconds: int,
+    delay_seconds: int,
+    accepted: bool,
+) -> None:
+    monkeypatch.setenv("YA_CLAW_BRIDGE_GITHUB_MAX_SOURCE_NOTIFICATION_DELAY_SECONDS", str(max_delay_seconds))
+    source_at = datetime(2026, 8, 26, 8, tzinfo=UTC)
+    notification = _notification(
+        thread_id="delay-test",
+        latest_comment=source_kind == "comment",
+        updated_at=source_at + timedelta(seconds=delay_seconds),
+    )
+    if source_kind == "subject_alias":
+        notification = notification.model_copy(
+            update={"subject": notification.subject.model_copy(update={"latest_comment_url": notification.subject.url})}
+        )
+    source_url = notification.subject.latest_comment_url or notification.subject.url
+    assert source_url is not None
+    client = _FakeGitHubClient(
+        notifications=[notification],
+        sources={
+            source_url: {
+                "created_at": source_at.isoformat(),
+                "updated_at": source_at.isoformat(),
+                "user": {"login": "alice", "id": 1, "type": "User"},
+            }
+        },
+        expected_mark_count=1,
+    )
+    handler = _RecordingHandler()
+    adapter = GitHubBridgeAdapter(
+        settings=ClawSettings(bridge_github_allowed_senders="alice", _env_file=None),
+        handler=handler,
+        session_factory=create_session_factory(db_engine),
+        client=client,
+    )
+    await adapter._process_notification(notification, tenant_key="github:api.github.com:100")
+    assert [message.sender_id for message in handler.messages] == (["alice"] if accepted else [])
+    assert client.marked_read == ["delay-test"]
 
 
 async def test_github_adapter_treats_equivalent_subject_url_as_subject_for_sender_attribution(

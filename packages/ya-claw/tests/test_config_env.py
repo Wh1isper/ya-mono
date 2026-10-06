@@ -11,6 +11,19 @@ from ya_claw.bridge import BridgeAdapterType, BridgeDispatchMode
 from ya_claw.config import ClawSettings
 
 
+def test_github_source_notification_delay_default_and_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    key = "YA_CLAW_BRIDGE_GITHUB_MAX_SOURCE_NOTIFICATION_DELAY_SECONDS"
+    monkeypatch.delenv(key, raising=False)
+    assert ClawSettings(_env_file=None).bridge_github_max_source_notification_delay_seconds == 600
+    for value in (0, 60, 1200):
+        monkeypatch.setenv(key, str(value))
+        assert ClawSettings(_env_file=None).bridge_github_max_source_notification_delay_seconds == value
+    for value in ("-1", "invalid"):
+        monkeypatch.setenv(key, value)
+        with pytest.raises(ValueError, match="bridge_github_max_source_notification_delay_seconds"):
+            ClawSettings(_env_file=None)
+
+
 def test_capability_plugin_manifest_is_explicit_and_cached(tmp_path: Path) -> None:
     manifest_path = tmp_path / "plugins.toml"
     manifest_path.write_text("schema_version = 1\n", encoding="utf-8")

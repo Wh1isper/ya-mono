@@ -27,6 +27,7 @@ YA_CLAW_BRIDGE_GITHUB_TOKEN=replace-with-classic-pat
 YA_CLAW_BRIDGE_GITHUB_ALLOWED_SENDERS=alice,bob
 YA_CLAW_BRIDGE_GITHUB_DEFAULT_PROFILE=default
 YA_CLAW_BRIDGE_GITHUB_POLL_INTERVAL_SECONDS=60
+YA_CLAW_BRIDGE_GITHUB_MAX_SOURCE_NOTIFICATION_DELAY_SECONDS=600
 YA_CLAW_BRIDGE_GITHUB_INITIAL_LOOKBACK_SECONDS=0
 YA_CLAW_BRIDGE_GITHUB_MARK_READ=true
 ```
@@ -75,11 +76,13 @@ The adapter follows `subject.latest_comment_url` as an opaque API URL when prese
 
 ## Sender Attribution
 
+`YA_CLAW_BRIDGE_GITHUB_MAX_SOURCE_NOTIFICATION_DELAY_SECONDS` sets the maximum non-negative source-to-notification delay in seconds (default `600`). Zero requires identical timestamps. This window is independent of the polling interval and the 60-second cursor replay overlap. Increasing it tolerates delayed notifications but also widens the heuristic association with an older source; it does not make subject edits attributable or change sender allowlists.
+
 Notification thread objects do not include the triggering actor. The adapter resolves the source object to apply `YA_CLAW_BRIDGE_GITHUB_ALLOWED_SENDERS`:
 
-- A comment from a distinct `latest_comment_url` is attributable to its `user`, `actor`, `sender`, or `author` when the notification follows the comment's `updated_at` within one minute. The comment object identifies its author directly, and the bounded delay accounts for GitHub's asynchronous notification generation for new and updated comments.
+- A comment from a distinct `latest_comment_url` is attributable to its `user`, `actor`, `sender`, or `author` when the notification follows the comment's `updated_at` within the configured delay window (10 minutes by default). The comment object identifies its author directly, and the bounded delay accounts for GitHub's asynchronous notification generation for new and updated comments.
 - GitHub may set `latest_comment_url` to the subject URL for a newly created Issue. The adapter compares normalized same-origin source URLs and treats equivalent subject URLs as a subject rather than a comment.
-- A newly created subject body is attributable only for `mention` and `team_mention` reasons when `created_at` equals `updated_at` and the notification follows within one minute. Later subject edits are unattributable because the subject author may differ from the editor.
+- A newly created subject body is attributable only for `mention` and `team_mention` reasons when `created_at` equals `updated_at` and the notification follows within the configured delay window (10 minutes by default). Later subject edits are unattributable because the subject author may differ from the editor.
 - Other subject-only notification reasons are not reliably attributable because the subject author may differ from the actor who changed assignment, state, labels, or review requests.
 
 With an explicit sender list, an unattributable notification is ignored. With `*`, sender attribution is not required and every Issue/PR notification snapshot is accepted, except an identified self-event.
