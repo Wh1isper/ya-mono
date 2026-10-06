@@ -178,6 +178,7 @@ class ClawSettings(BaseSettings):
     bridge_github_allowed_senders: str = ""
     bridge_github_default_profile: str | None = None
     bridge_github_poll_interval_seconds: PositiveInt = 60
+    bridge_github_max_source_notification_delay_seconds: int = Field(default=600, ge=0)
     bridge_github_initial_lookback_seconds: int = Field(default=0, ge=0)
     bridge_github_mark_read: bool = True
     bridge_lark_enabled: bool = False

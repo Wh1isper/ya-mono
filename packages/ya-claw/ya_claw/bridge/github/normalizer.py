@@ -13,7 +13,6 @@ from ya_claw.bridge.github.models import (
 from ya_claw.bridge.models import BridgeAdapterType, BridgeInboundMessage
 
 _ATTRIBUTABLE_SUBJECT_REASONS = frozenset({"mention", "team_mention"})
-_MAX_SOURCE_NOTIFICATION_DELAY = timedelta(minutes=1)
 
 
 def resolve_notification_resource(notification: GitHubNotification) -> GitHubNotificationResource | None:
@@ -47,6 +46,7 @@ def source_sender_is_attributable(
     payload: dict[str, Any] | None,
     *,
     source_is_comment: bool,
+    max_notification_delay: timedelta,
 ) -> bool:
     if not isinstance(payload, dict):
         return False
@@ -60,7 +60,7 @@ def source_sender_is_attributable(
         return False
     source_at = updated_at if source_is_comment else created_at
     notification_delay = _as_utc(notification.updated_at) - source_at
-    return timedelta(0) <= notification_delay <= _MAX_SOURCE_NOTIFICATION_DELAY
+    return timedelta(0) <= notification_delay <= max_notification_delay
 
 
 def resolve_notification_source(

@@ -102,11 +102,12 @@ class GitHubBridgeAdapter(BridgeAdapter):
         self._cursor_at, created = await self._load_or_create_cursor(self._tenant_key)
         self._cursor_has_history = not created
         logger.info(
-            "Starting GitHub bridge adapter account={} tenant={} allowed_senders={} poll_interval_seconds={}",
+            "Starting GitHub bridge adapter account={} tenant={} allowed_senders={} poll_interval_seconds={} max_source_notification_delay_seconds={}",
             bot_user.login,
             self._tenant_key,
             sorted(allowed_senders),
             self._settings.bridge_github_poll_interval_seconds,
+            self._settings.bridge_github_max_source_notification_delay_seconds,
         )
 
     async def _poll_once(self) -> int | None:
@@ -192,6 +193,7 @@ class GitHubBridgeAdapter(BridgeAdapter):
         await self._mark_read(notification.id)
 
     async def _load_source(self, notification: GitHubNotification) -> tuple[dict[str, object] | None, bool]:
+        max_notification_delay = timedelta(seconds=self._settings.bridge_github_max_source_notification_delay_seconds)
         latest_comment_url = notification.subject.latest_comment_url
         if latest_comment_url is not None:
             try:
@@ -200,6 +202,7 @@ class GitHubBridgeAdapter(BridgeAdapter):
                     notification,
                     payload,
                     source_is_comment=not _same_source_url(latest_comment_url, notification.subject.url),
+                    max_notification_delay=max_notification_delay,
                 )
             except GitHubApiError as exc:
                 if exc.status_code not in {404, 410}:
@@ -212,6 +215,7 @@ class GitHubBridgeAdapter(BridgeAdapter):
             notification,
             payload,
             source_is_comment=False,
+            max_notification_delay=max_notification_delay,
         ) and latest_comment_url is None
 
     def _sender_allowed(self, sender: GitHubUser | None) -> bool:
