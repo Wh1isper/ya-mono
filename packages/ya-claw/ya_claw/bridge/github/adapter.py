@@ -11,19 +11,33 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ya_claw.bridge.base import BridgeAdapter, BridgeMessageHandler
 from ya_claw.bridge.github.client import GitHubApiError, GitHubClient, GitHubRestClient
-from ya_claw.bridge.github.models import GitHubNotification, GitHubUser
+from ya_claw.bridge.github.models import (
+    GitHubNotification,
+    GitHubNotificationResource,
+    GitHubNotificationSource,
+    GitHubUser,
+)
 from ya_claw.bridge.github.normalizer import (
     build_inbound_message,
+    comment_mentions_user,
+    resolve_comment_source,
     resolve_notification_resource,
     resolve_notification_source,
     source_sender_is_attributable,
 )
-from ya_claw.bridge.models import BridgeAdapterType, BridgeEventStatus
+from ya_claw.bridge.models import BridgeAdapterType, BridgeEventStatus, BridgeInboundMessage
 from ya_claw.config import ClawSettings
-from ya_claw.orm.tables import BridgeCursorRecord
+from ya_claw.orm.tables import BridgeCursorRecord, BridgeEventRecord
 
 _CURSOR_KEY = "notifications"
 _CURSOR_OVERLAP = timedelta(seconds=60)
+_ACCEPTED_STATUSES = frozenset({
+    BridgeEventStatus.QUEUED,
+    BridgeEventStatus.SUBMITTED,
+    BridgeEventStatus.STEERED,
+    BridgeEventStatus.DEFERRED,
+    BridgeEventStatus.DUPLICATE,
+})
 
 
 class GitHubBridgeAdapter(BridgeAdapter):
@@ -74,6 +88,7 @@ class GitHubBridgeAdapter(BridgeAdapter):
                 try:
                     if self._tenant_key is None:
                         await self._bootstrap(allowed_senders)
+                    await self._retry_pending_reactions()
                     response_interval = await self._poll_once()
                     if response_interval is not None:
                         delay_seconds = max(delay_seconds, response_interval)
@@ -139,7 +154,7 @@ class GitHubBridgeAdapter(BridgeAdapter):
             return
 
         try:
-            source_payload, sender_is_attributable = await self._load_source(notification)
+            sources = await self._load_sources(notification, resource)
         except GitHubApiError as exc:
             if exc.status_code not in {404, 410}:
                 raise
@@ -151,30 +166,38 @@ class GitHubBridgeAdapter(BridgeAdapter):
             )
             await self._mark_read(notification.id)
             return
-        source = resolve_notification_source(
-            source_payload,
-            sender_is_attributable=sender_is_attributable,
-        )
-        if not self._sender_allowed(source.sender):
-            logger.info(
-                "Ignoring GitHub notification from disallowed or unresolved sender thread_id={} repository={} resource={}#{} sender={}",
-                notification.id,
-                notification.repository.full_name,
-                resource.kind,
-                resource.number,
-                source.sender.login if source.sender is not None else None,
-            )
-            await self._mark_read(notification.id)
-            return
+        for source in sources:
+            if not self._sender_allowed(source.sender):
+                logger.info(
+                    "Ignoring GitHub notification from disallowed or unresolved sender thread_id={} repository={} resource={}#{} sender={}",
+                    notification.id,
+                    notification.repository.full_name,
+                    resource.kind,
+                    resource.number,
+                    source.sender.login if source.sender is not None else None,
+                )
+                continue
+            await self._dispatch_source(notification, resource, source, tenant_key=tenant_key)
+        await self._mark_read(notification.id)
 
+    async def _dispatch_source(
+        self,
+        notification: GitHubNotification,
+        resource: GitHubNotificationResource,
+        source: GitHubNotificationSource,
+        *,
+        tenant_key: str,
+    ) -> None:
         message = build_inbound_message(
             notification,
             tenant_key=tenant_key,
             resource=resource,
             source=source,
         )
+        if source.comment_url is not None:
+            message = await self._reuse_legacy_comment_identity(message, source)
         result = await self._handler.handle_message(message)
-        if result.status == BridgeEventStatus.FAILED:
+        if result.status not in _ACCEPTED_STATUSES:
             raise RuntimeError(
                 f"GitHub bridge dispatch failed for event '{message.event_id}': "
                 f"{result.error_message or 'unknown bridge dispatch error'}"
@@ -190,7 +213,71 @@ class GitHubBridgeAdapter(BridgeAdapter):
             result.session_id,
             result.run_id,
         )
-        await self._mark_read(notification.id)
+        if source.comment_url is not None:
+            await self._acknowledge_comment(message)
+
+    async def _load_sources(
+        self, notification: GitHubNotification, resource: GitHubNotificationResource
+    ) -> list[GitHubNotificationSource]:
+        payload, attributable = await self._load_source(notification)
+        latest_url = notification.subject.latest_comment_url
+        direct_comment = (
+            latest_url is not None
+            and not _same_source_url(latest_url, notification.subject.url)
+            and isinstance(payload, dict)
+        )
+        sources: dict[str, GitHubNotificationSource] = {}
+        if direct_comment and attributable and isinstance(payload, dict):
+            source = resolve_comment_source(
+                notification,
+                payload,
+                api_url=self._settings.bridge_github_api_url,
+                review_comment="/pulls/comments/" in (latest_url or ""),
+            )
+            if source is not None and source.comment_event_id is not None:
+                sources[source.comment_event_id] = source
+
+        # Notifications are wake-ups, not actor-bearing events. Recover explicit
+        # requests from real comments even when the snapshot points at the subject
+        # or a later comment. Never assign the subject author's identity to them.
+        comments = await self._require_client().list_comments(
+            repository=notification.repository.full_name,
+            number=resource.number,
+            pull_request=resource.kind == "pull",
+        )
+        bot_user = self._bot_user
+        if bot_user is None:
+            raise RuntimeError("GitHub bridge account has not been resolved.")
+        for comment in comments:
+            if not (
+                comment_mentions_user(comment, bot_user.login)
+                or source_sender_is_attributable(
+                    notification,
+                    comment,
+                    source_is_comment=True,
+                    max_notification_delay=timedelta(
+                        seconds=self._settings.bridge_github_max_source_notification_delay_seconds
+                    ),
+                )
+            ):
+                continue
+            source = resolve_comment_source(
+                notification,
+                comment,
+                api_url=self._settings.bridge_github_api_url,
+                review_comment="pull_request_review_id" in comment,
+            )
+            if source is not None and source.comment_event_id is not None:
+                sources[source.comment_event_id] = source
+        allowed_comments = [source for source in sources.values() if self._sender_allowed(source.sender)]
+        if allowed_comments:
+            return sorted(
+                allowed_comments,
+                key=lambda source: (str((source.payload or {}).get("updated_at")), source.comment_event_id or ""),
+            )
+        # Preserve subject-only notifications, including the explicit '*' policy.
+        # A rejected/stale comment must not become an attributable subject.
+        return [resolve_notification_source(payload, sender_is_attributable=attributable)]
 
     async def _load_source(self, notification: GitHubNotification) -> tuple[dict[str, object] | None, bool]:
         max_notification_delay = timedelta(seconds=self._settings.bridge_github_max_source_notification_delay_seconds)
@@ -217,6 +304,127 @@ class GitHubBridgeAdapter(BridgeAdapter):
             source_is_comment=False,
             max_notification_delay=max_notification_delay,
         ) and latest_comment_url is None
+
+    async def _reuse_legacy_comment_identity(
+        self, message: BridgeInboundMessage, source: GitHubNotificationSource
+    ) -> BridgeInboundMessage:
+        """Retain delivery keys for comments already stored under notification IDs."""
+        async with self._session_factory() as db_session:
+            result = await db_session.execute(
+                select(BridgeEventRecord).where(
+                    BridgeEventRecord.adapter == BridgeAdapterType.GITHUB,
+                    BridgeEventRecord.tenant_key == message.tenant_key,
+                    BridgeEventRecord.external_chat_id == message.chat_id,
+                    BridgeEventRecord.event_id.startswith(f"github:{message.thread_id}:"),
+                )
+            )
+            for record in result.scalars():
+                github = record.normalized_event.get("metadata", {}).get("github", {})
+                if github.get("comment_event_id") == source.comment_event_id:
+                    return message.model_copy(
+                        update={
+                            "event_id": record.event_id,
+                            "message_id": record.external_message_id or record.event_id,
+                        }
+                    )
+                raw = record.raw_event
+                payload = raw.get("resolved_source")
+                subject = raw.get("subject")
+                if not isinstance(payload, dict) or not isinstance(subject, dict) or source.payload is None:
+                    continue
+                url = subject.get("latest_comment_url")
+                if (
+                    isinstance(url, str)
+                    and source.comment_url is not None
+                    and _same_source_url(url, source.comment_url)
+                    and payload.get("id") == source.payload.get("id")
+                    and payload.get("updated_at") == source.payload.get("updated_at")
+                ):
+                    return message.model_copy(
+                        update={
+                            "event_id": record.event_id,
+                            "message_id": record.external_message_id or record.event_id,
+                        }
+                    )
+        return message
+
+    async def _retry_pending_reactions(self) -> None:
+        async with self._session_factory() as db_session:
+            result = await db_session.execute(
+                select(BridgeEventRecord.normalized_event).where(
+                    BridgeEventRecord.adapter == BridgeAdapterType.GITHUB,
+                    BridgeEventRecord.tenant_key == self._require_tenant_key(),
+                    BridgeEventRecord.status.in_(_ACCEPTED_STATUSES),
+                    BridgeEventRecord.normalized_event["metadata"]["github"]["eyes_reaction"].as_string() == "pending",
+                )
+            )
+            messages = [BridgeInboundMessage.model_validate(payload) for payload in result.scalars()]
+        for message in messages:
+            sender = GitHubUser(login=message.sender_id, id=-1) if message.sender_id is not None else None
+            if self._sender_allowed(sender):
+                await self._acknowledge_comment(message)
+
+    async def _acknowledge_comment(self, message: BridgeInboundMessage) -> None:
+        github = message.metadata.get("github")
+        if not isinstance(github, dict) or not isinstance(github.get("comment_url"), str):
+            return
+        comment_url = github["comment_url"]
+        async with self._session_factory() as db_session:
+            result = await db_session.execute(
+                select(BridgeEventRecord).where(
+                    BridgeEventRecord.adapter == BridgeAdapterType.GITHUB,
+                    BridgeEventRecord.tenant_key == message.tenant_key,
+                    BridgeEventRecord.event_id == message.event_id,
+                )
+            )
+            record = result.scalar_one_or_none()
+            if isinstance(record, BridgeEventRecord):
+                metadata = record.normalized_event.get("metadata", {})
+                stored_github = metadata.get("github", {})
+                if stored_github.get("eyes_reaction") in {"sent", "unavailable"}:
+                    return
+                # Also enroll successfully ingested pre-comment-identity events.
+                record.normalized_event = {
+                    **record.normalized_event,
+                    "metadata": {
+                        **metadata,
+                        "github": {
+                            **stored_github,
+                            "comment_url": comment_url,
+                            "eyes_reaction": "pending",
+                        },
+                    },
+                }
+                await db_session.commit()
+        try:
+            await self._require_client().add_eyes_reaction(comment_url)
+            state = "sent"
+        except GitHubApiError as exc:
+            if exc.status_code in {404, 410}:
+                state = "unavailable"
+                logger.warning(
+                    "GitHub acknowledgement target disappeared event_id={} url={}", message.event_id, comment_url
+                )
+            else:
+                logger.warning("GitHub acknowledgement pending retry event_id={} error={}", message.event_id, exc)
+                return
+        async with self._session_factory() as db_session:
+            result = await db_session.execute(
+                select(BridgeEventRecord).where(
+                    BridgeEventRecord.adapter == BridgeAdapterType.GITHUB,
+                    BridgeEventRecord.tenant_key == message.tenant_key,
+                    BridgeEventRecord.event_id == message.event_id,
+                )
+            )
+            record = result.scalar_one_or_none()
+            if isinstance(record, BridgeEventRecord):
+                normalized = record.normalized_event
+                metadata = normalized.get("metadata", {})
+                record.normalized_event = {
+                    **normalized,
+                    "metadata": {**metadata, "github": {**metadata.get("github", {}), "eyes_reaction": state}},
+                }
+                await db_session.commit()
 
     def _sender_allowed(self, sender: GitHubUser | None) -> bool:
         bot_user = self._bot_user

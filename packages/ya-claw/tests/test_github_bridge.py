@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -9,7 +10,7 @@ from urllib.parse import parse_qs
 
 import httpx
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine
 from ya_claw.bridge.base import BridgeMessageHandler
 from ya_claw.bridge.github.adapter import GitHubBridgeAdapter
@@ -17,7 +18,9 @@ from ya_claw.bridge.github.client import GitHubApiError, GitHubRestClient
 from ya_claw.bridge.github.models import GitHubNotification, GitHubNotificationPage, GitHubUser
 from ya_claw.bridge.github.normalizer import (
     build_inbound_message,
+    comment_mentions_user,
     notification_event_id,
+    resolve_comment_source,
     resolve_notification_resource,
     resolve_notification_source,
 )
@@ -27,9 +30,12 @@ from ya_claw.bridge.models import (
     BridgeEventStatus,
     BridgeInboundMessage,
 )
+from ya_claw.bridge.service import BridgeRuntimeHandler
 from ya_claw.config import ClawSettings
 from ya_claw.db.engine import create_engine, create_session_factory
-from ya_claw.orm.tables import BridgeCursorRecord
+from ya_claw.execution.dispatcher import RunDispatcher
+from ya_claw.orm.tables import BridgeCursorRecord, BridgeEventRecord, RunRecord
+from ya_claw.runtime_state import create_runtime_state
 
 
 @pytest.fixture
@@ -105,6 +111,8 @@ class _FakeGitHubClient:
         self.marked_read: list[str] = []
         self.marked = asyncio.Event()
         self.closed = False
+        self.comments: list[dict[str, Any]] = []
+        self.reactions: list[str] = []
 
     async def get_authenticated_user(self) -> GitHubUser:
         return GitHubUser(login="ya-claw-bot", id=100, type="User")
@@ -115,6 +123,12 @@ class _FakeGitHubClient:
 
     async def get_json(self, url: str) -> dict[str, Any]:
         return self.sources[url]
+
+    async def list_comments(self, *, repository: str, number: int, pull_request: bool) -> list[dict[str, Any]]:
+        return self.comments
+
+    async def add_eyes_reaction(self, comment_url: str) -> None:
+        self.reactions.append(comment_url)
 
     async def mark_thread_read(self, thread_id: str) -> None:
         self.marked_read.append(thread_id)
@@ -208,7 +222,7 @@ async def test_github_adapter_filters_senders_routes_issue_and_persists_cursor(d
     assert message.adapter == BridgeAdapterType.GITHUB
     assert message.chat_id == "github:42:issue:7"
     assert message.sender_id == "Alice"
-    assert message.event_id == "github:101:2026-08-26T08:00:00Z"
+    assert message.event_id == "github:comment:42:issues:501:2026-08-26T08:00:00Z"
     assert message.message_id == message.event_id
     assert message.thread_id == "101"
     assert message.metadata["github"]["repository"] == "acme/widgets"
@@ -489,6 +503,7 @@ async def test_github_adapter_applies_configured_source_notification_delay(
         notifications=[notification],
         sources={
             source_url: {
+                "id": 601,
                 "created_at": source_at.isoformat(),
                 "updated_at": source_at.isoformat(),
                 "user": {"login": "alice", "id": 1, "type": "User"},
@@ -503,6 +518,7 @@ async def test_github_adapter_applies_configured_source_notification_delay(
         session_factory=create_session_factory(db_engine),
         client=client,
     )
+    await adapter._bootstrap({"alice"})
     await adapter._process_notification(notification, tenant_key="github:api.github.com:100")
     assert [message.sender_id for message in handler.messages] == (["alice"] if accepted else [])
     assert client.marked_read == ["delay-test"]
@@ -703,5 +719,296 @@ async def test_github_rest_client_rejects_foreign_source_url() -> None:
     try:
         with pytest.raises(GitHubApiError, match="foreign API origin"):
             await client.get_json("https://example.com/repos/acme/widgets/issues/1")
+    finally:
+        await client.close()
+
+
+def _comment(
+    comment_id: int = 6126540597,
+    *,
+    login: str = "Wh1isper",
+    body: str = "@ya-claw-bot Any idea?",
+    updated_at: str = "2026-10-12T14:42:49Z",
+) -> dict[str, Any]:
+    return {
+        "id": comment_id,
+        "url": f"https://api.github.com/repos/acme/widgets/issues/comments/{comment_id}",
+        "body": body,
+        "user": {"login": login, "id": 1, "type": "User"},
+        "created_at": updated_at,
+        "updated_at": updated_at,
+    }
+
+
+def _subject_snapshot() -> GitHubNotification:
+    notification = _notification(
+        thread_id="26283766175",
+        number=957,
+        latest_comment=False,
+        updated_at=datetime(2026, 10, 13, 4, 43, 56, tzinfo=UTC),
+    )
+    return notification.model_copy(
+        update={"subject": notification.subject.model_copy(update={"latest_comment_url": notification.subject.url})}
+    )
+
+
+def _comment_client(notification: GitHubNotification) -> _FakeGitHubClient:
+    assert notification.subject.url is not None
+    return _FakeGitHubClient(
+        notifications=[notification],
+        sources={
+            notification.subject.url: {
+                "id": 5815408715,
+                "user": {"login": "Other-Bot", "id": 2, "type": "User"},
+                "created_at": "2026-10-12T14:27:04Z",
+                "updated_at": "2026-10-13T04:43:35Z",
+                "body": "Edited issue body",
+            }
+        },
+        expected_mark_count=1,
+    )
+
+
+def _comment_adapter(
+    db_engine: AsyncEngine, client: _FakeGitHubClient, handler: BridgeMessageHandler | None = None
+) -> GitHubBridgeAdapter:
+    settings = ClawSettings(bridge_github_allowed_senders="wh1isper", _env_file=None)
+    factory = create_session_factory(db_engine)
+    return GitHubBridgeAdapter(
+        settings=settings,
+        session_factory=factory,
+        client=client,
+        handler=handler
+        or BridgeRuntimeHandler(
+            settings=settings,
+            session_factory=factory,
+            runtime_state=create_runtime_state(),
+            run_dispatcher=RunDispatcher(None),
+        ),
+    )
+
+
+async def test_github_recovers_actual_comment_from_subject_snapshot_and_dedupes(db_engine: AsyncEngine) -> None:
+    notification = _subject_snapshot()
+    client = _comment_client(notification)
+    client.comments = [
+        _comment(2, login="mallory"),
+        _comment(3, login="ya-claw-bot"),
+        _comment(4, body="Unrelated old comment"),
+        _comment(5, body="@ya-claw-bot-extra is a different account"),
+        _comment(6, updated_at="2026-10-14T00:00:00Z"),
+        _comment(),
+    ]
+    adapter = _comment_adapter(db_engine, client)
+    await adapter._bootstrap({"wh1isper"})
+    await adapter._poll_once()
+    # Later thread snapshots and process restarts must not resubmit the comment.
+    notification = notification.model_copy(update={"updated_at": notification.updated_at + timedelta(minutes=1)})
+    client.notifications = [notification]
+    adapter = _comment_adapter(db_engine, client)
+    await adapter._bootstrap({"wh1isper"})
+    await adapter._poll_once()
+    assert client.reactions == ["https://api.github.com/repos/acme/widgets/issues/comments/6126540597"]
+    async with create_session_factory(db_engine)() as db:
+        event = (await db.execute(select(BridgeEventRecord))).scalar_one()
+        run = (await db.execute(select(RunRecord))).scalar_one()
+        assert event.status == BridgeEventStatus.QUEUED
+        assert event.external_chat_id == "github:42:issue:957"
+        assert event.event_id == "github:comment:42:issues:6126540597:2026-10-12T14:42:49Z"
+        assert event.normalized_event["sender_id"] == "Wh1isper"
+        assert event.normalized_event["metadata"]["github"]["eyes_reaction"] == "sent"
+        assert len(run.input_parts) == 1
+        assert "Any idea?" in run.input_parts[0]["text"]
+        assert "Edited issue body" not in run.input_parts[0]["text"]
+
+
+@pytest.mark.parametrize("status", list(BridgeEventStatus))
+async def test_github_reacts_only_after_accepted_dispatch(db_engine: AsyncEngine, status: BridgeEventStatus) -> None:
+    notification = _subject_snapshot()
+    client = _comment_client(notification)
+    client.comments = [_comment()]
+    order: list[str] = []
+
+    class Handler(_RecordingHandler):
+        async def handle_message(self, message: BridgeInboundMessage) -> BridgeDispatchResult:
+            assert not client.reactions
+            order.append("dispatch")
+            return (await super().handle_message(message)).model_copy(update={"status": status})
+
+    adapter = _comment_adapter(db_engine, client, Handler())
+    await adapter._bootstrap({"wh1isper"})
+    if status in {BridgeEventStatus.RECEIVED, BridgeEventStatus.FAILED}:
+        with pytest.raises(RuntimeError, match="dispatch failed"):
+            await adapter._poll_once()
+        assert client.reactions == []
+        assert client.marked_read == []
+    else:
+        await adapter._poll_once()
+        assert len(client.reactions) == 1
+        assert client.marked_read == [notification.id]
+    assert order == ["dispatch"]
+
+
+@pytest.mark.parametrize("removed_sender", [False, True])
+async def test_github_retries_durable_reaction_after_restart_without_notification(
+    db_engine: AsyncEngine, removed_sender: bool
+) -> None:
+    notification = _subject_snapshot()
+    client = _comment_client(notification)
+    client.comments = [_comment()]
+
+    async def fail_reaction(_url: str) -> None:
+        async with create_session_factory(db_engine)() as db:
+            event = (await db.execute(select(BridgeEventRecord))).scalar_one()
+            assert event.status == BridgeEventStatus.QUEUED
+            assert event.normalized_event["metadata"]["github"]["eyes_reaction"] == "pending"
+            assert await db.scalar(select(func.count()).select_from(RunRecord)) == 1
+        raise GitHubApiError("transient acknowledgement failure", status_code=503)
+
+    client.add_eyes_reaction = fail_reaction
+    adapter = _comment_adapter(db_engine, client)
+    await adapter._bootstrap({"wh1isper"})
+    await adapter._poll_once()
+    assert client.marked_read == [notification.id]
+
+    fresh_client = _comment_client(notification)
+    fresh_client.notifications = []
+    fresh_client.comments = []
+    adapter = _comment_adapter(db_engine, fresh_client)
+    if removed_sender:
+        adapter._settings.bridge_github_allowed_senders = "someone-else"
+    await adapter._bootstrap(adapter._settings.resolved_bridge_github_allowed_senders)
+    await adapter._retry_pending_reactions()
+    await adapter._retry_pending_reactions()
+    assert len(fresh_client.reactions) == (0 if removed_sender else 1)
+    async with create_session_factory(db_engine)() as db:
+        event = (await db.execute(select(BridgeEventRecord))).scalar_one()
+        assert event.normalized_event["metadata"]["github"]["eyes_reaction"] == (
+            "pending" if removed_sender else "sent"
+        )
+        assert await db.scalar(select(func.count()).select_from(RunRecord)) == 1
+
+
+@pytest.mark.parametrize(
+    "legacy_status", [BridgeEventStatus.QUEUED, BridgeEventStatus.RECEIVED, BridgeEventStatus.FAILED]
+)
+async def test_github_comment_identity_survives_direct_source_and_legacy_notification(
+    db_engine: AsyncEngine, legacy_status: BridgeEventStatus
+) -> None:
+    notification = _subject_snapshot()
+    comment = _comment()
+    direct = notification.model_copy(
+        update={
+            "updated_at": datetime(2026, 10, 12, 14, 43, tzinfo=UTC),
+            "subject": notification.subject.model_copy(update={"latest_comment_url": comment["url"]}),
+        }
+    )
+    resource = resolve_notification_resource(direct)
+    assert resource is not None
+    source = resolve_notification_source(comment, sender_is_attributable=True)
+    legacy = build_inbound_message(direct, tenant_key="github:api.github.com:100", resource=resource, source=source)
+    client = _comment_client(notification)
+    adapter = _comment_adapter(db_engine, client)
+    # Simulate an input accepted by v2.11.1 under its notification-version key.
+    result = await adapter._handler.handle_message(legacy)
+    assert result.status == BridgeEventStatus.QUEUED
+    async with create_session_factory(db_engine)() as db:
+        event = (await db.execute(select(BridgeEventRecord))).scalar_one()
+        event.status = legacy_status
+        await db.commit()
+    client.comments = [comment]
+    await adapter._bootstrap({"wh1isper"})
+    await adapter._poll_once()
+    # Now expose the same source through latest_comment_url as well.
+    client.notifications = [direct]
+    client.sources[comment["url"]] = comment
+    await adapter._poll_once()
+    async with create_session_factory(db_engine)() as db:
+        event = (await db.execute(select(BridgeEventRecord))).scalar_one()
+        assert event.event_id == legacy.event_id
+        assert event.normalized_event["metadata"]["github"]["eyes_reaction"] == "sent"
+        assert await db.scalar(select(func.count()).select_from(RunRecord)) == 1
+    assert client.reactions == [comment["url"]]
+
+
+async def test_github_ingests_coalesced_comments_in_order_and_edits_once(db_engine: AsyncEngine) -> None:
+    notification = _subject_snapshot()
+    client = _comment_client(notification)
+    first = _comment(10)
+    second = _comment(11, body="A follow-up without a mention", updated_at="2026-10-13T04:42:00Z")
+    client.comments = [second, first]
+    handler = _RecordingHandler()
+    adapter = _comment_adapter(db_engine, client, handler)
+    await adapter._bootstrap({"wh1isper"})
+    await adapter._poll_once()
+    assert [message.content_json["source"]["id"] for message in handler.messages if message.content_json] == [10, 11]
+    assert client.reactions == [first["url"], second["url"]]
+    original = resolve_comment_source(notification, first, api_url="https://api.github.com")
+    edited = resolve_comment_source(
+        notification, {**first, "updated_at": "2026-10-13T04:42:00Z"}, api_url="https://api.github.com"
+    )
+    assert original is not None and edited is not None
+    assert original.comment_event_id != edited.comment_event_id
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ("@ya-claw-bot test", True),
+        ("(@YA-CLAW-BOT)", True),
+        ("@ya-claw-bot-extra", False),
+        ("x@ya-claw-bot", False),
+        ("@ya-claw-bot_name", False),
+    ],
+)
+def test_github_comment_mentions_exact_account(body: str, expected: bool) -> None:
+    assert comment_mentions_user({"body": body}, "ya-claw-bot") is expected
+
+
+async def test_github_client_paginates_issue_and_review_comments_and_reacts() -> None:
+    requests: list[httpx.Request] = []
+
+    async def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "POST":
+            assert request.url.path in {
+                "/repos/acme/widgets/issues/comments/1/reactions",
+                "/repos/acme/widgets/pulls/comments/2/reactions",
+            }
+            assert json.loads(request.content) == {"content": "eyes"}
+            return httpx.Response(200 if request.url.path.endswith("/1/reactions") else 201, json={"id": 1})
+        if request.url.params.get("page") == "2":
+            return httpx.Response(200, json=[{"id": 3}])
+        assert request.url.params["per_page"] == "100"
+        if request.url.path == "/repos/acme/widgets/issues/7/comments":
+            return httpx.Response(
+                200,
+                json=[{"id": 1}],
+                headers={"Link": '<https://api.github.com/repos/acme/widgets/issues/7/comments?page=2>; rel="next"'},
+            )
+        assert request.url.path == "/repos/acme/widgets/pulls/7/comments"
+        return httpx.Response(200, json=[{"id": 2, "pull_request_review_id": 4}])
+
+    client = GitHubRestClient(token="github-token", transport=httpx.MockTransport(handle))  # noqa: S106
+    try:
+        comments = await client.list_comments(repository="acme/widgets", number=7, pull_request=True)
+        assert [comment["id"] for comment in comments] == [1, 3, 2]
+        await client.add_eyes_reaction("https://api.github.com/repos/acme/widgets/issues/comments/1")
+        await client.add_eyes_reaction("https://api.github.com/repos/acme/widgets/pulls/comments/2")
+        with pytest.raises(GitHubApiError, match="foreign API origin"):
+            await client.add_eyes_reaction("https://attacker.example/comments/1")
+    finally:
+        await client.close()
+    assert len(requests) == 5
+
+
+async def test_github_client_rejects_foreign_comment_pagination_link() -> None:
+    async def handle(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[], headers={"Link": '<https://attacker.example/comments?page=2>; rel="next"'})
+
+    client = GitHubRestClient(token="github-token", transport=httpx.MockTransport(handle))  # noqa: S106
+    try:
+        with pytest.raises(GitHubApiError, match="foreign API origin"):
+            await client.list_comments(repository="acme/widgets", number=7, pull_request=False)
     finally:
         await client.close()

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from ya_claw.bridge.github.models import (
     GitHubNotification,
@@ -76,6 +77,49 @@ def resolve_notification_source(
     )
 
 
+def resolve_comment_source(
+    notification: GitHubNotification,
+    payload: dict[str, Any],
+    *,
+    api_url: str,
+    review_comment: bool = False,
+) -> GitHubNotificationSource | None:
+    """Identify an API comment independently of the mutable notification snapshot."""
+    comment_id = payload.get("id")
+    updated_at = _payload_timestamp(payload.get("updated_at"))
+    created_at = _payload_timestamp(payload.get("created_at"))
+    sender = _source_user(payload)
+    if (
+        not isinstance(comment_id, int)
+        or isinstance(comment_id, bool)
+        or comment_id <= 0
+        or updated_at is None
+        or created_at is None
+        or sender is None
+        or updated_at < created_at
+        or updated_at > _as_utc(notification.updated_at)
+    ):
+        return None
+    kind = "pulls" if review_comment else "issues"
+    repo = quote(notification.repository.full_name, safe="/")
+    url = f"{api_url.rstrip('/')}/repos/{repo}/{kind}/comments/{comment_id}"
+    return GitHubNotificationSource(
+        payload=payload,
+        sender=sender,
+        content_text=_source_content(payload),
+        comment_url=url,
+        comment_event_id=f"github:comment:{notification.repository.id}:{kind}:{comment_id}:{_github_timestamp(updated_at)}",
+    )
+
+
+def comment_mentions_user(payload: dict[str, Any], login: str) -> bool:
+    body = payload.get("body")
+    return (
+        isinstance(body, str)
+        and re.search(rf"(?<![\w@])@{re.escape(login)}(?![\w-])", body, flags=re.IGNORECASE) is not None
+    )
+
+
 def build_inbound_message(
     notification: GitHubNotification,
     *,
@@ -83,7 +127,7 @@ def build_inbound_message(
     resource: GitHubNotificationResource,
     source: GitHubNotificationSource,
 ) -> BridgeInboundMessage:
-    event_id = notification_event_id(notification)
+    event_id = source.comment_event_id or notification_event_id(notification)
     sender_login = source.sender.login if source.sender is not None else None
     source_payload = source.payload
     notification_payload = notification.model_dump(mode="json")
@@ -107,10 +151,10 @@ def build_inbound_message(
         event_id=event_id,
         message_id=event_id,
         root_id=notification.subject.url,
-        parent_id=notification.subject.latest_comment_url,
+        parent_id=source.comment_url or notification.subject.latest_comment_url,
         thread_id=notification.id,
         chat_id=resource.chat_id,
-        event_type="github.notification",
+        event_type="github.comment" if source.comment_url is not None else "github.notification",
         sender_id=sender_login,
         sender_type=source.sender.type if source.sender is not None else None,
         chat_type=resource.kind,
@@ -132,6 +176,15 @@ def build_inbound_message(
                 "subject_url": notification.subject.url,
                 "latest_comment_url": notification.subject.latest_comment_url,
                 "sender_login": sender_login,
+                **(
+                    {
+                        "comment_url": source.comment_url,
+                        "comment_event_id": source.comment_event_id,
+                        "eyes_reaction": "pending",
+                    }
+                    if source.comment_url
+                    else {}
+                ),
             }
         },
     )
@@ -158,7 +211,9 @@ def _notification_content(
         f"URL: {resource.html_url}",
     ]
     if isinstance(source.content_text, str) and source.content_text.strip() != "":
-        lines.extend(("Latest source content:", source.content_text.strip()))
+        if source.comment_url is not None:
+            lines.append(f"Triggering comment: {source.comment_url}")
+        lines.extend(("Source content:", source.content_text.strip()))
     return "\n".join(lines)
 
 
