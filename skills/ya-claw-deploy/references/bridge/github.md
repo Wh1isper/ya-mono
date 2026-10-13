@@ -44,11 +44,16 @@ GitHub notifications are mutable thread snapshots rather than individual events.
 
 - tenant: API host plus authenticated account ID
 - conversation: repository ID plus Issue/PR kind and number
-- event/message ID: notification thread ID plus `updated_at`
+- comment event/message ID: repository ID, comment kind/ID, and comment `updated_at`
+- subject-only event/message ID: notification thread ID plus `updated_at`
 
 Later updates to one Issue or Pull Request therefore continue the same session while retaining distinct idempotency keys. The session omits a custom workspace binding and inherits `YA_CLAW_WORKSPACE_DIR` or the configured default mount set.
 
 The adapter follows `latest_comment_url` when available. A distinct comment source is attributable to its author when the notification follows the comment's `updated_at` within the configured delay window (10 minutes by default), accounting for GitHub's asynchronous notification generation for new and updated comments. GitHub may return the subject URL itself as `latest_comment_url` for a newly created Issue; the adapter recognizes normalized equivalent URLs as the subject. Subject `mention` and `team_mention` notifications can attribute the subject author when `created_at` equals `updated_at` and the notification follows within the configured delay window (10 minutes by default). Other subject-only reasons and later subject edits cannot reliably identify the actor; explicit sender allowlists reject them, while `*` accepts them.
+
+The adapter also paginates the resource's conversation comments and, for PRs, review comments. It recovers actual comments when `latest_comment_url` points to the subject or a later activity. Real comments within the attribution window retain the existing follow-up behavior. Explicit mentions of the authenticated account can recover older requests independently of notification delay; all comments still require an allowed author and exclude the bot itself. Multiple eligible comments are delivered in chronological order. Older explicit requests not already ingested may therefore be recovered when their resource next appears in the notification inbox; this is not a global historical-notification replay. Existing records for already-ingested comment versions retain their delivery identity across upgrade.
+
+After durable ingestion, the bridge adds an `eyes` reaction to the actual comment. It sends no acknowledgement comment and does not instruct the model to send one. The event's `normalized_event.metadata.github.eyes_reaction` records `pending`, `sent`, or `unavailable`; pending reactions retry independently on later polls and after restart, even without another notification. A reaction failure never resubmits an accepted input. Check PAT permissions if acknowledgements remain pending; 404/410 targets are logged and marked unavailable. The existing event JSON stores this state without a database migration.
 
 ## Polling and Cursor
 
@@ -99,6 +104,7 @@ Check service logs for:
 - ignored disallowed or unresolved senders
 - dispatched event ID, repository, Issue/PR number, session ID, and run ID
 - transient poll failures and mark-read failures
+- pending acknowledgement retries and unavailable reaction targets
 
 Check the workspace container:
 
@@ -133,3 +139,6 @@ curl -sS \
 - Notifications API: <https://docs.github.com/en/rest/activity/notifications>
 - List notifications: <https://docs.github.com/en/rest/activity/notifications#list-notifications-for-the-authenticated-user>
 - Mark a thread read: <https://docs.github.com/en/rest/activity/notifications#mark-a-thread-as-read>
+- Issue comments: <https://docs.github.com/en/rest/issues/comments#list-issue-comments>
+- PR review comments: <https://docs.github.com/en/rest/pulls/comments#list-review-comments-on-a-pull-request>
+- Comment reactions: <https://docs.github.com/en/rest/reactions/reactions#create-reaction-for-an-issue-comment>

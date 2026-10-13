@@ -56,6 +56,8 @@ class GitHubNotificationSource:
     payload: dict[str, Any] | None
     sender: GitHubUser | None
     content_text: str | None
+    comment_url: str | None = None
+    comment_event_id: str | None = None
 
 
 @dataclass(frozen=True)

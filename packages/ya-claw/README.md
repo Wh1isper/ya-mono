@@ -135,7 +135,8 @@ Standalone SDK hosts should likewise call this method at application startup and
 - `embedded` is the default bridge dispatch mode and runs adapter tasks under `BridgeSupervisor` in the same HTTP server lifespan as `ExecutionSupervisor`.
 - `manual` starts the HTTP server with bridge dispatch managed outside the server lifespan.
 - GitHub bridge ingress polls every notification reason for an ordinary account with a classic PAT, routes Issue/PR subjects, and applies `YA_CLAW_BRIDGE_GITHUB_ALLOWED_SENDERS` with exact case-insensitive logins or `*`.
-- GitHub Issue/PR resources map one-to-one to durable sessions, inherit the configured default workspace, and use a durable timestamp cursor plus versioned notification IDs for restart-safe replay.
+- GitHub Issue/PR resources map one-to-one to durable sessions and inherit the configured default workspace. The bridge resolves actual comments (including delayed explicit mentions), applies the sender allowlist, and deduplicates by comment ID/version; subject-only inputs retain versioned notification IDs.
+- After durable comment ingestion, the bridge adds an `eyes` reaction. Pending reactions survive restart and retry without resubmitting the task; no immediate acknowledgement reply is requested from the model.
 - Lark bridge event allowlist comes from `YA_CLAW_BRIDGE_LARK_EVENT_TYPES`; defaults cover `im.chat.member.bot.added_v1`, `im.chat.member.user.added_v1`, `im.message.receive_v1`, and `drive.notice.comment_add_v1`.
 - Lark message events map `(adapter, tenant_key, chat_id)` one-to-one to a session.
 - Other accepted Lark events use `chat_id` when present and fall back to stable event or Drive conversation keys.

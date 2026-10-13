@@ -45,7 +45,7 @@ flowchart TD
     GH["GitHub Notifications REST API"] -->|Outbound polling| POLL["GitHubBridgeAdapter"]
     POLL --> RESOURCE{"Issue or Pull Request?"}
     RESOURCE -->|No| READ["Optional mark-read"]
-    RESOURCE -->|Yes| SOURCE["Resolve latest comment or subject"]
+    RESOURCE -->|Yes| SOURCE["Read conversation and review comments"]
     SOURCE --> SENDER["Apply sender login allowlist"]
     SENDER -->|Rejected| READ
     SENDER -->|Accepted| NORMALIZE["Build versioned BridgeInboundMessage"]
@@ -53,7 +53,8 @@ flowchart TD
     DEDUPE --> CONVERSATION["Resolve Issue/PR conversation"]
     CONVERSATION --> SESSION["Create or reuse durable session"]
     SESSION --> RUN["Create, steer, or defer bridge input"]
-    RUN --> WORKSPACE["Shared configured workspace"]
+    RUN --> ACK["Persist pending acknowledgement, then add eyes reaction"]
+    ACK --> WORKSPACE["Shared configured workspace"]
     WORKSPACE --> GHCLI["gh and git using GH_TOKEN"]
     NORMALIZE --> CURSOR["Advance durable cursor after completed scan"]
 ```
@@ -72,17 +73,28 @@ The bridge therefore treats a notification as a wake-up signal:
 - The GitHub-specific agent prompt instructs the agent to inspect the current resource with `gh` before acting.
 - Follow-up notifications for the same resource continue the existing session even when the new comment does not mention the service account again.
 
-The adapter follows `subject.latest_comment_url` as an opaque API URL when present. This supports both Issue conversation comments and Pull Request review comments without guessing their endpoint shape. If the latest comment has disappeared, the adapter falls back to `subject.url`; an absent Issue or Pull Request is ignored. Foreign-origin URLs are rejected before authorization headers are sent.
+For each notification, the adapter reads the latest source and paginates the Issue conversation comments; Pull Requests also include review comments. GitHub may return the subject itself or a later comment as `latest_comment_url`, so that pointer is not the sole authority for finding a request. Accepted comment versions are delivered chronologically to the existing resource conversation with the actual author's identity and comment body. If the latest comment has disappeared, the adapter falls back to the subject and comment lists; an absent Issue or Pull Request is ignored. Foreign-origin source, pagination, and reaction URLs are rejected before authorization headers are sent.
 
 ## Sender Attribution
 
 `YA_CLAW_BRIDGE_GITHUB_MAX_SOURCE_NOTIFICATION_DELAY_SECONDS` sets the maximum non-negative source-to-notification delay in seconds (default `600`). Zero requires identical timestamps. This window is independent of the polling interval and the 60-second cursor replay overlap. Increasing it tolerates delayed notifications but also widens the heuristic association with an older source; it does not make subject edits attributable or change sender allowlists.
 
-Notification thread objects do not include the triggering actor. The adapter resolves the source object to apply `YA_CLAW_BRIDGE_GITHUB_ALLOWED_SENDERS`:
+Notification thread objects do not include the triggering actor. The adapter resolves real comments and subjects to apply `YA_CLAW_BRIDGE_GITHUB_ALLOWED_SENDERS`:
+
+- A real comment explicitly mentioning the authenticated account is an independent request. It can be recovered even when the notification arrived outside the attribution delay window or points to a later activity. Exact, case-insensitive account matching excludes longer login prefixes. The comment must have valid ID/author/timestamps and cannot be newer than the notification snapshot.
+
+- Comments without an explicit mention, including follow-ups, remain eligible within the configured source-to-notification delay window.
+
+- Every candidate is checked against the existing sender allowlist, and identifiable self-comments are rejected even with `*`. An explicit mention does not bypass authorization.
+
+- Recovery scans the resource's comments, so older explicit requests not previously ingested can be delivered when that resource next produces a notification. It is not a scan of every historical notification or every repository. Operators should review this behavior before enabling the change on an account with a large backlog.
 
 - A comment from a distinct `latest_comment_url` is attributable to its `user`, `actor`, `sender`, or `author` when the notification follows the comment's `updated_at` within the configured delay window (10 minutes by default). The comment object identifies its author directly, and the bounded delay accounts for GitHub's asynchronous notification generation for new and updated comments.
+
 - GitHub may set `latest_comment_url` to the subject URL for a newly created Issue. The adapter compares normalized same-origin source URLs and treats equivalent subject URLs as a subject rather than a comment.
+
 - A newly created subject body is attributable only for `mention` and `team_mention` reasons when `created_at` equals `updated_at` and the notification follows within the configured delay window (10 minutes by default). Later subject edits are unattributable because the subject author may differ from the editor.
+
 - Other subject-only notification reasons are not reliably attributable because the subject author may differ from the actor who changed assignment, state, labels, or review requests.
 
 With an explicit sender list, an unattributable notification is ignored. With `*`, sender attribution is not required and every Issue/PR notification snapshot is accepted, except an identified self-event.
@@ -104,7 +116,15 @@ github:{repository_id}:pull:{number}
 
 Repository ID keeps the conversation stable if a repository is renamed or transferred. Issue and Pull Request numbers remain scoped by repository ID.
 
-A notification occurrence is versioned by thread ID and `updated_at`:
+A comment input is versioned independently of the notification snapshot:
+
+```text
+github:comment:{repository_id}:{issues|pulls}:{comment_id}:{comment_updated_at_utc}
+```
+
+`issues` identifies conversation comments on either Issues or PRs; `pulls` identifies PR review comments. Both `event_id` and `message_id` use this identity, so coalesced or later notification snapshots cannot resubmit the same comment version. A later edit is a new version if a notification wakes the adapter. Existing notification-keyed records for the same comment URL, ID, and version retain their original delivery keys, including failed-input recovery; upgrades do not replay already-ingested comments.
+
+Subject-only notification occurrences remain versioned by thread ID and `updated_at`:
 
 ```text
 github:{notification_thread_id}:{updated_at_utc}
@@ -135,6 +155,16 @@ The server timestamp avoids missing notifications when the YA Claw host clock is
 
 The adapter honors `X-Poll-Interval` by waiting for the greater of GitHub's returned minimum and `YA_CLAW_BRIDGE_GITHUB_POLL_INTERVAL_SECONDS`. It sends `If-Modified-Since` and accepts `304 Not Modified` as an empty poll.
 
+## Ingestion Acknowledgement
+
+The bridge adds an `eyes` reaction to the actual comment **after** the handler returns `queued`, `submitted`, `steered`, `deferred`, or a successfully ingested `duplicate`. `received` and `failed` do not acknowledge ingestion. The reaction means the input has entered the durable conversation, not that the task has completed.
+
+The normalized event's `metadata.github` contains `comment_url` and `eyes_reaction` (`pending`, `sent`, or `unavailable`). Pending intent is persisted with the inbound event before dispatch; only accepted events are eligible for acknowledgement. The adapter retries pending acknowledgements on every poll and after restart, even when no notification or source comment is returned. It rechecks the configured sender allowlist before retrying. This uses the existing event JSON storage and requires no schema migration.
+
+Reaction failure does not undo an accepted input or block unrelated notifications. Transient errors and permission failures remain pending and are logged; a deleted/inaccessible target returning 404/410 becomes `unavailable`. GitHub's reaction creation is idempotent for an account and reaction type, so retry after remote success but before the local `sent` commit is safe. Successful reactions are not posted again on normal notification replay. The bot PAT must be authorized to create reactions on the target repositories.
+
+The bridge sends no acknowledgement comment and injects no instruction asking the model to send one. Workspace guidance can focus on completing the authorized task and reporting substantive results.
+
 ## Read State
 
 When `YA_CLAW_BRIDGE_GITHUB_MARK_READ=true`, accepted, rejected, and unsupported notification threads are marked read after successful local handling. A failed local dispatch is retried without marking the thread read or advancing the cursor. Mark-read is best-effort and is not the delivery authority.
@@ -149,7 +179,7 @@ The GitHub prompt includes:
 
 - repository, resource kind, number, title, and URL
 - notification reason, sender, thread ID, event ID, and update time
-- the resolved latest source content when available
+- the resolved triggering comment and its source URL, or subject content when applicable
 - a recommended `gh issue view` or `gh pr view` command
 - a recommended command for replying on the same resource
 

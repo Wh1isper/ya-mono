@@ -28,6 +28,10 @@ class GitHubClient(Protocol):
 
     async def get_json(self, url: str) -> dict[str, Any]: ...
 
+    async def list_comments(self, *, repository: str, number: int, pull_request: bool) -> list[dict[str, Any]]: ...
+
+    async def add_eyes_reaction(self, comment_url: str) -> None: ...
+
     async def mark_thread_read(self, thread_id: str) -> None: ...
 
     async def close(self) -> None: ...
@@ -115,6 +119,30 @@ class GitHubRestClient:
             raise GitHubApiError(f"GitHub API response from {response.request.url} must be a JSON object.")
         return payload
 
+    async def list_comments(self, *, repository: str, number: int, pull_request: bool) -> list[dict[str, Any]]:
+        repo_url = f"{self._api_url}/repos/{quote(repository, safe='/')}"
+        urls = [f"{repo_url}/issues/{number}/comments"]
+        if pull_request:
+            urls.append(f"{repo_url}/pulls/{number}/comments")
+        comments: list[dict[str, Any]] = []
+        for url in urls:
+            next_url: str | None = url
+            params: Mapping[str, str | int | bool] | None = {"per_page": 100}
+            while next_url is not None:
+                response = await self._request("GET", next_url, params=params)
+                params = None
+                payload = response.json()
+                if not isinstance(payload, list) or any(not isinstance(item, dict) for item in payload):
+                    raise GitHubApiError("GitHub comments response must be an array of objects.")
+                comments.extend(payload)
+                next_link = response.links.get("next")
+                next_url = next_link.get("url") if isinstance(next_link, dict) else None
+        return comments
+
+    async def add_eyes_reaction(self, comment_url: str) -> None:
+        # GitHub returns 200 for an existing reaction and 201 for a new one.
+        await self._request("POST", f"{comment_url.rstrip('/')}/reactions", json={"content": "eyes"})
+
     async def mark_thread_read(self, thread_id: str) -> None:
         normalized_thread_id = thread_id.strip()
         if normalized_thread_id == "":
@@ -134,10 +162,11 @@ class GitHubRestClient:
         *,
         params: Mapping[str, str | int | bool] | None = None,
         headers: Mapping[str, str] | None = None,
+        json: dict[str, str] | None = None,
     ) -> httpx.Response:
         self._require_api_origin(url)
         try:
-            response = await self._client.request(method, url, params=params, headers=headers)
+            response = await self._client.request(method, url, params=params, headers=headers, json=json)
             if response.status_code == httpx.codes.NOT_MODIFIED:
                 return response
             response.raise_for_status()
