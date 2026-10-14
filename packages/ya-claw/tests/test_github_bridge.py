@@ -34,7 +34,7 @@ from ya_claw.bridge.service import BridgeRuntimeHandler
 from ya_claw.config import ClawSettings
 from ya_claw.db.engine import create_engine, create_session_factory
 from ya_claw.execution.dispatcher import RunDispatcher
-from ya_claw.orm.tables import BridgeCursorRecord, BridgeEventRecord, RunRecord
+from ya_claw.orm.tables import BridgeConversationRecord, BridgeCursorRecord, BridgeEventRecord, RunRecord, SessionRecord
 from ya_claw.runtime_state import create_runtime_state
 
 
@@ -504,6 +504,7 @@ async def test_github_adapter_applies_configured_source_notification_delay(
         sources={
             source_url: {
                 "id": 601,
+                "body": "@ya-claw-bot please investigate",
                 "created_at": source_at.isoformat(),
                 "updated_at": source_at.isoformat(),
                 "user": {"login": "alice", "id": 1, "type": "User"},
@@ -574,7 +575,8 @@ async def test_github_adapter_treats_equivalent_subject_url_as_subject_for_sende
     assert handler.messages == []
 
 
-async def test_github_adapter_wildcard_accepts_unattributable_pull_request(db_engine: AsyncEngine) -> None:
+@pytest.mark.parametrize("body", ["Please review", "@ya-claw-bot Please review"])
+async def test_github_adapter_wildcard_rejects_unattributable_pull_request(db_engine: AsyncEngine, body: str) -> None:
     notification = _notification(
         thread_id="201",
         subject_type="PullRequest",
@@ -589,7 +591,7 @@ async def test_github_adapter_wildcard_accepts_unattributable_pull_request(db_en
             notification.subject.url: {
                 "number": 9,
                 "title": "Improve widgets",
-                "body": "Please review",
+                "body": body,
                 "user": {"login": "pull-author", "id": 3, "type": "User"},
             }
         },
@@ -610,15 +612,12 @@ async def test_github_adapter_wildcard_accepts_unattributable_pull_request(db_en
     )
 
     task = asyncio.create_task(adapter.run())
-    await asyncio.wait_for(handler.called.wait(), timeout=5)
+    await asyncio.wait_for(client.marked.wait(), timeout=5)
     await adapter.stop()
     await asyncio.wait_for(task, timeout=5)
 
-    assert len(handler.messages) == 1
-    message = handler.messages[0]
-    assert message.chat_id == "github:42:pull:9"
-    assert message.sender_id is None
-    assert "Improve widgets" in (message.content_text or "")
+    assert handler.messages == []
+    assert client.reactions == []
 
 
 def test_github_normalizer_versions_notification_threads() -> None:
@@ -935,7 +934,7 @@ async def test_github_ingests_coalesced_comments_in_order_and_edits_once(db_engi
     notification = _subject_snapshot()
     client = _comment_client(notification)
     first = _comment(10)
-    second = _comment(11, body="A follow-up without a mention", updated_at="2026-10-13T04:42:00Z")
+    second = _comment(11, body="@ya-claw-bot A follow-up", updated_at="2026-10-13T04:42:00Z")
     client.comments = [second, first]
     handler = _RecordingHandler()
     adapter = _comment_adapter(db_engine, client, handler)
@@ -1012,3 +1011,160 @@ async def test_github_client_rejects_foreign_comment_pagination_link() -> None:
             await client.list_comments(repository="acme/widgets", number=7, pull_request=False)
     finally:
         await client.close()
+
+
+@pytest.mark.parametrize("allowed_senders", ["wh1isper", "*"])
+@pytest.mark.parametrize("source_kind", ["direct", "scan", "review", "subject", "subject_alias"])
+@pytest.mark.parametrize("body", ["No mention", "Hey @someone-else, thanks", "@ya-claw-bot-extra please review"])
+async def test_github_requires_direct_mention_for_every_source(
+    db_engine: AsyncEngine, allowed_senders: str, source_kind: str, body: str
+) -> None:
+    notification = _notification(
+        thread_id="892",
+        subject_type="PullRequest",
+        number=892,
+        updated_at=datetime(2026, 10, 14, 7, 37, 18, tzinfo=UTC),
+        latest_comment=source_kind in {"direct", "review"},
+    )
+    comment = _comment(6163352248, body=body, updated_at="2026-10-14T07:36:56Z")
+    if source_kind == "review":
+        comment["pull_request_review_id"] = 123
+        notification = notification.model_copy(
+            update={
+                "subject": notification.subject.model_copy(
+                    update={"latest_comment_url": "https://api.github.com/repos/acme/widgets/pulls/comments/6163352248"}
+                )
+            }
+        )
+    elif source_kind == "subject_alias":
+        notification = notification.model_copy(
+            update={"subject": notification.subject.model_copy(update={"latest_comment_url": notification.subject.url})}
+        )
+    client = _comment_client(notification)
+    source_url = notification.subject.latest_comment_url or notification.subject.url
+    assert source_url is not None
+    client.sources[source_url] = comment
+    if source_kind in {"scan", "review"}:
+        client.comments = [comment]
+    adapter = _comment_adapter(db_engine, client)
+    adapter._settings.bridge_github_allowed_senders = allowed_senders
+    await adapter._bootstrap(adapter._settings.resolved_bridge_github_allowed_senders)
+    await adapter._poll_once()
+    assert client.reactions == []
+    assert client.marked_read == [notification.id]
+    async with create_session_factory(db_engine)() as db:
+        for table in (BridgeEventRecord, BridgeConversationRecord, RunRecord, SessionRecord):
+            assert await db.scalar(select(func.count()).select_from(table)) == 0
+
+
+@pytest.mark.parametrize("subject_type", ["Issue", "PullRequest"])
+async def test_github_mentions_reuse_resource_session_after_restart_and_completed_run(
+    db_engine: AsyncEngine, subject_type: str
+) -> None:
+    notification = _notification(
+        thread_id="session-first",
+        subject_type=subject_type,
+        number=892,
+        latest_comment=False,
+        updated_at=datetime(2026, 10, 14, 8, tzinfo=UTC),
+    )
+    client = _comment_client(notification)
+    first = _comment(10, updated_at="2026-10-14T07:00:00Z")
+    client.comments = [first]
+    adapter = _comment_adapter(db_engine, client)
+    await adapter._bootstrap({"wh1isper"})
+    await adapter._poll_once()
+    async with create_session_factory(db_engine)() as db:
+        first_run = (await db.execute(select(RunRecord))).scalar_one()
+        session = (await db.execute(select(SessionRecord))).scalar_one()
+        session_id = session.id
+        first_run.status = "completed"
+        first_run.finished_at = datetime.now(UTC)
+        session.active_run_id = None
+        await db.commit()
+
+    # Rebuild both adapter and runtime handler; persisted conversation owns routing.
+    notification = notification.model_copy(update={"id": "session-later"})
+    client = _comment_client(notification)
+    unrelated = _comment(11, body="Hey @someone-else, thanks", updated_at="2026-10-14T07:59:00Z")
+    client.comments = [first, unrelated]
+    adapter = _comment_adapter(db_engine, client)
+    await adapter._bootstrap({"wh1isper"})
+    await adapter._poll_once()
+    async with create_session_factory(db_engine)() as db:
+        assert await db.scalar(select(func.count()).select_from(RunRecord)) == 1
+    assert client.reactions == []
+
+    second = _comment(12, body="@YA-CLAW-BOT please follow up", updated_at="2026-10-14T07:59:30Z")
+    if subject_type == "PullRequest":
+        second["pull_request_review_id"] = 456
+    client.comments.append(second)
+    await adapter._poll_once()
+    await adapter._poll_once()
+    async with create_session_factory(db_engine)() as db:
+        events = (await db.execute(select(BridgeEventRecord))).scalars().all()
+        assert len(events) == 2
+        assert {event.session_id for event in events} == {session_id}
+        assert len({event.run_id for event in events}) == 2
+        assert await db.scalar(select(func.count()).select_from(BridgeConversationRecord)) == 1
+        assert await db.scalar(select(func.count()).select_from(SessionRecord)) == 1
+    assert len(client.reactions) == 1
+    assert ("/pulls/comments/" if subject_type == "PullRequest" else "/issues/comments/") in client.reactions[0]
+
+    # A different resource gets a different durable session.
+    other = _notification(
+        thread_id="session-other",
+        subject_type=subject_type,
+        number=893,
+        latest_comment=False,
+        updated_at=notification.updated_at,
+    )
+    other_client = _comment_client(other)
+    other_client.comments = [_comment(13)]
+    other_adapter = _comment_adapter(db_engine, other_client)
+    await other_adapter._bootstrap({"wh1isper"})
+    await other_adapter._poll_once()
+    async with create_session_factory(db_engine)() as db:
+        conversations = (await db.execute(select(BridgeConversationRecord))).scalars().all()
+        assert len(conversations) == 2
+        assert len({conversation.session_id for conversation in conversations}) == 2
+
+
+async def test_github_comment_edits_require_mention_and_dedupe_versions(db_engine: AsyncEngine) -> None:
+    notification = _subject_snapshot()
+    client = _comment_client(notification)
+    comment = _comment()
+    client.comments = [comment]
+    adapter = _comment_adapter(db_engine, client)
+    await adapter._bootstrap({"wh1isper"})
+    await adapter._poll_once()
+    client.comments = [{**comment, "body": "Mention removed", "updated_at": "2026-10-13T04:42:00Z"}]
+    await adapter._poll_once()
+    client.comments = [{**comment, "body": "@ya-claw-bot revised request", "updated_at": "2026-10-13T04:43:00Z"}]
+    await adapter._poll_once()
+    await adapter._poll_once()
+    async with create_session_factory(db_engine)() as db:
+        events = (await db.execute(select(BridgeEventRecord))).scalars().all()
+        assert len(events) == 2
+        assert len({event.session_id for event in events}) == 1
+    assert client.reactions == [comment["url"], comment["url"]]
+
+
+async def test_github_does_not_retry_legacy_nonmention_reaction(db_engine: AsyncEngine) -> None:
+    notification = _subject_snapshot()
+    comment = _comment(body="Hey @someone-else, thanks")
+    source = resolve_comment_source(notification, comment, api_url="https://api.github.com")
+    resource = resolve_notification_resource(notification)
+    assert source is not None and resource is not None
+    message = build_inbound_message(
+        notification, tenant_key="github:api.github.com:100", resource=resource, source=source
+    )
+    client = _comment_client(notification)
+    adapter = _comment_adapter(db_engine, client)
+    # Simulate a v2.11.2 nonmention input whose reaction had not succeeded.
+    await adapter._handler.handle_message(message)
+    await adapter._bootstrap({"wh1isper"})
+    await adapter._retry_pending_reactions()
+    assert client.reactions == []
+    async with create_session_factory(db_engine)() as db:
+        assert await db.scalar(select(func.count()).select_from(RunRecord)) == 1
