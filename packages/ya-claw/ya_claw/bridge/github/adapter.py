@@ -219,6 +219,9 @@ class GitHubBridgeAdapter(BridgeAdapter):
     async def _load_sources(
         self, notification: GitHubNotification, resource: GitHubNotificationResource
     ) -> list[GitHubNotificationSource]:
+        bot_user = self._bot_user
+        if bot_user is None:
+            raise RuntimeError("GitHub bridge account has not been resolved.")
         payload, attributable = await self._load_source(notification)
         latest_url = notification.subject.latest_comment_url
         direct_comment = (
@@ -227,7 +230,12 @@ class GitHubBridgeAdapter(BridgeAdapter):
             and isinstance(payload, dict)
         )
         sources: dict[str, GitHubNotificationSource] = {}
-        if direct_comment and attributable and isinstance(payload, dict):
+        if (
+            direct_comment
+            and attributable
+            and isinstance(payload, dict)
+            and comment_mentions_user(payload, bot_user.login)
+        ):
             source = resolve_comment_source(
                 notification,
                 payload,
@@ -245,21 +253,8 @@ class GitHubBridgeAdapter(BridgeAdapter):
             number=resource.number,
             pull_request=resource.kind == "pull",
         )
-        bot_user = self._bot_user
-        if bot_user is None:
-            raise RuntimeError("GitHub bridge account has not been resolved.")
         for comment in comments:
-            if not (
-                comment_mentions_user(comment, bot_user.login)
-                or source_sender_is_attributable(
-                    notification,
-                    comment,
-                    source_is_comment=True,
-                    max_notification_delay=timedelta(
-                        seconds=self._settings.bridge_github_max_source_notification_delay_seconds
-                    ),
-                )
-            ):
+            if not comment_mentions_user(comment, bot_user.login):
                 continue
             source = resolve_comment_source(
                 notification,
@@ -275,9 +270,17 @@ class GitHubBridgeAdapter(BridgeAdapter):
                 allowed_comments,
                 key=lambda source: (str((source.payload or {}).get("updated_at")), source.comment_event_id or ""),
             )
-        # Preserve subject-only notifications, including the explicit '*' policy.
-        # A rejected/stale comment must not become an attributable subject.
-        return [resolve_notification_source(payload, sender_is_attributable=attributable)]
+        # Only a newly created, attributable subject with a direct mention may
+        # trigger without a comment. Never turn a rejected comment into a subject
+        # event, even with a wildcard sender allowlist.
+        if (
+            direct_comment
+            or not attributable
+            or not isinstance(payload, dict)
+            or not comment_mentions_user(payload, bot_user.login)
+        ):
+            return []
+        return [resolve_notification_source(payload, sender_is_attributable=True)]
 
     async def _load_source(self, notification: GitHubNotification) -> tuple[dict[str, object] | None, bool]:
         max_notification_delay = timedelta(seconds=self._settings.bridge_github_max_source_notification_delay_seconds)
@@ -359,9 +362,17 @@ class GitHubBridgeAdapter(BridgeAdapter):
                 )
             )
             messages = [BridgeInboundMessage.model_validate(payload) for payload in result.scalars()]
+        bot_user = self._bot_user
+        if bot_user is None:
+            raise RuntimeError("GitHub bridge account has not been resolved.")
         for message in messages:
             sender = GitHubUser(login=message.sender_id, id=-1) if message.sender_id is not None else None
-            if self._sender_allowed(sender):
+            source = message.raw_event.get("resolved_source")
+            if (
+                self._sender_allowed(sender)
+                and isinstance(source, dict)
+                and comment_mentions_user(source, bot_user.login)
+            ):
                 await self._acknowledge_comment(message)
 
     async def _acknowledge_comment(self, message: BridgeInboundMessage) -> None:
@@ -427,17 +438,15 @@ class GitHubBridgeAdapter(BridgeAdapter):
                 await db_session.commit()
 
     def _sender_allowed(self, sender: GitHubUser | None) -> bool:
+        if sender is None:
+            return False
         bot_user = self._bot_user
-        if (
-            sender is not None
-            and bot_user is not None
-            and (sender.id == bot_user.id or sender.login.casefold() == bot_user.login.casefold())
-        ):
+        if bot_user is not None and (sender.id == bot_user.id or sender.login.casefold() == bot_user.login.casefold()):
             return False
         allowed_senders = self._settings.resolved_bridge_github_allowed_senders
         if "*" in allowed_senders:
             return True
-        return sender is not None and sender.login.casefold() in allowed_senders
+        return sender.login.casefold() in allowed_senders
 
     async def _mark_read(self, thread_id: str) -> None:
         if not self._settings.bridge_github_mark_read:
