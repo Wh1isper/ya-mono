@@ -39,7 +39,7 @@ from ya_agent_sdk.agents.main import (
     create_agent,
     stream_agent,
 )
-from ya_agent_sdk.context import AgentContext, ToolIdWrapper
+from ya_agent_sdk.context import AgentContext
 from ya_agent_sdk.environment.local import LocalEnvironment
 from ya_agent_sdk.toolsets.core.base import BaseTool
 
@@ -349,13 +349,10 @@ async def test_recoverable_messages_preserve_completed_hitl_tool_call_history() 
     assert streamer.recoverable_messages() == formal_history
 
 
-async def test_recoverable_messages_wrap_formal_history_with_stream_event_ids() -> None:
-    """Formal recoverable history uses the same wrapped IDs as streamed events."""
+async def test_recoverable_messages_preserve_formal_history_with_stream_event_ids() -> None:
+    """Formal recoverable history uses the same native IDs as streamed events."""
 
-    wrapper = ToolIdWrapper()
-    event = wrapper.wrap_event(
-        FunctionToolCallEvent(part=ToolCallPart(tool_name="reviewed_tool", args={}, tool_call_id="provider-call-1"))
-    )
+    event = FunctionToolCallEvent(part=ToolCallPart(tool_name="reviewed_tool", args={}, tool_call_id="provider-call-1"))
     wrapped_id = event.part.tool_call_id
     formal_history = [
         ModelResponse(parts=[ToolCallPart(tool_name="reviewed_tool", args={}, tool_call_id="provider-call-1")])
@@ -370,7 +367,6 @@ async def test_recoverable_messages_wrap_formal_history_with_stream_event_ids() 
         _main_task=asyncio.create_task(asyncio.sleep(0)),
         _poll_done=asyncio.Event(),
         _tasks=[],
-        _tool_id_wrapper=wrapper,
     )
     streamer.run = CompletedToolCallRun()  # type: ignore[assignment]
 
@@ -379,14 +375,12 @@ async def test_recoverable_messages_wrap_formal_history_with_stream_event_ids() 
     assert isinstance(response, ModelResponse)
     part = response.parts[0]
     assert isinstance(part, ToolCallPart)
-    assert part.tool_call_id == wrapped_id
-    assert part.tool_call_id.startswith("ya-")
+    assert part.tool_call_id == wrapped_id == "provider-call-1"
 
 
-async def test_recoverable_messages_wrap_native_tool_call_history() -> None:
-    """Formal native tool-call history uses normalized IDs."""
+async def test_recoverable_messages_preserve_native_tool_call_history() -> None:
+    """Formal native tool-call history preserves provider IDs."""
 
-    wrapper = ToolIdWrapper()
     formal_history = [
         ModelResponse(parts=[NativeToolCallPart(tool_name="web_search", args={}, tool_call_id="provider-native-1")])
     ]
@@ -400,7 +394,6 @@ async def test_recoverable_messages_wrap_native_tool_call_history() -> None:
         _main_task=asyncio.create_task(asyncio.sleep(0)),
         _poll_done=asyncio.Event(),
         _tasks=[],
-        _tool_id_wrapper=wrapper,
     )
     streamer.run = CompletedNativeToolCallRun()  # type: ignore[assignment]
 
@@ -409,8 +402,7 @@ async def test_recoverable_messages_wrap_native_tool_call_history() -> None:
     assert isinstance(response, ModelResponse)
     part = response.parts[0]
     assert isinstance(part, NativeToolCallPart)
-    assert part.tool_call_id.startswith("ya-")
-    assert part.tool_call_id == wrapper.upsert_tool_call_id("provider-native-1")
+    assert part.tool_call_id == "provider-native-1"
 
 
 async def test_interrupted_stream_exposes_text_only_recoverable_messages(tmp_path: Path) -> None:
@@ -513,10 +505,9 @@ def test_recoverable_messages_keep_complete_thinking_before_partial_text() -> No
 def test_recoverable_messages_keep_complete_tool_call_args() -> None:
     """Completed tool calls are preserved as whole arguments for the next run."""
 
-    wrapper = ToolIdWrapper()
     accumulator = PartialTextAccumulator()
-    wrapped_delta = wrapper.wrap_event(
-        PartDeltaEvent(index=0, delta=ToolCallPartDelta(tool_name_delta="shell", tool_call_id="provider-call-1"))
+    wrapped_delta = PartDeltaEvent(
+        index=0, delta=ToolCallPartDelta(tool_name_delta="shell", tool_call_id="provider-call-1")
     )
     assert isinstance(wrapped_delta, PartDeltaEvent)
     assert isinstance(wrapped_delta.delta, ToolCallPartDelta)
@@ -525,15 +516,13 @@ def test_recoverable_messages_keep_complete_tool_call_args() -> None:
     accumulator.observe(PartDeltaEvent(index=0, delta=ToolCallPartDelta(args_delta='{"command": "echo')))
     accumulator.observe(PartDeltaEvent(index=0, delta=ToolCallPartDelta(args_delta=' hello"}')))
     accumulator.observe(
-        wrapper.wrap_event(
-            PartEndEvent(
-                index=0,
-                part=ToolCallPart(
-                    tool_name="shell",
-                    args='{"command": "echo hello"}',
-                    tool_call_id="provider-call-1",
-                ),
-            )
+        PartEndEvent(
+            index=0,
+            part=ToolCallPart(
+                tool_name="shell",
+                args='{"command": "echo hello"}',
+                tool_call_id="provider-call-1",
+            ),
         )
     )
 

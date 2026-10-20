@@ -30,3 +30,12 @@ in browser memory for the active page session. Users can explicitly select
 Use this option only on a trusted personal browser profile. **Disconnect**
 removes the local copy of the token; it does not revoke the bearer token on the
 server.
+
+## Tool display identity
+
+Provider `toolCallId` values remain unchanged. Adapted tool start/chunk/end/result
+events carry a separate `toolCallKey`, scoped to the display run and invocation.
+The adapter retains that key across deferred-result segments and allocates a new key
+when another invocation starts, even if an agent reuses a provider ID. Result
+`messageId` derives from this display key. Replay, rendering, and argument budgets use
+`toolCallKey`; older stored events without it retain their original ID-based behavior.

@@ -79,27 +79,14 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_ai import (
-    DeferredToolRequests,
-    FunctionToolCallEvent,
-    FunctionToolResultEvent,
     ModelSettings,
-    OutputToolResultEvent,
-    PartDeltaEvent,
-    PartEndEvent,
-    PartStartEvent,
     RunContext,
-    ToolCallPartDelta,
     UserContent,
 )
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.messages import AgentStreamEvent as PydanticAgentStreamEvent
 from pydantic_ai.messages import (
     ModelMessage,
-    NativeToolCallPart,
-    NativeToolReturnPart,
-    RetryPromptPart,
-    ToolCallPart,
-    ToolReturnPart,
 )
 from pydantic_ai.models import Model
 from pydantic_ai.usage import RunUsage
@@ -368,114 +355,6 @@ class StreamEvent:
     agent_id: str
     agent_name: str
     event: AgentStreamEvent
-
-
-# =============================================================================
-# Tool ID Wrapper
-# =============================================================================
-
-
-class ToolIdWrapper:
-    """Wrapper for tool call IDs to ensure stable, cross-provider compatible identifiers.
-
-    This class normalizes tool call IDs from different LLM providers by mapping them to
-    a consistent format ("ya-{uuid}"). This ensures:
-    - Consistent ID format across all providers (OpenAI, Anthropic, Gemini, etc.)
-    - Stable ID mapping within a session for proper tool call/result matching
-    - Compatibility with all downstream systems expecting standardized IDs
-
-    The wrapper maintains an internal mapping to ensure the same original ID always
-    maps to the same normalized ID within a session.
-    """
-
-    def __init__(self) -> None:
-        self._prefix = "ya-"
-        self._tool_call_maps: dict[str, str] = {}
-
-    def clear(self) -> None:
-        """Clear the tool call ID mapping.
-
-        This should be called when starting a new session to ensure
-        fresh ID mappings.
-        """
-        self._tool_call_maps.clear()
-
-    def upsert_tool_call_id(self, tool_call_id: str) -> str:
-        """Normalize a tool call ID to the standard format.
-
-        If the ID already has the standard prefix, return it unchanged.
-        Otherwise, create and cache a new normalized ID.
-
-        Args:
-            tool_call_id: The original tool call ID from any provider.
-
-        Returns:
-            Normalized tool call ID with "ya-" prefix.
-        """
-        if tool_call_id.startswith(self._prefix):
-            return tool_call_id
-
-        if tool_call_id not in self._tool_call_maps:
-            self._tool_call_maps[tool_call_id] = f"{self._prefix}{uuid4().hex}"
-        return self._tool_call_maps[tool_call_id]
-
-    def wrap_event(self, event: AgentStreamEvent) -> AgentStreamEvent:
-        match event:
-            case FunctionToolCallEvent():
-                event.part.tool_call_id = self.upsert_tool_call_id(event.tool_call_id)
-            case FunctionToolResultEvent() | OutputToolResultEvent():
-                event.part.tool_call_id = self.upsert_tool_call_id(event.tool_call_id)
-            case PartStartEvent() | PartEndEvent():
-                if isinstance(
-                    event.part,
-                    (ToolCallPart, NativeToolCallPart, ToolReturnPart, NativeToolReturnPart, RetryPromptPart),
-                ):
-                    event.part.tool_call_id = self.upsert_tool_call_id(event.part.tool_call_id)
-            case PartDeltaEvent():
-                if isinstance(event.delta, ToolCallPartDelta) and event.delta.tool_call_id:
-                    event.delta.tool_call_id = self.upsert_tool_call_id(event.delta.tool_call_id)
-        return event
-
-    def wrap_deferred_tool_requests(self, deferred_tool_requests: DeferredToolRequests) -> DeferredToolRequests:
-        metadata = deferred_tool_requests.metadata or {}
-        wrapped_metadata: dict[str, dict[str, Any]] = {}
-        for call in deferred_tool_requests.calls or []:
-            original_tool_call_id = call.tool_call_id
-            call.tool_call_id = self.upsert_tool_call_id(call.tool_call_id)
-            if original_tool_call_id in metadata:
-                wrapped_metadata[call.tool_call_id] = metadata[original_tool_call_id]
-        for approval in deferred_tool_requests.approvals or []:
-            original_tool_call_id = approval.tool_call_id
-            approval.tool_call_id = self.upsert_tool_call_id(approval.tool_call_id)
-            if original_tool_call_id in metadata:
-                wrapped_metadata[approval.tool_call_id] = metadata[original_tool_call_id]
-        if wrapped_metadata:
-            deferred_tool_requests.metadata = wrapped_metadata
-        return deferred_tool_requests
-
-    def wrap_messages(
-        self,
-        _: RunContext[AgentContext] | None,
-        message_history: list[ModelMessage],
-    ) -> list[ModelMessage]:
-        """Normalize all tool call IDs in the message history.
-
-        This method can be used directly as a pydantic-ai history_processor.
-
-        Args:
-            _: RunContext (unused, required by history_processor signature).
-            message_history: List of messages to process.
-
-        Returns:
-            The same message history with normalized tool call IDs.
-        """
-        for m in message_history:
-            for p in m.parts:
-                if isinstance(
-                    p, (ToolCallPart, NativeToolCallPart, ToolReturnPart, NativeToolReturnPart, RetryPromptPart)
-                ):
-                    p.tool_call_id = self.upsert_tool_call_id(p.tool_call_id)
-        return message_history
 
 
 # =============================================================================
@@ -1234,9 +1113,6 @@ class AgentContext(BaseModel):
     input_router: LogicalRunInputRouter | None = Field(default=None, exclude=True)
     """Run-local native enqueue router, bound only while a logical run is active."""
 
-    tool_id_wrapper: ToolIdWrapper = Field(default_factory=ToolIdWrapper)
-    """Tool ID wrapper for normalizing tool call IDs across providers."""
-
     agent_stream_queues: dict[str, asyncio.Queue[AgentStreamEvent]] = Field(
         default_factory=_create_stream_queue_factory
     )
@@ -1753,7 +1629,7 @@ class AgentContext(BaseModel):
 
         Per-run state (fresh for each run):
             - run_id, start_at, end_at
-            - tool_id_wrapper, agent_stream_queues
+            - agent_stream_queues
             - usage_snapshot_entries, shell_review_records, deferred_tool_metadata
             - force_inject_instructions, previous_assistant_response_reference
 
@@ -1771,7 +1647,6 @@ class AgentContext(BaseModel):
             "run_id": self.provider_thread_id or _generate_run_id(),
             "start_at": datetime.now(UTC),
             "end_at": None,
-            "tool_id_wrapper": ToolIdWrapper(),
             "agent_stream_queues": _create_stream_queue_factory(),
             "usage_snapshot_entries": {},
             "shell_review_records": deque(maxlen=10),
@@ -1854,7 +1729,6 @@ class AgentContext(BaseModel):
             "previous_assistant_response_reference": None,
             "run_input_ledger": RunInputLedger(),
             "input_router": None,
-            "tool_id_wrapper": ToolIdWrapper(),  # Fresh wrapper for subagent
             "tool_tags": set(),  # Fresh tags for subagent (recomputed by its own Toolset)
             "shell_review_records": deque(maxlen=10),
             "security": self.security.model_copy(deep=True),
@@ -2071,7 +1945,6 @@ class AgentContext(BaseModel):
             # object.__setattr__ (e.g., in prepare_new_run / create_subagent_context).
             object.__setattr__(self, "_entered", True)
         self.start_at = datetime.now(UTC)
-        self.tool_id_wrapper.clear()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):

@@ -124,7 +124,9 @@ class AguiReplayBuffer:
         self._append_delta_fragment(existing_index, event.get("delta"))
 
     def _merge_tool_call_chunk(self, event: dict[str, Any]) -> None:
-        tool_call_id = _normalized_identifier(_event_field(event, "toolCallId", "tool_call_id"))
+        tool_call_id = _normalized_identifier(
+            _event_field(event, "toolCallKey", "tool_call_key") or _event_field(event, "toolCallId", "tool_call_id")
+        )
         if tool_call_id is None:
             self._append_passthrough_event(event)
             return

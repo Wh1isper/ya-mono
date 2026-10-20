@@ -27,8 +27,8 @@ from ya_agent_sdk.capabilities.foundation import (
     OverallRetryBudget,
     ReasoningCompatibilityCapability,
     RuntimeContextCapability,
+    SelfHealingModelCapability,
     ToolArgumentRepairCapability,
-    ToolIdCompatibilityCapability,
 )
 from ya_agent_sdk.capabilities.presets import RuntimeFoundationCapability
 from ya_agent_sdk.capabilities.tool_policy import (
@@ -63,7 +63,7 @@ BUILTIN_CAPABILITY_TYPES = (
     ThinkingCapability,
     ToolApprovalCapability,
     ToolArgumentRepairCapability,
-    ToolIdCompatibilityCapability,
+    SelfHealingModelCapability,
     ToolObservationCapability,
     ToolSupersessionCapability,
     ToolTimeoutCapability,

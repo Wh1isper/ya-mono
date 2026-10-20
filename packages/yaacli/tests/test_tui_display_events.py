@@ -828,3 +828,52 @@ def test_tui_finish_active_goal_emits_reason_and_resets_goal() -> None:
     assert ctx.goal_needs_post_restore_audit is False
     assert ctx.goal_last_context_handoff_source is None
     assert any("Cancelled at iteration 4" in line for line in app._output_lines)
+
+
+@pytest.mark.parametrize("child_first", [False, True])
+def test_tui_native_ids_do_not_merge_root_children_or_invocations(child_first: bool) -> None:
+    app = TUIApp(config=MockConfig(), config_manager=MockConfigManager())  # type: ignore[arg-type]
+    for child in ("child-1", "child-2"):
+        app._handle_subagent_start(SubagentStartEvent(event_id=child, agent_id=child, agent_name=child))
+    root = {
+        "type": "TOOL_CALL_CHUNK",
+        "toolCallId": "same",
+        "toolCallKey": "run:tool:1",
+        "toolCallName": "shell",
+        "delta": '{"command":"first"}',
+        "timestamp": 1000,
+    }
+    children = [
+        {
+            "type": "TOOL_CALL_CHUNK",
+            "toolCallId": "same",
+            "toolCallKey": f"run:tool:{i}",
+            "toolCallName": "view",
+            "delta": "{}",
+            "yaacliAgentId": child,
+        }
+        for i, child in enumerate(("child-1", "child-2"), 2)
+    ]
+    app._handle_display_events([*children, root] if child_first else [root, *children])
+    app._handle_display_events(children)  # Duplicate progress is not a second call.
+    first_result = {
+        "type": "TOOL_CALL_RESULT",
+        "toolCallId": "same",
+        "toolCallKey": "run:tool:1",
+        "content": "first result",
+        "timestamp": 2500,
+    }
+    app._handle_display_events([first_result, first_result])
+    app._handle_display_events([
+        {**root, "toolCallKey": "run:tool:4", "delta": '{"command":"second"}', "timestamp": 3000},
+        {**first_result, "toolCallKey": "run:tool:4", "content": "second result", "timestamp": 5000},
+    ])
+    assert all(app._subagent_states[child]["tool_count"] == 1 for child in ("child-1", "child-2"))
+    assert len(app._tool_messages) == 2
+    assert all(message.tool_call_id == "same" for message in app._tool_messages.values())
+    assert app._tool_messages["run:tool:1"].content == "first result"
+    assert app._tool_messages["run:tool:4"].content == "second result"
+    assert app._event_renderer.tracker.tool_calls["run:tool:1"].duration() == 1.5
+    assert app._event_renderer.tracker.tool_calls["run:tool:4"].duration() == 2
+    assert sum("Calling:" in line and "shell" in line for line in app._output_lines) == 2
+    assert len(app._printed_tool_calls) == 2

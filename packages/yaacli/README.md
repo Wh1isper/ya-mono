@@ -198,7 +198,7 @@ The output viewport has priority over auxiliary UI. The task pane is hidden when
 - Background results never modify or clear the compose area. A terminal background subagent is projected as session-scoped readiness only; its committed result enters the canonical parent continuation path on the next accepting agent turn and does not automatically wake the model. Monitored-shell notifications are persisted as feature input and may start one idle turn according to shell-monitor policy. There is no `/integrate` command or MessageBus delivery path.
 - `/agents` shows running and recently completed background subagents; `/process` shows active background shell processes.
 - `/attachments` and `/remove-image` inspect or edit images queued for the next turn.
-- `/tool <call-id>` shows the complete retained result for a tool call.
+- `/tool <call-id>` shows the complete retained result for a tool call. Reused native IDs return an ambiguity message with occurrence selectors; use `/tool <selector>` to choose a result. Selectors refer to the current retained history or live display turn.
 - `/session <id>` restores a saved session. The CLI equivalent is `yaacli --session <id>`.
 - Use `/help` for the complete built-in and configured command list. Slash commands and available skills complete while typing.
 - Prefix an idle prompt with one or more available skill names to request them explicitly: `/lark-cli /agent-builder Build an agent that replies in Lark`. Only the leading consecutive `/skill-name` tokens are selected. Reserved built-in commands keep control-plane precedence; an available skill takes precedence over a configured prompt command with the same name.
@@ -405,3 +405,12 @@ Linux image paste still relies on `wl-paste` on Wayland or `xclip` on X11.
 ## License
 
 BSD 3-Clause License. See the [repository license](https://github.com/wh1isper/ya-mono/blob/main/LICENSE).
+
+## Tool display identity
+
+Provider `toolCallId` values remain unchanged. Adapted tool start/chunk/end/result
+events carry a separate `toolCallKey`, scoped to the display run and invocation.
+The adapter retains that key across deferred-result segments and allocates a new key
+when another invocation starts, even if an agent reuses a provider ID. Result
+`messageId` derives from this display key. Replay, rendering, and argument budgets use
+`toolCallKey`; older stored events without it retain their original ID-based behavior.

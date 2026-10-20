@@ -29,3 +29,12 @@ content, and execution start/resume events omit prompt and deferred-result conte
 injected messages, durable input/enqueue identities, idempotency keys, raw lifecycle
 event IDs/timestamps, resumable state, and other host-owned data must remain outside
 AGUI replay and SSE.
+
+## Tool display identity
+
+Provider `toolCallId` values remain unchanged. Adapted tool start/chunk/end/result
+events carry a separate `toolCallKey`, scoped to the display run and invocation.
+The adapter retains that key across deferred-result segments and allocates a new key
+when another invocation starts, even if an agent reuses a provider ID. Result
+`messageId` derives from this display key. Replay, rendering, and argument budgets use
+`toolCallKey`; older stored events without it retain their original ID-based behavior.

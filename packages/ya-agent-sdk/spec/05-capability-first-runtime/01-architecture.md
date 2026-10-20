@@ -165,7 +165,7 @@ toolset is explicitly wrapped by the Pydantic AI Toolset capability inside
 - `ReasoningCompatibilityCapability`;
 - `MediaCompatibilityCapability`;
 - `ToolArgumentRepairCapability`;
-- `ToolIdCompatibilityCapability`;
+- `SelfHealingModelCapability`;
 - `ContextCompactionCapability`;
 - `ColdStartCapability`;
 - `EnvironmentContextCapability`;
@@ -265,7 +265,7 @@ Construction-time capability instances are otherwise immutable.
 | logical-run user input record | context-owned `RunInputLedger` and `ResumableState` |
 | handoff and file-inspection continuation state | context and `ResumableState` |
 | Pydantic AI `ToolManager` | Pydantic AI |
-| tool ID mapping | run-local `ToolIdCompatibilityCapability` helper |
+| provider rejection repair | request-local `SelfHealingModelCapability`; native tool IDs remain unchanged |
 | model feature metadata | `ModelFeature`, not a capability manager |
 | skill catalog/cache | run-local `SkillsCapability` service |
 | native Tool Search loaded state | Pydantic AI Tool Search and canonical history |

@@ -96,6 +96,10 @@ dependencies = [
 [tool.hatch.build.targets.wheel]
 packages = ["ya_agent_sdk"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"LICENSE-APACHE-2.0" = "ya_agent_sdk/licenses/LICENSE-APACHE-2.0"
+"THIRD_PARTY_NOTICES.md" = "ya_agent_sdk/licenses/THIRD_PARTY_NOTICES.md"
+
 [tool.deptry]
 ignore = ["DEP001", "DEP002"]
 package_module_name_map = { "anthropic" = "anthropic", "anyio" = "anyio", "boto3" = "boto3", "boto3-stubs" = "boto3_stubs|mypy_boto3_s3", "docker" = "docker", "firecrawl-py" = "firecrawl", "httpx" = "httpx", "httpx2" = "httpx2", "inline-snapshot" = "inline_snapshot", "jinja2" = "jinja2", "markitdown" = "markitdown", "pathspec" = "pathspec", "pillow" = "PIL", "pre-commit" = "pre_commit", "pydantic" = "pydantic", "pydantic-ai" = "pydantic_ai", "pydantic-monty" = "pydantic_monty", "pydantic-settings" = "pydantic_settings", "pymupdf" = "pymupdf|fitz", "pymupdf-layout" = "pymupdf_layout", "pymupdf4llm" = "pymupdf4llm", "pytest" = "pytest", "pytest-asyncio" = "pytest_asyncio", "pytest-cov" = "pytest_cov", "pytest-xdist" = "pytest_xdist", "pyright" = "pyright", "python-dotenv" = "dotenv", "pyyaml" = "yaml", "rank-bm25" = "rank_bm25", "ruff" = "ruff", "tavily-python" = "tavily", "tenacity" = "tenacity", "typing-extensions" = "typing_extensions", "websockets" = "websockets", "ya-agent-sdk" = "ya_agent_sdk", "ya-agent-environment" = "ya_agent_environment", "ya-oauth-provider" = "ya_oauth_provider" }
