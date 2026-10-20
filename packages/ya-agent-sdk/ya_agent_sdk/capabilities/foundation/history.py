@@ -68,30 +68,6 @@ class ToolArgumentRepairCapability(AbstractCapability[AgentContext]):
 
 
 @dataclass(kw_only=True)
-class ToolIdCompatibilityCapability(AbstractCapability[AgentContext]):
-    """Normalize tool call/result identities on immutable message replacements."""
-
-    id: str | None = "tool_id_compatibility"
-
-    def get_ordering(self) -> CapabilityOrdering:
-        return CapabilityOrdering(
-            wraps=(
-                HandoffCapability,
-                ContextCompactionCapability,
-                ColdStartCapability,
-                ReinjectSystemPrompt,
-            )
-        )
-
-    async def before_model_request(
-        self,
-        ctx: RunContext[AgentContext],
-        request_context: ModelRequestContext,
-    ) -> ModelRequestContext:
-        return await apply_history_processor(ctx.deps.tool_id_wrapper.wrap_messages, ctx, request_context)
-
-
-@dataclass(kw_only=True)
 class HandoffCapability(AbstractCapability[AgentContext]):
     """Apply an explicit summarized-context handoff transition."""
 

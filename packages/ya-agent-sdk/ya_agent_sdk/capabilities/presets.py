@@ -16,7 +16,6 @@ from .foundation.history import (
     HandoffCapability,
     ReasoningCompatibilityCapability,
     ToolArgumentRepairCapability,
-    ToolIdCompatibilityCapability,
 )
 from .foundation.request import (
     EnvironmentContextCapability,
@@ -25,6 +24,7 @@ from .foundation.request import (
     RuntimeContextCapability,
 )
 from .foundation.retry import OverallRetryBudget
+from .foundation.self_healing import SelfHealingModelCapability
 
 
 @dataclass
@@ -36,7 +36,7 @@ class RuntimeFoundationCapability(CombinedCapability[AgentContext]):
             ReasoningCompatibilityCapability(),
             MediaCompatibilityCapability(),
             ToolArgumentRepairCapability(),
-            ToolIdCompatibilityCapability(),
+            SelfHealingModelCapability(),
             OverallRetryBudget(),
             HandoffCapability(),
             ContextCompactionCapability(),

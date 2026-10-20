@@ -83,7 +83,6 @@ from ya_agent_sdk.context import (
     ResumableState,
     StreamEvent,
     StreamRecoveryPolicy,
-    ToolIdWrapper,
 )
 from ya_agent_sdk.environment.local import LocalEnvironment
 from ya_agent_sdk.events import (
@@ -866,7 +865,6 @@ class AgentStreamer(Generic[AgentDepsT, OutputT]):
     _poll_done: asyncio.Event
     _tasks: list[asyncio.Task[None]] = field(default_factory=list)
     _partial_text: PartialTextAccumulator = field(default_factory=PartialTextAccumulator)
-    _tool_id_wrapper: ToolIdWrapper | None = None
     _input_router: LogicalRunInputRouter | None = None
     run: AgentRun[AgentDepsT, OutputT] | None = None
     exception: BaseException | None = None
@@ -883,16 +881,12 @@ class AgentStreamer(Generic[AgentDepsT, OutputT]):
         messages: list[ModelMessage] = []
         if self.run is not None:
             messages = list(self.run.all_messages())
-            if self._tool_id_wrapper is not None:
-                messages = self._tool_id_wrapper.wrap_messages(None, messages)
             if messages and isinstance(messages[-1], ModelResponse):
                 self._mark_interrupted_response(messages[-1])
                 return messages
         partial_response = self._partial_text.build_response()
         if partial_response is not None:
             messages.append(partial_response)
-            if self._tool_id_wrapper is not None:
-                messages = self._tool_id_wrapper.wrap_messages(None, messages)
         return messages
 
     @staticmethod
@@ -1234,13 +1228,12 @@ async def stream_agent(  # noqa: C901
             await pre_event_hook(event_ctx)
 
         input_router.observe_event(event)
-        wrapped_event = ctx.tool_id_wrapper.wrap_event(event)
-        partial_text.observe(wrapped_event)
+        partial_text.observe(event)
         await output_queue.put(
             StreamEvent(
                 agent_id=main_agent_info.agent_id,
                 agent_name=main_agent_info.agent_name,
-                event=wrapped_event,
+                event=event,
             )
         )
 
@@ -1770,7 +1763,6 @@ async def stream_agent(  # noqa: C901
         _poll_done=poll_done,
         _tasks=[main_task, poll_task],
         _partial_text=partial_text,
-        _tool_id_wrapper=ctx.tool_id_wrapper,
         _input_router=input_router,
     )
 
@@ -1785,7 +1777,6 @@ async def stream_agent(  # noqa: C901
     else:
         if (run := streamer.run) and (result := run.result) and isinstance(result.output, DeferredToolRequests):
             deferred_suspension = True
-            result.output = ctx.tool_id_wrapper.wrap_deferred_tool_requests(result.output)
     finally:
         # Cancel all running tasks to initiate clean shutdown.
         # This handles both explicit interrupt() calls and external cancellation (e.g., Ctrl+C).

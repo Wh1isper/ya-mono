@@ -822,7 +822,7 @@ async def _stream_child_node(
             async for event in stream:
                 try:
                     router.observe_event(event)
-                    await child_ctx.emit_event(child_ctx.tool_id_wrapper.wrap_event(event))
+                    await child_ctx.emit_event(event)
                 except BaseException:
                     event_processing_failed = True
                     raise

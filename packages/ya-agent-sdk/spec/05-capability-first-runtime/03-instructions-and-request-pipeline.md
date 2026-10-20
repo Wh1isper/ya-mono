@@ -212,16 +212,15 @@ flowchart TD
     Media --> FeatureInputs[One-shot request-envelope inputs]
     FeatureInputs --> Model[Model request handler]
     Model --> Response[Model response]
-    Response --> ToolIds[Normalize provider-emitted tool IDs]
-    ToolIds --> Stored[Canonical response history]
+    Response --> Stored[Canonical response history with native tool IDs]
 ```
 
 The semantic stages are:
 
 1. **Pending messages**: Pydantic AI drains `asap` or `when_idle` content into
    canonical history.
-2. **Canonical repair**: reasoning, restored non-normalized provider tool IDs, and
-   recoverable tool argument history are normalized before lifecycle reduction.
+2. **Canonical repair**: reasoning and recoverable tool argument history are
+   normalized before lifecycle reduction. Tool call IDs remain unchanged.
 3. **Lifecycle reduction**: handoff, compaction, and cold-start select retained
    canonical history; compact and handoff restore applied logical-run user inputs plus
    input already drained into the current bound native request from `RunInputLedger`.
@@ -233,10 +232,12 @@ The semantic stages are:
    preparation without changing the canonical snapshot contract.
 7. **Request projection**: `wrap_model_request` shapes retained media for the selected
    provider and adds one-shot file reminders only to the request view.
-8. **Response normalization**: provider-emitted tool IDs become stable YA IDs before
-   persistence and host event emission.
+8. **Reactive self-healing**: a matched provider rejection repairs a private request
+   copy and replays that model request once, before any stream has been exposed.
 
-Canonical YA tool IDs are reused for subsequent provider requests and host events.
+Native tool call IDs are reused for provider requests, host events, checkpoints,
+deferred request metadata, and approval/result keys. Existing `ya-*` IDs remain opaque
+valid IDs; no migration or reverse mapping is needed.
 
 ## 6. Ordering Invariants
 
@@ -253,7 +254,7 @@ Canonical YA tool IDs are reused for subsequent provider requests and host event
 8. Environment snapshot processing precedes runtime snapshot processing. Both preserve
    leading system prompts and tool-result/retry ordering; runtime text is inserted
    before the Environment/user text at that boundary.
-9. Provider-emitted tool IDs are normalized before persistence or host emission.
+9. Provider-emitted tool IDs are preserved through persistence and host emission.
 10. Compact and handoff restore each applied run input exactly once. They also retain
     current-request-delivered input while its application event is pending, without
     changing ledger disposition; they never consume queued, accepted, or rejected input.
@@ -274,14 +275,11 @@ ordering error.
 
 ### 7.1 Position rule
 
-No SDK- or YAACLI-owned capability uses `CapabilityOrdering.position` in the 2.0
-baseline. `position` is a coarse global tier, not a unique slot: multiple outermost or
-innermost capabilities still use caller order when they are ready in the same
-topological batch. Pydantic AI already uses those tiers for framework-wide boundaries
-including instrumentation, Tool Search, pending-message drain, and durable execution.
-YA does not compete with or copy those boundaries.
-
-Each YA leaf declares only local type relationships required for correctness.
+`SelfHealingModelCapability` uses `position="innermost"` to wrap the effective model
+selected by earlier `before_model_request` hooks. It reuses an existing self-healing
+wrapper anywhere in the wrapper chain. Repairs occur inside the model request, after
+canonical history has been committed, and mutate only a deep copy made after a match.
+Other YA leaves declare local type relationships required for correctness.
 `requires` means that a target must be present and does not imply order. Type references
 are used instead of instance references so `for_run()` replacement preserves the graph.
 An omitted relationship adds no edge. A fully unconstrained list retains caller/source
@@ -296,7 +294,6 @@ The canonical `before_model_request` relationships are:
 | --- | --- | --- |
 | `ReasoningCompatibilityCapability` | `HandoffCapability`, `ContextCompactionCapability`, `ColdStartCapability`, Pydantic AI `ReinjectSystemPrompt` | normalize retained reasoning before lifecycle reduction or prompt restoration |
 | `ToolArgumentRepairCapability` | `HandoffCapability`, `ContextCompactionCapability`, `ColdStartCapability`, Pydantic AI `ReinjectSystemPrompt` | repair recoverable calls before they can be summarized, trimmed, or passed to prompt restoration |
-| `ToolIdCompatibilityCapability` | `HandoffCapability`, `ContextCompactionCapability`, `ColdStartCapability`, Pydantic AI `ReinjectSystemPrompt` | normalize restored IDs before lifecycle reduction or prompt restoration |
 | `OverallRetryBudget` | `HandoffCapability`, `ContextCompactionCapability`, `ColdStartCapability`, Pydantic AI `ReinjectSystemPrompt` | count current-run retry prompts before a reducer or prompt restoration can hide them |
 | `HandoffCapability` | `ContextCompactionCapability`, `ColdStartCapability`, Pydantic AI `ReinjectSystemPrompt` | apply the handoff transition before later reduction and prompt restoration |
 | `ContextCompactionCapability` | `ColdStartCapability`, Pydantic AI `ReinjectSystemPrompt` | compact before cold-start trimming and prompt restoration |
@@ -311,14 +308,10 @@ leaves are absent.
 Every later optional leaf whose relative order matters appears directly in `wraps`.
 The graph therefore remains correct if, for example, compaction is absent between
 handoff and cold start, or all three lifecycle reducers are absent before system-prompt
-reinjection. The three repair leaves and `OverallRetryBudget` are unrelated to one
+reinjection. The two repair leaves and `OverallRetryBudget` are unrelated to one
 another; when considered as a fully unconstrained subset they retain caller order.
 
-`ToolIdCompatibilityCapability` also implements `after_model_request`. Its outer
-placement makes response unwinding run late, so provider-emitted IDs are normalized
-before response persistence and host emission without adding a second ordering system.
-Pydantic AI's outermost pending-message drain runs before this YA chain. No YA leaf
-redeclares that native position.
+Pydantic AI's outermost pending-message drain runs before this YA chain.
 
 ### 7.3 Request-only envelope
 

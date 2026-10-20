@@ -27,6 +27,8 @@ _IDENTITY_FIELDS = frozenset({
     "run_id",
     "messageId",
     "message_id",
+    "toolCallKey",
+    "tool_call_key",
     "toolCallId",
     "tool_call_id",
     "parentMessageId",
@@ -345,7 +347,12 @@ def _event_run_id(event: dict[str, Any], fallback: str) -> str:
 
 def _chunk_identifier(event: dict[str, Any], event_type: str) -> str:
     if event_type == "TOOL_CALL_CHUNK":
-        value = _identifier(event.get("toolCallId") or event.get("tool_call_id"))
+        value = _identifier(
+            event.get("toolCallKey")
+            or event.get("tool_call_key")
+            or event.get("toolCallId")
+            or event.get("tool_call_id")
+        )
     else:
         value = _identifier(event.get("messageId") or event.get("message_id"))
     return _bounded_identifier(value)

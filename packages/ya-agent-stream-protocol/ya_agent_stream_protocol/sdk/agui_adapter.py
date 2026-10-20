@@ -97,6 +97,8 @@ class AguiEventAdapter:
         self._run_id = run_id
         self._config = config
         self._agents: dict[str, AgentCursor] = {}
+        self._tool_call_keys: dict[tuple[str, str], str] = {}
+        self._tool_call_sequence = 0
 
     def build_run_started_event(self, *, input_parts: list[JsonObject] | None = None) -> JsonObject:
         _ = input_parts
@@ -469,13 +471,20 @@ class AguiEventAdapter:
 
     def _with_stream_metadata(self, stream_event: StreamEvent, events: list[JsonObject]) -> list[JsonObject]:
         prefix = self._config.stream_metadata_prefix
-        if prefix is None:
-            return events
-        agent_id_key = f"{prefix}AgentId"
-        agent_name_key = f"{prefix}AgentName"
         for event in events:
-            event[agent_id_key] = stream_event.agent_id
-            event[agent_name_key] = stream_event.agent_name
+            tool_call_id = event.get("toolCallId")
+            if isinstance(tool_call_id, str):
+                identity = (stream_event.agent_id, tool_call_id)
+                if event["type"] == "TOOL_CALL_START" or identity not in self._tool_call_keys:
+                    self._tool_call_sequence += 1
+                    self._tool_call_keys[identity] = f"{self._run_id}:tool:{self._tool_call_sequence}"
+                key = self._tool_call_keys[identity]
+                event["toolCallKey"] = key
+                if event["type"] == "TOOL_CALL_RESULT":
+                    event["messageId"] = f"{key}:result"
+            if prefix is not None:
+                event[f"{prefix}AgentId"] = stream_event.agent_id
+                event[f"{prefix}AgentName"] = stream_event.agent_name
         return events
 
     def _custom_agent_event(self, event_name: str, *, stream_event: StreamEvent, payload: object) -> JsonObject:

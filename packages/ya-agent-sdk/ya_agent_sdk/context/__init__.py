@@ -45,7 +45,6 @@ from .agent import (
     StreamEvent,
     StreamRecoveryPolicy,
     ToolConfig,
-    ToolIdWrapper,
     ToolProxyState,
     ToolSettings,
 )
@@ -78,7 +77,6 @@ __all__ = [
     "TaskManager",
     "TaskStatus",
     "ToolConfig",
-    "ToolIdWrapper",
     "ToolProxyState",
     "ToolSettings",
 ]

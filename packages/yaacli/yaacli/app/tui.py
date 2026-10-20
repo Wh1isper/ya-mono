@@ -1519,17 +1519,16 @@ class TUIApp:
                     tool_name = str(event.get("toolCallName") or event.get("tool_call_name") or "")
                     tool_call_id = str(event.get("toolCallId") or event.get("tool_call_id") or "")
                     agent_id = str(event.get("yaacliAgentId") or event.get("yaacli_agent_id") or "")
-                    if agent_id in self._subagent_states and tool_call_id and tool_call_id not in self._tool_messages:
-                        self._tool_messages[tool_call_id] = ToolMessage(
-                            tool_call_id=tool_call_id,
-                            name=tool_name,
-                            args=_bounded_tool_args(str(event.get("delta") or "")),
-                        )
-                        if tool_name:
-                            state = self._subagent_states[agent_id]
-                            state["tool_names"] = [*state["tool_names"][-2:], tool_name]
-                            state["tool_count"] = int(state.get("tool_count", 0)) + 1
-                            self._update_subagent_progress_line(agent_id)
+                    if agent_id in self._subagent_states and tool_call_id:
+                        state = self._subagent_states[agent_id]
+                        key = str(event.get("toolCallKey") or tool_call_id)
+                        seen = state.setdefault("tool_call_keys", set())
+                        if key not in seen:
+                            seen.add(key)
+                            if tool_name:
+                                state["tool_names"] = [*state["tool_names"][-2:], tool_name]
+                                state["tool_count"] = int(state.get("tool_count", 0)) + 1
+                                self._update_subagent_progress_line(agent_id)
                 continue
             if event_type == "TEXT_MESSAGE_START":
                 self._finalize_streaming_text()
@@ -1577,13 +1576,14 @@ class TUIApp:
                 self._finalize_streaming_thinking()
                 tool_name = event.get("toolCallName") or event.get("tool_call_name") or "tool"
                 tool_call_id = str(event.get("toolCallId") or event.get("tool_call_id") or "")
-                if tool_call_id and tool_call_id not in self._tool_messages:
-                    self._tool_messages[tool_call_id] = ToolMessage(
+                tool_call_key = str(event.get("toolCallKey") or tool_call_id)
+                if tool_call_id and tool_call_key not in self._tool_messages:
+                    self._tool_messages[tool_call_key] = ToolMessage(
                         tool_call_id=tool_call_id,
                         name=str(tool_name),
                     )
                     self._event_renderer.tracker.start_call(
-                        tool_call_id,
+                        tool_call_key,
                         str(tool_name),
                         start_time=_agui_event_timestamp_seconds(event),
                     )
@@ -1599,15 +1599,16 @@ class TUIApp:
                 self._finalize_streaming_thinking()
                 tool_name = event.get("toolCallName") or event.get("tool_call_name") or "tool"
                 tool_call_id = str(event.get("toolCallId") or event.get("tool_call_id") or "")
-                if tool_call_id and tool_call_id not in self._tool_messages:
+                tool_call_key = str(event.get("toolCallKey") or tool_call_id)
+                if tool_call_id and tool_call_key not in self._tool_messages:
                     display_args = _bounded_tool_args(str(event.get("delta") or ""))
-                    self._tool_messages[tool_call_id] = ToolMessage(
+                    self._tool_messages[tool_call_key] = ToolMessage(
                         tool_call_id=tool_call_id,
                         name=str(tool_name),
                         args=display_args,
                     )
                     self._event_renderer.tracker.start_call(
-                        tool_call_id,
+                        tool_call_key,
                         str(tool_name),
                         display_args,
                         start_time=_agui_event_timestamp_seconds(event),
@@ -1615,19 +1616,20 @@ class TUIApp:
                     self._append_block(
                         self._event_renderer.render_tool_call_start(str(tool_name), tool_call_id).rstrip()
                     )
-                elif tool_call_id and tool_call_id in self._tool_messages:
-                    existing_tool_msg = self._tool_messages[tool_call_id]
+                elif tool_call_id and tool_call_key in self._tool_messages:
+                    existing_tool_msg = self._tool_messages[tool_call_key]
                     if not existing_tool_msg.args:
                         existing_tool_msg.args = _bounded_tool_args(str(event.get("delta") or ""))
-                    if tool_call_id in self._event_renderer.tracker.tool_calls:
-                        self._event_renderer.tracker.tool_calls[tool_call_id].args = existing_tool_msg.args
+                    if tool_call_key in self._event_renderer.tracker.tool_calls:
+                        self._event_renderer.tracker.tool_calls[tool_call_key].args = existing_tool_msg.args
                 continue
             if event_type == "TOOL_CALL_RESULT":
                 agent_id = str(event.get("yaacliAgentId") or "main")
                 if agent_id != "main":
                     continue
                 tool_call_id = str(event.get("toolCallId") or event.get("tool_call_id") or "")
-                existing_tool_msg = self._tool_messages.get(tool_call_id)
+                tool_call_key = str(event.get("toolCallKey") or tool_call_id)
+                existing_tool_msg = self._tool_messages.get(tool_call_key)
                 tool_msg = existing_tool_msg or ToolMessage(
                     tool_call_id=tool_call_id,
                     name=str(event.get("toolCallName") or event.get("tool_call_name") or "tool"),
@@ -1635,14 +1637,14 @@ class TUIApp:
                 full_content = str(event.get("content") or "")
                 tool_msg.content = _bounded_tool_result(full_content)
                 self._event_renderer.tracker.complete_call(
-                    tool_call_id,
+                    tool_call_key,
                     tool_msg.content,
                     end_time=_agui_event_timestamp_seconds(event),
                 )
-                if tool_call_id not in self._printed_tool_calls:
+                if tool_call_key not in self._printed_tool_calls:
                     duration = 0.0
-                    if tool_call_id in self._event_renderer.tracker.tool_calls:
-                        duration = self._event_renderer.tracker.tool_calls[tool_call_id].duration()
+                    if tool_call_key in self._event_renderer.tracker.tool_calls:
+                        duration = self._event_renderer.tracker.tool_calls[tool_call_key].duration()
                     self._append_block(
                         self._event_renderer.render_tool_call_complete(
                             tool_msg,
@@ -1650,7 +1652,7 @@ class TUIApp:
                             width=width,
                         ).rstrip()
                     )
-                    self._printed_tool_calls.add(tool_call_id)
+                    self._printed_tool_calls.add(tool_call_key)
                 continue
             if event_type == "CUSTOM" and event.get("name") == "yaacli.steering_accepted":
                 value = event.get("value")
@@ -5342,40 +5344,40 @@ class TUIApp:
         return json.dumps(content, ensure_ascii=False, indent=2, default=str)
 
     def _tool_query_index(self) -> dict[str, ToolMessage]:
-        """Build an authoritative cross-turn tool index from model history."""
+        """Index retained occurrences, plus the current uncommitted live turn."""
         index: dict[str, ToolMessage] = {}
-        for message in self._message_history or []:
+        latest: dict[str, ToolMessage] = {}
+        for message_index, message in enumerate(self._message_history or []):
             if isinstance(message, ModelResponse):
-                for part in message.parts:
+                for part_index, part in enumerate(message.parts):
                     if not isinstance(part, ToolCallPart) or not part.tool_call_id:
                         continue
-                    index[part.tool_call_id] = ToolMessage(
+                    occurrence = ToolMessage(
                         tool_call_id=part.tool_call_id,
                         name=part.tool_name,
                         args=self._serialize_tool_args(part.args),
                     )
+                    index[f"history:{message_index}:{part_index}"] = occurrence
+                    latest[part.tool_call_id] = occurrence
             elif isinstance(message, ModelRequest):
-                for part in message.parts:
+                for part_index, part in enumerate(message.parts):
                     if not isinstance(part, ToolReturnPart | RetryPromptPart) or not part.tool_call_id:
                         continue
-                    existing = index.get(part.tool_call_id)
+                    existing = latest.get(part.tool_call_id)
                     if existing is None:
                         existing = ToolMessage(
                             tool_call_id=part.tool_call_id,
                             name=part.tool_name or "tool",
                         )
-                        index[part.tool_call_id] = existing
+                        index[f"history:{message_index}:{part_index}"] = existing
+                        latest[part.tool_call_id] = existing
                     existing.content = self._serialize_tool_result(part.content)
 
-        for tool_call_id, live_message in self._tool_messages.items():
-            existing = index.get(tool_call_id)
-            if existing is None:
-                index[tool_call_id] = live_message.model_copy(deep=True)
-                continue
-            if existing.args is None:
-                existing.args = live_message.args
-            if existing.content is None:
-                existing.content = live_message.content
+        # During execution, history is the previous committed revision. Once the
+        # terminal revision is restored, it owns complete results; display caches
+        # may contain truncated copies and must not create duplicate occurrences.
+        if self._active_display_run_id is not None and self._last_snapshot_saved is not True:
+            index.update(self._tool_messages)
         return index
 
     def _show_tool_result(self, requested_id: str) -> None:
@@ -5385,9 +5387,13 @@ class TUIApp:
         if not requested_id:
             recent = list(tool_messages)[-5:]
             hint = ", ".join(recent) if recent else "none"
-            self._append_system_output(f"Usage: /tool <call-id>. Recent IDs: {hint}")
+            self._append_system_output(f"Usage: /tool <call-id or selector>. Recent selectors: {hint}")
             return
-        matches = [call_id for call_id in tool_messages if call_id == requested_id or call_id.startswith(requested_id)]
+        matches = [
+            key
+            for key, message in tool_messages.items()
+            if key == requested_id or message.tool_call_id.startswith(requested_id)
+        ]
         if len(matches) != 1:
             if matches:
                 self._append_system_output(f"Ambiguous tool call ID: {', '.join(matches)}")
@@ -5396,7 +5402,7 @@ class TUIApp:
             return
         call_id = matches[0]
         message = tool_messages[call_id]
-        self._append_system_output(f"Tool {message.name} [{call_id}]")
+        self._append_system_output(f"Tool {message.name} [{message.tool_call_id}] ({call_id})")
         if message.args:
             args_text = (
                 json.dumps(message.args, ensure_ascii=False, indent=2)
@@ -5790,7 +5796,6 @@ class TUIApp:
         ctx.shell_review_records.clear()
         ctx.user_prompts = None
         ctx.previous_assistant_response_reference = None
-        ctx.tool_id_wrapper.clear()
         ctx.agent_stream_queues = {}
         ctx.agent_stream_info = {}
         ctx.files_to_inspect = []

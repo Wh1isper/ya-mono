@@ -7,7 +7,6 @@ from .history import (
     HandoffCapability,
     ReasoningCompatibilityCapability,
     ToolArgumentRepairCapability,
-    ToolIdCompatibilityCapability,
 )
 from .request import (
     EnvironmentContextCapability,
@@ -16,6 +15,7 @@ from .request import (
     RuntimeContextCapability,
 )
 from .retry import OverallRetryBudget
+from .self_healing import SelfHealingModelCapability
 
 __all__ = [
     "ColdStartCapability",
@@ -28,7 +28,7 @@ __all__ = [
     "OverallRetryBudget",
     "ReasoningCompatibilityCapability",
     "RuntimeContextCapability",
+    "SelfHealingModelCapability",
     "SupportsDeferredOutput",
     "ToolArgumentRepairCapability",
-    "ToolIdCompatibilityCapability",
 ]

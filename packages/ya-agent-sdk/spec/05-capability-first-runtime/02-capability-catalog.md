@@ -107,7 +107,7 @@ Structured user interaction is absent from child capability sets.
 | `ReasoningCompatibilityCapability` | normalize reasoning across model/provider changes |
 | `MediaCompatibilityCapability` | request-envelope projection that splits, resizes/compresses, limits, uploads, and filters retained media without persisting provider-specific projection |
 | `ToolArgumentRepairCapability` | repair recoverable truncated tool arguments before lifecycle reduction |
-| `ToolIdCompatibilityCapability` | normalize tool call/result IDs without mutating canonical input objects |
+| `SelfHealingModelCapability` | replay a rejected model request once after a matched request-local history repair |
 | `ContextCompactionCapability` | cache-friendly compaction, typed events, and ordered restoration of applied `RunInputLedger` entries |
 | `ColdStartCapability` | cold-start trim |
 | `FileInspectionCapability` | one-shot request-envelope continuation reminder; replaces the misleading auto-load name |
@@ -198,7 +198,7 @@ once for tools and instructions together.
 | `filter_by_capability` | `MediaCompatibilityCapability` | model-feature filtering stage |
 | `create_media_upload_filter` | configured media compatibility leaf | upload after local shaping and before unsupported-media filtering |
 | `fix_truncated_tool_args` | `ToolArgumentRepairCapability` | canonical repair before lifecycle reduction |
-| `ToolIdWrapper.wrap_messages` | `ToolIdCompatibilityCapability` | replacement transform and event normalization |
+| `ToolIdWrapper.wrap_messages` | removed | preserve native tool IDs in history, events, and deferred interactions |
 | `process_handoff_message` | `HandoffCapability` | handoff transition |
 | cache-friendly compact filters | `ContextCompactionCapability` | lifecycle reduction |
 | `cold_start_trim` | `ColdStartCapability` | lifecycle reduction |

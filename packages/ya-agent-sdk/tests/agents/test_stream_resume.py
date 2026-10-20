@@ -220,7 +220,7 @@ async def test_stream_agent_uses_model_config_resume_defaults(tmp_path: Path) ->
     assert all(event.resume_prompt == "configured resume prompt" for event in resume_events)
 
 
-async def test_stream_agent_applies_retry_recovery_before_resume(tmp_path: Path) -> None:
+async def test_stream_agent_resume_preserves_provider_history_without_self_healing(tmp_path: Path) -> None:
     calls: list[list[ModelMessage]] = []
     history = [
         ModelResponse(
@@ -256,11 +256,11 @@ async def test_stream_agent_applies_retry_recovery_before_resume(tmp_path: Path)
     assert len(calls) == 2
     resume_messages = calls[1]
     response = next(message for message in resume_messages if isinstance(message, ModelResponse))
-    assert response.provider_response_id is None
+    assert response.provider_response_id == "resp_1"
     thinking = response.parts[0]
     assert isinstance(thinking, ThinkingPart)
-    assert thinking.id is None
-    assert thinking.signature is None
+    assert thinking.id == "rs_1"
+    assert thinking.signature == "encrypted"
 
 
 async def test_stream_agent_explicit_resume_args_override_model_config(tmp_path: Path) -> None:

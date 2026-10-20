@@ -127,8 +127,8 @@ Each feature family is migrated bottom-up:
 - handoff and request-envelope file inspection;
 - Skills, manager-backed Tool Proxy, MCP, CodeAct, and delegation;
 - native Pydantic AI Tool Search adoption;
-- reasoning, request-only media projection, tool argument repair, and tool ID
-  normalization;
+- reasoning, request-only media projection, tool argument repair, and reactive
+  model-request self-healing with native tool call IDs;
 - cache-friendly compact, cold-start, request-envelope Environment/runtime context,
   and system prompt reinjection;
 - approval, timeout, visibility, observation, and retry policy leaves extracted from
@@ -415,7 +415,8 @@ Each feature family is migrated bottom-up:
 - skill refresh I/O only after catalog invalidation;
 - media projection order and absence from canonical history;
 - provider-valid tool return/retry ordering; and
-- stable tool ID normalization across response, event, persistence, and restore.
+- unchanged native tool call IDs across response, event, persistence, and restore;
+- request-local self-healing with a single replay and unchanged canonical history.
 
 ## 12. SDK Logical-Run Tests
 

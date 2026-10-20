@@ -48,6 +48,27 @@ def test_receiver_projection_bounds_tool_result_payload() -> None:
     assert event["yaacliReplayTruncated"] is True
 
 
+def test_tool_chunk_budgets_follow_display_keys_with_reused_native_ids() -> None:
+    replay = BoundedDisplayReplay(limits=DisplayReplayLimits(max_chunk_chars=8, max_event_payload_chars=1))
+    first = {"type": "TOOL_CALL_CHUNK", "toolCallId": "call_1", "toolCallKey": "run:tool:1"}
+    second = {"type": "TOOL_CALL_CHUNK", "toolCallId": "call_1", "toolCallKey": "run:tool:2"}
+    replay.append({**first, "delta": "12345678"})
+    replay.append({**first, "delta": "9"})
+    replay.append({**second, "delta": "abc"})
+
+    snapshot = replay.snapshot()
+    assert len(snapshot) == 2
+    assert snapshot[0]["yaacliReplayTruncated"] is True
+    assert snapshot[1]["delta"] == "abc"
+    assert [event["toolCallKey"] for event in snapshot] == ["run:tool:1", "run:tool:2"]
+    assert all(event["toolCallId"] == "call_1" for event in snapshot)
+
+    restored = BoundedDisplayReplay(limits=DisplayReplayLimits(max_chunk_chars=8, max_event_payload_chars=1))
+    restored.extend_snapshot(snapshot)
+    restored.append({**second, "delta": "def"})
+    assert restored.snapshot()[1]["delta"] == "abcdef"
+
+
 def test_receiver_projection_retains_only_recent_runs() -> None:
     replay = BoundedDisplayReplay(
         config=AguiReplayConfig(),

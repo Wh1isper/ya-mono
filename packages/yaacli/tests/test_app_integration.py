@@ -2788,6 +2788,46 @@ def test_tui_app_tool_command_shows_complete_cross_turn_history_result() -> None
     assert "complete result" in output
 
 
+@pytest.mark.parametrize("live", [False, True])
+def test_tui_app_tool_query_preserves_reused_native_id_occurrences(live: bool) -> None:
+    from yaacli.display import ToolMessage
+
+    app = TUIApp(config=MockConfig(), config_manager=MockConfigManager())
+    first = [
+        ModelResponse(parts=[ToolCallPart("shell", {"command": "first"}, tool_call_id="reused")]),
+        ModelRequest(parts=[ToolReturnPart("shell", "first result", tool_call_id="reused")]),
+    ]
+    second = [
+        ModelResponse(parts=[ToolCallPart("shell", {"command": "second"}, tool_call_id="reused")]),
+        ModelRequest(parts=[ToolReturnPart("shell", "second result", tool_call_id="reused")]),
+    ]
+    app._message_history = first if live else first + second
+    app._active_display_run_id = "live" if live else None
+    app._tool_messages["live:tool:1"] = ToolMessage(
+        tool_call_id="reused", name="shell", args={"command": "second"}, content="second result"
+    )
+    second_selector = "live:tool:1" if live else "history:2:0"
+
+    app._show_tool_result("reused")
+    output = "\n".join(app._output_lines)
+    assert "Ambiguous tool call ID: history:0:0, " + second_selector in output
+    assert "first result" not in output
+    assert "second result" not in output
+    app._show_tool_result("history:0:0")
+    assert "first result" in "\n".join(app._output_lines)
+    app._show_tool_result(second_selector)
+    assert "second result" in "\n".join(app._output_lines)
+
+    # A terminal commit replaces live data with canonical, untruncated results.
+    app._message_history = first + second
+    app._last_snapshot_saved = True
+    app._tool_messages["live:tool:1"].content = "truncated display"
+    index = app._tool_query_index()
+    assert list(index) == ["history:0:0", "history:2:0"]
+    assert index["history:2:0"].content == "second result"
+    assert all(message.tool_call_id == "reused" for message in index.values())
+
+
 @pytest.mark.asyncio
 async def test_tui_app_deferred_flow_resolves_approvals_and_calls() -> None:
     app = TUIApp(config=MockConfig(), config_manager=MockConfigManager())

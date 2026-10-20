@@ -38,9 +38,9 @@ from ya_agent_sdk.capabilities.foundation import (
     OverallRetryBudget,
     ReasoningCompatibilityCapability,
     RuntimeContextCapability,
+    SelfHealingModelCapability,
     SupportsDeferredOutput,
     ToolArgumentRepairCapability,
-    ToolIdCompatibilityCapability,
 )
 from ya_agent_sdk.capabilities.plugins import (
     CAPABILITY_PLUGIN_SCHEMA_VERSION,
@@ -88,6 +88,7 @@ __all__ = [
     "ResolvedCapabilityPlugins",
     "RuntimeContextCapability",
     "RuntimeFoundationCapability",
+    "SelfHealingModelCapability",
     "ShellCapability",
     "SkillsCapability",
     "SupportsDeferredOutput",
@@ -95,7 +96,6 @@ __all__ = [
     "ThinkingCapability",
     "ToolApprovalCapability",
     "ToolArgumentRepairCapability",
-    "ToolIdCompatibilityCapability",
     "ToolObservationCapability",
     "ToolProxyCapability",
     "ToolSupersessionCapability",

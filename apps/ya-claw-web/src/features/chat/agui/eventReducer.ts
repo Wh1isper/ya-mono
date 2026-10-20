@@ -93,7 +93,7 @@ export function reduceAguiEvent(
   if (eventType === 'REASONING_MESSAGE_CHUNK') {
     return mergeReasoning(nextState, event)
   }
-  if (eventType === 'TOOL_CALL_CHUNK') {
+  if (eventType === 'TOOL_CALL_START' || eventType === 'TOOL_CALL_CHUNK') {
     return mergeToolCall(nextState, event)
   }
   if (eventType === 'TOOL_CALL_RESULT') {
@@ -213,9 +213,11 @@ function mergeToolCall(
   const toolCallId =
     identifierField(event, 'toolCallId', 'tool_call_id') ??
     `tool:${state.blocks.length}`
+  const toolCallKey =
+    identifierField(event, 'toolCallKey', 'tool_call_key') ?? toolCallId
   const delta = stringField(event, 'delta') ?? ''
   const existingIndex = state.blocks.findIndex(
-    (block) => block.kind === 'tool_call' && block.toolCallId === toolCallId,
+    (block) => block.kind === 'tool_call' && block.id === `tool:${toolCallKey}`,
   )
   if (existingIndex >= 0) {
     const existing = state.blocks[existingIndex]
@@ -233,7 +235,7 @@ function mergeToolCall(
   }
   return appendBlock(state, {
     kind: 'tool_call',
-    id: `tool:${toolCallId}`,
+    id: `tool:${toolCallKey}`,
     toolCallId,
     name: stringField(event, 'toolCallName', 'tool_call_name') ?? undefined,
     args: delta,
@@ -248,12 +250,14 @@ function mergeToolResult(
   const toolCallId =
     identifierField(event, 'toolCallId', 'tool_call_id') ??
     `tool:${state.blocks.length}`
+  const toolCallKey =
+    identifierField(event, 'toolCallKey', 'tool_call_key') ?? toolCallId
   const content =
     event.content === undefined
       ? safeJsonStringify(event)
       : stringifyValue(event.content)
   const existingIndex = state.blocks.findIndex(
-    (block) => block.kind === 'tool_call' && block.toolCallId === toolCallId,
+    (block) => block.kind === 'tool_call' && block.id === `tool:${toolCallKey}`,
   )
   if (existingIndex >= 0) {
     const existing = state.blocks[existingIndex]
@@ -268,7 +272,7 @@ function mergeToolResult(
   }
   return appendBlock(state, {
     kind: 'tool_call',
-    id: `tool:${toolCallId}`,
+    id: `tool:${toolCallKey}`,
     toolCallId,
     args: '',
     result: content,

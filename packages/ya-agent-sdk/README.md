@@ -450,3 +450,43 @@ uv sync --all-packages
 ```
 
 Workspace commands live at the repository root. See the [contributing guide](https://github.com/wh1isper/ya-mono/tree/main/CONTRIBUTING.md).
+
+## Native tool IDs and request self-healing
+
+Tool call IDs pass through unchanged in model history, stream events, checkpoints,
+deferred request metadata, and host approval/result keys. Existing `ya-*` IDs remain
+valid opaque values. The SDK no longer exposes `ToolIdWrapper` or
+`ToolIdCompatibilityCapability`; remove those from custom compositions.
+
+`RuntimeFoundationCapability` explicitly includes `SelfHealingModelCapability`.
+Minimal `create_agent(capabilities=[])` compositions stay minimal. The capability
+wraps the effective request model once, including models selected by earlier hooks.
+Its five default recovery rules are:
+
+- Oversized payload: replace inline binary images/videos in user prompts and ordinary
+  tool returns with explicit removal reminders. Keep audio, documents, URLs, and native
+  tool results.
+- Invalid provider item ID: remove provider-bound response/part IDs and metadata,
+  reasoning, and compaction parts while preserving `tool_call_id`.
+- Anthropic incomplete thinking: remove rejected thinking parts.
+- Anthropic modified thinking or invalid signature: remove rejected thinking parts.
+- Stale reasoning/encrypted content: remove provider-bound thinking parts.
+
+A recognized provider error must produce an effective repair before a single replay.
+Matchers inspect original string values in structured HTTP error bodies, including
+provider messages nested inside gateway error envelopes, preserving their quotes.
+Repairs operate on a deep copy after rejection, leaving canonical history and pending
+approvals intact. Streaming retries cover establishment only; an exposed stream is
+never replayed by this wrapper. Model replay does not execute tools again. The existing
+opt-in agent stream recovery policy retains its own attempt budgets and context-overflow
+handling; provider-reference healing now belongs solely to the request wrapper.
+
+Python callers can configure `SelfHealingModelCapability(rules=...)` or wrap a model
+with `ya_agent_sdk.agents.models.self_healing.SelfHealingModel`. `None` selects all
+defaults, `[]` disables repairs, and an explicit sequence replaces the defaults.
+`ModelRecoveryRule` contains a name, exception matcher, and history repair returning
+the number of changes. The first matching rule owns the decision. Portable capability
+specs use the default rules; callable custom rules are Python-only.
+
+The implementation is adapted from Agent Foundation under Apache-2.0; attribution and
+license text ship with the SDK distribution (see `THIRD_PARTY_NOTICES.md`).
