@@ -673,6 +673,8 @@ async def test_sdk_service_foreground_is_idempotent_and_resumes_child_session(
     assert duplicate.execution_id == first.execution_id
 
     await client.mark_running(first.execution_id)
+    # Synchronize the task projection without relying on the background driver's next poll.
+    await client.get_async_subagent(name_or_task_id=first.execution_id)
     running = await service.get(
         first.execution_id,
         caller_scope_id="parent-session",
