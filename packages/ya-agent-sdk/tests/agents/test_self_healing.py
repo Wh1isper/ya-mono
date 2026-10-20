@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from copy import copy, deepcopy
@@ -105,6 +106,34 @@ async def test_reasoning_rules_replay_private_copy(body, streaming: bool) -> Non
         await model.request(original, None, PARAMETERS)
     assert len(provider.seen) == 2
     assert provider.seen[1][0].parts == [TextPart("answer", id="foreign-id")]
+    assert original == snapshot
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"error": {"message": ITEM_ERROR}},
+        {"errors": [{"message": ITEM_ERROR.replace("'", '"')}]},
+        {
+            "message": "[gateway/model] Invalid request: " + json.dumps({"error": {"message": ITEM_ERROR}}),
+            "type": "upstream_error",
+        },
+    ],
+)
+async def test_structured_provider_error_preserves_message_quotes(body, streaming: bool) -> None:
+    original = history()
+    snapshot = deepcopy(original)
+    provider = RejectOnce(ModelHTTPError(400, "test", body=body))
+    model = SelfHealingModel(provider)
+    if streaming:
+        async with model.request_stream(original, None, PARAMETERS) as stream:
+            async for _ in stream:
+                pass
+    else:
+        await model.request(original, None, PARAMETERS)
+    assert len(provider.seen) == 2
+    assert provider.seen[1][0].parts == [TextPart("answer")]
     assert original == snapshot
 
 

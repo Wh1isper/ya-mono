@@ -1,13 +1,13 @@
 # Copyright 2026 Converge AI
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from agent-foundation e36d0518c51a1d89eef20715de4f3b187040d885.
-# Modified for YA: copy-on-repair request isolation and native prompt metadata.
+# Modified for YA: copy-on-repair isolation, native prompt metadata, and structured error text.
 """Narrowly matched, request-local provider-history self-healing."""
 
 from __future__ import annotations
 
 import re
-from collections.abc import AsyncGenerator, Callable, Sequence
+from collections.abc import AsyncGenerator, Callable, Iterator, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass
@@ -161,7 +161,21 @@ def _error_text(error: ModelAPIError) -> str:
     values = [error.message or ""]
     if isinstance(error, ModelHTTPError):
         values.extend((str(error.status_code), str(error.body or "")))
+        # dict/list repr can escape quotes inside gateway-wrapped messages.
+        # Match their original text as well, without broadening the error rules.
+        values.extend(_body_strings(error.body))
     return " ".join(values).lower()
+
+
+def _body_strings(value: object) -> Iterator[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _body_strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _body_strings(item)
 
 
 def _body_contains(value: object, *, key: str, expected: str) -> bool:

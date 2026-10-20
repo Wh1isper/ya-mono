@@ -473,6 +473,8 @@ Its five default recovery rules are:
 - Stale reasoning/encrypted content: remove provider-bound thinking parts.
 
 A recognized provider error must produce an effective repair before a single replay.
+Matchers inspect original string values in structured HTTP error bodies, including
+provider messages nested inside gateway error envelopes, preserving their quotes.
 Repairs operate on a deep copy after rejection, leaving canonical history and pending
 approvals intact. Streaming retries cover establishment only; an exposed stream is
 never replayed by this wrapper. Model replay does not execute tools again. The existing

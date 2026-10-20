@@ -14,5 +14,6 @@ Copyright 2026 Converge AI. Licensed under Apache License 2.0; see
 `LICENSE-APACHE-2.0` in this distribution.
 
 YA modifications isolate repairs on a copied request history, use native Pydantic AI
-prompt metadata, and install the model through the explicit runtime foundation and
-portable capability catalog. All five upstream default recovery rules are retained.
+prompt metadata, preserve original text in structured provider error bodies, and
+install the model through the explicit runtime foundation and portable capability
+catalog. All five upstream default recovery rules are retained.
