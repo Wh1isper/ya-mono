@@ -11,6 +11,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, inspect, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from ya_claw.config import ClawSettings
 from ya_claw.controller.session_lifecycle import SESSION_PRUNE_CLAIM
@@ -116,12 +117,36 @@ class SessionPruneController:
         )
 
     async def _load_sessions(self, db_session: AsyncSession) -> list[SessionRecord]:
-        result = await db_session.execute(select(SessionRecord))
+        result = await db_session.execute(
+            select(SessionRecord).options(
+                load_only(
+                    SessionRecord.id,
+                    SessionRecord.head_run_id,
+                    SessionRecord.head_success_run_id,
+                    SessionRecord.active_run_id,
+                    raiseload=True,
+                )
+            )
+        )
         return list(result.scalars().all())
 
     async def _load_runs(self, db_session: AsyncSession) -> list[RunRecord]:
         result = await db_session.execute(
-            select(RunRecord).order_by(RunRecord.session_id.asc(), RunRecord.sequence_no.desc(), RunRecord.id.desc())
+            # Retention needs indexes and restore links, never conversation payloads.
+            # Loading every historical JSON input/metadata can dwarf active-run memory.
+            select(RunRecord)
+            .options(
+                load_only(
+                    RunRecord.id,
+                    RunRecord.session_id,
+                    RunRecord.sequence_no,
+                    RunRecord.restore_from_run_id,
+                    RunRecord.status,
+                    RunRecord.created_at,
+                    raiseload=True,
+                )
+            )
+            .order_by(RunRecord.session_id.asc(), RunRecord.sequence_no.desc(), RunRecord.id.desc())
         )
         return list(result.scalars().all())
 
