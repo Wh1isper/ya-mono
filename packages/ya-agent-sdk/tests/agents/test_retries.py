@@ -13,7 +13,6 @@ from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
     ModelResponse,
-    RetryPromptPart,
     ToolCallPart,
     ToolReturnPart,
 )
@@ -94,7 +93,9 @@ async def test_overall_retry_budget_does_not_reset_after_tool_success(tmp_path: 
         nonlocal model_calls, saw_successful_return
         model_calls += 1
         saw_successful_return = saw_successful_return or any(
-            isinstance(part, ToolReturnPart) and part.tool_name == RetryAfterSuccessTool.name
+            isinstance(part, ToolReturnPart)
+            and part.outcome == "success"
+            and part.tool_name == RetryAfterSuccessTool.name
             for message in messages
             if isinstance(message, ModelRequest)
             for part in message.parts
@@ -175,8 +176,8 @@ async def test_overall_retry_budget_counts_each_retry_prompt_in_one_request() ->
     request_context.messages = [
         ModelRequest(
             parts=[
-                RetryPromptPart(content="first", tool_name="tool_a", tool_call_id="call-a"),
-                RetryPromptPart(content="second", tool_name="tool_b", tool_call_id="call-b"),
+                ToolReturnPart(outcome="retried", content="first", tool_name="tool_a", tool_call_id="call-a"),
+                ToolReturnPart(outcome="retried", content="second", tool_name="tool_b", tool_call_id="call-b"),
             ],
             run_id="run-1",
         )

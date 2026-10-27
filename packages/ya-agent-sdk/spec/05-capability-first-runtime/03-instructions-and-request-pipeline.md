@@ -64,8 +64,9 @@ factory.
 
 Runtime and Environment context processors return copy-on-write replacements from
 `before_model_request`, after lifecycle reduction and native system-prompt reinjection.
-Pydantic AI commits these replacements to canonical graph history before native message
-cleanup/merging, model preparation, and `wrap_model_request` projections. They persist:
+The SDK explicitly commits these replacements through `RunContext.messages[:]` before
+native message cleanup/merging and model preparation. Assigning
+`ModelRequestContext.messages` alone changes only the current request. They persist:
 
 - elapsed time and usage;
 - context-window pressure and reminders;
@@ -93,13 +94,17 @@ Only one-shot or provider-compatibility transformations remain request-only:
 - one-shot file inspection reminders; and
 - provider-specific media projection.
 
-A request-only decorator creates replacement messages and a replacement
-`ModelRequestContext`, passes them only to `handler()`, and leaves canonical history
-untouched. The replacement preserves every field not intentionally changed, including
+Request-only processors run in `before_model_request`, ordered after canonical
+normalization, lifecycle reduction, prompt reinjection, and context snapshots. They
+return replacement messages in a replacement `ModelRequestContext` without updating
+`RunContext.messages`. Native `wrap_model_request` surrounds the entire before/call/after
+lifecycle, so request projection must not happen in its pre-handler section. The replacement preserves every field not intentionally changed, including
 Pydantic AI runtime-managed `model_id` and `streaming` fields.
 
-A one-shot source is cleared only after `handler()` returns a model response. If the
-handler raises, the source remains pending for recovery/retry.
+A one-shot source records the exact injected batch in request-local state during the
+before hook and consumes that batch only after `handler()` returns a model response.
+This includes paths added by earlier lifecycle hooks and preserves paths added after
+injection. If the handler raises, the source remains pending for recovery/retry.
 
 The note index does not alter note storage or inject note values. On user prompts it
 serializes at most 50 alphabetically sorted keys into one compact JSON array inside the
@@ -166,7 +171,14 @@ capability.
 ## 4. Canonical and Request-Only Processing
 
 SDK processors do not mutate `ModelMessage` or part instances supplied as canonical
-history.
+history. Trusted SDK processors use copy-on-write: a shallow list facade shares
+unchanged messages, while changed message, part, and metadata shells are replaced.
+No-op requests return the original envelope without traversing large tool-result
+payload trees. Unknown/mutating processor adapters retain a deep-copy boundary.
+Media projections detach request and content-bearing part shells before transforming
+nested content; response payloads and unchanged immutable values remain shared.
+Compaction and handoff allocate detached histories only after their trigger guards
+pass, preserving isolation for actual nested-agent execution and extension hooks.
 
 A canonical processor implemented through `before_model_request`:
 
@@ -174,16 +186,16 @@ A canonical processor implemented through `before_model_request`:
 2. preserves unchanged message instances;
 3. replaces every changed message and part;
 4. returns a replacement list when structure changes; and
-5. accepts that Pydantic AI will write the result into graph history.
+5. explicitly updates `RunContext.messages[:]` as well as the request view.
 
-A request-envelope decorator implemented through `wrap_model_request`:
+A request-envelope projection implemented through an ordered `before_model_request`:
 
 1. copies only the messages/parts it decorates;
-2. clones the request context while preserving all current and future fields other than
-   the intentional message replacement;
-3. calls `handler()` with that replacement context;
-4. never assigns decorated messages to graph state; and
-5. commits one-shot consumption only after a successful handler response.
+2. clones the request context while preserving all fields other than the intentional
+   message replacement;
+3. returns that replacement context without assigning it to persistent history; and
+4. uses `wrap_model_request` only to commit one-shot consumption after its handler
+   successfully completes the native request lifecycle.
 
 Native Pydantic AI capabilities follow their native request-context contract. SDK code
 does not alter native objects after Pydantic AI has emitted delivery events.

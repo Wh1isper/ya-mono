@@ -405,10 +405,19 @@ Event streaming uses SSE.
 
 ### Replay Contract
 
-- each event has a monotonic SSE ID
-- reconnect uses `Last-Event-ID`
-- the server replays buffered events after that cursor
-- the server then tails live events
+- source events have monotonic, run-scoped SSE IDs
+- reconnect uses `Last-Event-ID`; retained cursors receive only the following suffix
+- new subscriptions, expired cursors, and future cursors receive an atomic replacement
+  frame with SSE event/type `claw.replay_snapshot` and SSE ID equal to the cutover
+- snapshot data is `{type, runId, reason, events, closed}`; `reason` is `initial`,
+  `cursor_expired`, or `cursor_invalid`, and `events` is complete compact AGUI replay
+- clients replace the addressed run's view, then apply source IDs greater than the
+  cutover; slow subscribers may receive further replacement frames
+- snapshots are transport-only and neither increment the source ID nor enter durable replay
+- `closed: true` ends the stream and triggers durable query refresh, even when the
+  terminal source event has left the ring
+- the live ring is bounded by 512 events and 512 KiB; complete replay preserves content
+- released handles return 404; read durable run/session replay instead
 
 ### Transport Principle
 

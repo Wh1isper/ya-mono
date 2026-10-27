@@ -477,6 +477,12 @@ async def test_interrupted_stream_appends_current_text_after_completed_tool_hist
 
     messages = streamer.recoverable_messages()
     assert messages[: len(history)] == history
+    assert [
+        part.tool_call_id
+        for message in history
+        for part in message.parts
+        if isinstance(part, (ToolCallPart, ToolReturnPart))
+    ] == ["call-1", "call-1", "call-2", "call-2"]
     response = messages[-1]
     assert isinstance(response, ModelResponse)
     assert response.parts == [TextPart(content="final partial ")]
@@ -621,3 +627,53 @@ async def test_suspend_current_task_cancellation_allows_cleanup_waits() -> None:
     _task, cleared_after_restore = _suspend_current_task_cancellation()
     assert _task is current_task
     assert cleared_after_restore >= 1
+
+
+async def test_slow_consumer_applies_backpressure_without_losing_model_chunks(tmp_path: Path) -> None:
+    produced = 0
+
+    async def stream_function(_messages, _agent_info: AgentInfo):
+        nonlocal produced
+        for index in range(1000):
+            produced += 1
+            yield f"{index},"
+
+    runtime = _make_runtime(tmp_path, FunctionModel(stream_function=stream_function))
+    chunks: list[str] = []
+    async with stream_agent(runtime, "stream") as streamer:
+
+        async def wait_until_full() -> None:
+            while not streamer._output_queue.full():
+                await asyncio.sleep(0)
+
+        await asyncio.wait_for(wait_until_full(), timeout=2)
+        assert streamer._output_queue.qsize() == 128
+        assert produced < 1000
+        async for item in streamer:
+            event = item.event
+            if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart):
+                chunks.append(event.part.content)
+            elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
+                chunks.append(event.delta.content_delta)
+        streamer.raise_if_exception()
+        assert streamer.run is not None and streamer.run.result is not None
+        assert streamer.run.result.output == "".join(chunks)
+    assert "".join(chunks) == "".join(f"{index}," for index in range(1000))
+    assert all(task.done() for task in streamer._tasks)
+
+
+async def test_cancel_full_output_queue_closes_producers(tmp_path: Path) -> None:
+    async def stream_function(_messages, _agent_info: AgentInfo):
+        for _ in range(1000):
+            yield "x"
+
+    runtime = _make_runtime(tmp_path, FunctionModel(stream_function=stream_function))
+    async with stream_agent(runtime, "stream") as streamer:
+
+        async def wait_until_full() -> None:
+            while not streamer._output_queue.full():
+                await asyncio.sleep(0)
+
+        await asyncio.wait_for(wait_until_full(), timeout=2)
+        streamer.interrupt()
+    assert all(task.done() for task in streamer._tasks)

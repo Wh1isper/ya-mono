@@ -209,7 +209,7 @@ async def test_snapshot_is_copy_on_write_and_reads_retained_history(agent_contex
     updated = await RuntimeContextCapability().before_model_request(ctx, request)
     assert updated is not request
     assert retained == source
-    assert ctx.messages == stale
+    assert ctx.messages == updated.messages
     assert updated.model_id == "test-id"
     assert updated.streaming is True
     assert "<token-usage>" not in _contexts(updated.messages, "<runtime-context>")[0]

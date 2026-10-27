@@ -18,10 +18,7 @@ import type { StreamStatus } from '../../lib/status'
 import { buildAgencyPath } from '../../lib/urlState'
 import { formatShortId } from '../../lib/utils'
 import { useLayoutStore } from '../../stores/layoutStore'
-import {
-  buildTimelineFromRuns,
-  reduceAguiEvent,
-} from '../chat/agui/eventReducer'
+import { buildTimeline } from '../chat/agui/eventReducer'
 import { LivePill } from '../chat/debug/LivePill'
 import { ResizeHandle } from '../chat/debug/ResizeHandle'
 import { RunStrip } from '../chat/debug/RunControls'
@@ -167,23 +164,40 @@ export function AgencyPage() {
   )
 
   const history = useMemo(
-    () => mergeSessionHistoryPages(historyPages, effectiveLiveEvents),
-    [effectiveLiveEvents, historyPages],
+    () =>
+      mergeSessionHistoryPages(historyPages, {
+        runId: selectedRunId,
+        ready: live.ready && !hasCommittedTerminalEvent,
+        events: effectiveLiveEvents,
+      }),
+    [
+      effectiveLiveEvents,
+      historyPages,
+      selectedRunId,
+      live.ready,
+      hasCommittedTerminalEvent,
+    ],
   )
   const runs = history.runs.length ? history.runs : agencyRuns
-  const selectedRunTimeline = useMemo(() => {
-    const baseTimeline = buildTimelineFromRuns(
-      selectedRun ? [selectedRun] : [],
-      {
-        includeRuntimeEvents: false,
-      },
-    )
-    return effectiveLiveEvents.reduce(
-      (state, event) =>
-        reduceAguiEvent(state, event, { includeRuntimeEvents: false }),
-      baseTimeline,
-    )
-  }, [effectiveLiveEvents, selectedRun])
+  const selectedRunTimeline = useMemo(
+    () =>
+      buildTimeline(
+        live.ready && !hasCommittedTerminalEvent
+          ? effectiveLiveEvents
+          : replayEvents,
+        selectedRun?.input_parts ?? [],
+        selectedRunId ?? 'run',
+        { includeRuntimeEvents: false },
+      ),
+    [
+      selectedRun,
+      effectiveLiveEvents,
+      replayEvents,
+      live.ready,
+      hasCommittedTerminalEvent,
+      selectedRunId,
+    ],
+  )
   const timeline = selectedRunId ? selectedRunTimeline : history.timeline
   const contentLoading =
     Boolean(agencySessionId && sessionHistory.isLoading) ||

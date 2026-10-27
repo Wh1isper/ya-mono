@@ -44,7 +44,7 @@ def test_synthesize_thinking_part_for_tool_call_when_required() -> None:
         ModelResponse(parts=[ToolCallPart(tool_name="view", args={"file_path": "a.py"}, tool_call_id="call_1")]),
     ]
 
-    normalize_reasoning_for_model(_ctx(ModelFeature.reasoning_required), history)
+    history = normalize_reasoning_for_model(_ctx(ModelFeature.reasoning_required), history)
 
     plain_response = history[1]
     tool_response = history[2]
@@ -65,7 +65,7 @@ def test_keep_existing_thinking_part_on_tool_call_response() -> None:
         ModelResponse(parts=[existing, tool_call]),
     ]
 
-    normalize_reasoning_for_model(_ctx(ModelFeature.reasoning_required), history)
+    history = normalize_reasoning_for_model(_ctx(ModelFeature.reasoning_required), history)
 
     response = history[0]
     assert isinstance(response, ModelResponse)
@@ -80,7 +80,7 @@ def test_drop_thinking_part_on_plain_response_when_required() -> None:
         ModelResponse(parts=[existing, TextPart(content="Hello")]),
     ]
 
-    normalize_reasoning_for_model(_ctx(ModelFeature.reasoning_required), history)
+    history = normalize_reasoning_for_model(_ctx(ModelFeature.reasoning_required), history)
 
     response = history[0]
     assert isinstance(response, ModelResponse)
@@ -95,7 +95,7 @@ def test_drop_foreign_thinking_when_strict() -> None:
         ModelResponse(parts=[foreign, own, TextPart(content="Hello")]),
     ]
 
-    normalize_reasoning_for_model(
+    history = normalize_reasoning_for_model(
         _ctx(ModelFeature.reasoning_foreign_incompatible, provider="deepseek"),
         history,
     )
@@ -113,7 +113,7 @@ def test_preserves_order_of_other_parts() -> None:
         ModelResponse(parts=[text, tool_call]),
     ]
 
-    normalize_reasoning_for_model(_ctx(ModelFeature.reasoning_required), history)
+    history = normalize_reasoning_for_model(_ctx(ModelFeature.reasoning_required), history)
 
     response = history[0]
     assert isinstance(response, ModelResponse)
@@ -127,7 +127,7 @@ def test_compact_filter_preserves_tool_call_reasoning_placeholder() -> None:
     history: list[ModelMessage] = [
         ModelResponse(parts=[ToolCallPart(tool_name="view", args={"file_path": "a.py"}, tool_call_id="call_1")]),
     ]
-    normalize_reasoning_for_model(_ctx(ModelFeature.reasoning_required), history)
+    history = normalize_reasoning_for_model(_ctx(ModelFeature.reasoning_required), history)
 
     trimmed = _trim_history_for_compact(history)
 

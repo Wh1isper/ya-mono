@@ -138,3 +138,22 @@ orchestration extension and is not part of the Pydantic AI capability lifecycle.
   [04-native-steering-and-claw-queue.md](05-capability-first-runtime/04-native-steering-and-claw-queue.md)
   supersedes the MessageBus steering section of
   [04-runtime-host-contracts.md](04-runtime-host-contracts.md).
+
+## Pydantic AI 2.61 Integration
+
+The dependency floor is 2.61. The streamed driver delegates complete node hook ordering,
+error recovery, cancellation, and terminal enqueue draining to Pydantic AI. Its two
+private bridge calls are isolated in `agents/driver.py`; SDK node event consumption
+runs inside the native lifecycle rather than reconstructing it.
+
+ToolProxy and CodeAct use native `ToolManager.handle_call` for validation, declarative
+and raised deferral, approvals, denial, external results, and retries. CodeAct's validation
+callback records side-effect ownership only after arguments validate. Hidden-tool
+preparation, sandbox authority, output budgets, and durable host ownership remain YA
+policies.
+
+Tool correction feedback uses `ToolReturnPart(outcome="retried")`; response-level
+feedback uses `RetryFeedbackPart`. Host deferred retry decisions use `ModelRetry`.
+Persisted legacy `retry-prompt` messages are read by native `ModelMessagesTypeAdapter`
+and serialize into the new shapes. No dependency-version parser or rollback path is
+maintained. Native `RunUsage.requests` counts responses acted on, not transport attempts.

@@ -212,3 +212,28 @@ async def test_agent_spec_constructs_selected_custom_capability() -> None:
     request_parameters = model.last_model_request_parameters
     assert request_parameters is not None
     assert [part.content for part in request_parameters.instruction_parts] == ["from the declarative spec"]
+
+
+async def test_native_adapter_restores_legacy_retry_history_and_runs() -> None:
+    from pydantic_ai.messages import ModelMessagesTypeAdapter, ModelRequest, RetryFeedbackPart, ToolReturnPart
+
+    # Stored 2.40 wire shapes, without constructing deprecated Python classes.
+    legacy = b"""[
+      {"kind":"request","parts":[{"part_kind":"user-prompt","content":"start"}]},
+      {"kind":"response","parts":[{"part_kind":"tool-call","tool_name":"lookup","tool_call_id":"old-call","args":{}}]},
+      {"kind":"request","parts":[
+        {"part_kind":"retry-prompt","tool_name":"lookup","tool_call_id":"old-call","content":"correct arguments"},
+        {"part_kind":"retry-prompt","content":"correct output"}
+      ]}
+    ]"""
+    history = ModelMessagesTypeAdapter.validate_json(legacy)
+    request = history[-1]
+    assert isinstance(request, ModelRequest)
+    assert isinstance(request.parts[0], ToolReturnPart)
+    assert request.parts[0].outcome == "retried"
+    assert isinstance(request.parts[1], RetryFeedbackPart)
+    canonical = ModelMessagesTypeAdapter.dump_json(history)
+    assert b"retry-prompt" not in canonical
+    assert ModelMessagesTypeAdapter.validate_json(canonical) == history
+    result = await Agent(TestModel(call_tools=[], custom_output_text="restored")).run(message_history=history)
+    assert result.output == "restored"

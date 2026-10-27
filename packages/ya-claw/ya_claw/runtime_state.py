@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from itertools import islice
+from typing import Any, cast
+from weakref import WeakValueDictionary
 
 from ya_agent_stream_protocol.agui import AguiReplayBuffer, BufferedStreamEvent, format_sse_event, resolve_event_cursor
 
@@ -22,7 +27,11 @@ class ActiveRunHandle:
     session_id: str
     dispatch_mode: str = "async"
     input_ingress: Callable[[str, list[dict[str, Any]]], Awaitable[Any]] | None = None
-    events: list[BufferedStreamEvent] = field(default_factory=list)
+    events: deque[BufferedStreamEvent] = field(default_factory=deque)
+    event_sizes: deque[int] = field(default_factory=deque)
+    event_bytes: int = 0
+    max_live_events: int = 512
+    max_live_bytes: int = 512 * 1024
     replay: AguiReplayBuffer = field(default_factory=AguiReplayBuffer)
     next_event_id: int = 1
     closed: bool = False
@@ -60,7 +69,7 @@ class InMemoryRuntimeState:
     background_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
     hitl_states: dict[str, HitlRunState] = field(default_factory=dict)
     cleanup_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
-    session_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
+    session_locks: WeakValueDictionary[str, asyncio.Lock] = field(default_factory=WeakValueDictionary)
     run_input_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
     subscribers: int = 0
 
@@ -142,7 +151,7 @@ class InMemoryRuntimeState:
         handle = self.get_run_handle(run_id)
         if not isinstance(handle, ActiveRunHandle):
             raise KeyError(run_id)
-        return handle.replay.snapshot()
+        return deepcopy(handle.replay.snapshot())
 
     def register_background_task(self, run_id: str, task: asyncio.Task[None]) -> None:
         self.background_tasks[run_id] = task
@@ -221,12 +230,21 @@ class InMemoryRuntimeState:
         if not isinstance(handle, ActiveRunHandle):
             raise KeyError(run_id)
 
+        # One private payload is shared by live/replay owners; callers cannot
+        # mutate retained state through their input or the returned event.
+        owned_payload = deepcopy(payload)
         if replay:
-            handle.replay.append(payload)
+            handle.replay.append(owned_payload)
 
-        event = BufferedStreamEvent(id=str(handle.next_event_id), payload=dict(payload), terminal=terminal)
+        event = BufferedStreamEvent(id=str(handle.next_event_id), payload=owned_payload, terminal=terminal)
         handle.next_event_id += 1
         handle.events.append(event)
+        size = len(json.dumps(owned_payload, ensure_ascii=False).encode("utf-8"))
+        handle.event_sizes.append(size)
+        handle.event_bytes += size
+        while len(handle.events) > handle.max_live_events or handle.event_bytes > handle.max_live_bytes:
+            handle.events.popleft()
+            handle.event_bytes -= handle.event_sizes.popleft()
         if terminal:
             handle.closed = True
             handle.terminal_event_seen = True
@@ -234,7 +252,7 @@ class InMemoryRuntimeState:
         async with handle.condition:
             handle.condition.notify_all()
 
-        return event
+        return BufferedStreamEvent(id=event.id, payload=deepcopy(owned_payload), terminal=terminal)
 
     def bind_input_ingress(
         self,
@@ -300,24 +318,54 @@ class InMemoryRuntimeState:
             raise KeyError(run_id)
 
         cursor = resolve_event_cursor(last_event_id)
+        bootstrap = last_event_id is None
         self.subscribers += 1
         try:
             while True:
                 async with handle.condition:
-                    while cursor >= len(handle.events) and not handle.closed:
+                    while not bootstrap and cursor == handle.next_event_id - 1 and not handle.closed:
                         await handle.condition.wait()
-                    pending_events = list(handle.events[cursor:])
+                    latest = handle.next_event_id - 1
+                    oldest = handle.next_event_id - len(handle.events)
                     handle_closed = handle.closed
+                    if bootstrap or cursor < oldest - 1 or cursor > latest:
+                        reason = (
+                            "initial" if bootstrap else "cursor_expired" if cursor < oldest - 1 else "cursor_invalid"
+                        )
+                        bootstrap = False
+                        # Capture replay and cutover without an await. This is a
+                        # replacement baseline, never an append-only AGUI event.
+                        cursor = latest
+                        pending_events = [
+                            BufferedStreamEvent(
+                                id=str(cursor),
+                                payload={
+                                    "type": "claw.replay_snapshot",
+                                    "runId": handle.run_id,
+                                    "reason": reason,
+                                    "events": cast(list[JsonValue], handle.replay.snapshot()),
+                                    "closed": handle_closed,
+                                },
+                                terminal=handle_closed,
+                            )
+                        ]
+                    else:
+                        # A bounded batch prevents slow generators retaining a
+                        # second full backlog outside the ring.
+                        start = max(0, cursor - oldest + 1)
+                        pending_events = list(islice(handle.events, start, start + 64))
 
-                for event in pending_events:
-                    cursor += 1
+                while pending_events:
+                    event = pending_events.pop(0)
+                    cursor = int(event.id)
                     yield format_sse_event(event)
                     if event.terminal:
                         handle.terminal_event_consumed = True
                         return
+                    del event
 
-                if handle_closed:
-                    if handle.terminal_event_seen and cursor >= len(handle.events):
+                if handle_closed and cursor >= latest:
+                    if handle.terminal_event_seen:
                         handle.terminal_event_consumed = True
                     return
         finally:
@@ -351,6 +399,8 @@ class InMemoryRuntimeState:
             handle.closed = True
             async with handle.condition:
                 handle.condition.notify_all()
+        self.run_input_locks.clear()
+        self.session_locks.clear()
         self.run_handles.clear()
         self.session_latest_run_ids.clear()
         self.background_tasks.clear()

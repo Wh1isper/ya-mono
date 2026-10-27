@@ -7,6 +7,7 @@ import * as hooks from '../../api/hooks'
 import { useLayoutStore } from '../../stores/layoutStore'
 import { formatA11yViolations, getA11yViolations } from '../../test/a11y'
 import { ChatPage } from './ChatPage'
+import { useRunEventStream } from './useRunEventStream'
 
 vi.mock('@tanstack/react-router', () => ({
   useRouterState: ({
@@ -34,11 +35,7 @@ vi.mock('../../api/hooks', async (importOriginal) => ({
 }))
 
 vi.mock('./useRunEventStream', () => ({
-  useRunEventStream: () => ({
-    events: [],
-    status: 'idle',
-    error: null,
-  }),
+  useRunEventStream: vi.fn(),
 }))
 
 const refetch = vi.fn(async () => undefined)
@@ -100,6 +97,11 @@ function sessionDetail(id: string, runId: string | null = null) {
 describe('ChatPage route authority', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(useRunEventStream).mockReturnValue({
+      events: [],
+      status: 'idle',
+      ready: false,
+    })
     window.history.replaceState(null, '', '/conversations/sessions/session-a')
     useLayoutStore.setState({
       route: 'chat',
@@ -151,6 +153,63 @@ describe('ChatPage route authority', () => {
       isPending: false,
       mutateAsync: vi.fn(),
     } as unknown as ReturnType<typeof hooks.useSubmitSessionInputMutation>)
+  })
+
+  it('replaces an active checkpoint with a complete live baseline without duplicating text', () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/conversations/sessions/session-a/runs/run-a',
+    )
+    const detail = sessionDetail('session-a', 'run-a')
+    const run = {
+      ...detail.session.runs[0],
+      status: 'running',
+      message: [
+        { type: 'TEXT_MESSAGE_CHUNK', messageId: 'text-a', delta: 'Hello' },
+      ],
+    }
+    const activeDetail = {
+      ...detail,
+      session: {
+        ...detail.session,
+        status: 'running',
+        active_run_id: 'run-a',
+        runs: [run],
+        latest_run: run,
+      },
+    }
+    vi.mocked(hooks.useSessionQuery).mockReturnValue(
+      queryResult(activeDetail) as unknown as ReturnType<
+        typeof hooks.useSessionQuery
+      >,
+    )
+    vi.mocked(hooks.useSessionHistoryQuery).mockReturnValue({
+      ...queryResult({ pages: [activeDetail] }),
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(async () => undefined),
+    } as unknown as ReturnType<typeof hooks.useSessionHistoryQuery>)
+    const view = renderChatPage()
+    expect(screen.getByText('Hello')).toBeVisible()
+    vi.mocked(useRunEventStream).mockReturnValue({
+      status: 'streaming',
+      ready: true,
+      events: [
+        {
+          type: 'TEXT_MESSAGE_CHUNK',
+          messageId: 'text-a',
+          delta: 'Hello world',
+        },
+      ],
+    })
+    view.rerender(
+      <main>
+        <ChatPage />
+      </main>,
+    )
+    expect(screen.getByText('Hello world')).toBeVisible()
+    expect(screen.queryByText('HelloHello world')).not.toBeInTheDocument()
+    expect(screen.queryByText('Hello')).not.toBeInTheDocument()
   })
 
   it.each(['Tools', 'Memory', 'Workspace'] as const)(

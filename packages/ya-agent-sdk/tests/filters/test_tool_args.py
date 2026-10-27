@@ -59,7 +59,9 @@ async def test_fix_truncated_tool_args_invalid_json(tmp_path: Path) -> None:
             response = ModelResponse(parts=[tool_call], model_name="test-model")
             history = [response]
 
-            await fix_truncated_tool_args(mock_ctx, history)
+            result = await fix_truncated_tool_args(mock_ctx, history)
+            assert tool_call.args == '{"key": "truncated...'
+            tool_call = result[0].parts[0]
 
             # Invalid JSON should be replaced with error dict
             assert isinstance(tool_call.args, dict)
@@ -165,7 +167,10 @@ async def test_fix_truncated_tool_args_multiple_tool_calls(tmp_path: Path) -> No
             )
             history = [response]
 
-            await fix_truncated_tool_args(mock_ctx, history)
+            result = await fix_truncated_tool_args(mock_ctx, history)
+            assert result[0].parts[0] is valid_call
+            assert invalid_call.args == '{"truncated'
+            invalid_call = result[0].parts[1]
 
             # Valid should be unchanged
             assert valid_call.args == '{"valid": true}'

@@ -173,8 +173,19 @@ export function ChatPage() {
     [hasCommittedTerminalEvent, liveEvents],
   )
   const history = useMemo(
-    () => mergeSessionHistoryPages(historyPages, effectiveLiveEvents),
-    [effectiveLiveEvents, historyPages],
+    () =>
+      mergeSessionHistoryPages(historyPages, {
+        runId: resolvedRunId,
+        ready: live.ready && !hasCommittedTerminalEvent,
+        events: effectiveLiveEvents,
+      }),
+    [
+      effectiveLiveEvents,
+      historyPages,
+      resolvedRunId,
+      live.ready,
+      hasCommittedTerminalEvent,
+    ],
   )
   const timeline = history.timeline
   const currentSession = activeSessionData?.session ?? null

@@ -23,13 +23,14 @@ from pydantic_ai import (
     Agent,
     AgentRetries,
     AgentSpec,
+    CallToolsNode,
     DeferredToolRequests,
     DeferredToolResults,
+    ModelRequestNode,
     ModelSettings,
     UsageLimits,
     UserError,
 )
-from pydantic_ai._agent_graph import CallToolsNode, ModelRequestNode
 from pydantic_ai._enqueue import EnqueueContent, PendingMessage, PendingMessagePriority
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.messages import (
@@ -1190,7 +1191,8 @@ async def stream_agent(  # noqa: C901
     # becoming the task that closes the caller-owned env and agent resources.
     runtime_was_entered = runtime._enter_count > 0
 
-    output_queue: asyncio.Queue[StreamEvent] = asyncio.Queue()
+    # Model/tool producers await this queue, propagating consumer backpressure.
+    output_queue: asyncio.Queue[StreamEvent] = asyncio.Queue(maxsize=128)
     main_done = asyncio.Event()
     poll_done = asyncio.Event()
     partial_text = PartialTextAccumulator()

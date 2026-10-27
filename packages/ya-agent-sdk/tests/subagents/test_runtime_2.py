@@ -950,7 +950,8 @@ async def test_in_process_subagent_retries_transient_model_transport_failure() -
 
     assert record.state is SubagentExecutionState.succeeded
     assert record.output == "recovered"
-    assert record.usage["requests"] == 2
+    # Native usage counts responses acted on, not failed transport attempts.
+    assert record.usage["requests"] == 1
     assert len(calls) == 2
     resume_request = calls[1][-1]
     assert isinstance(resume_request, ModelRequest)

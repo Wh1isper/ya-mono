@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import asdict
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,7 +14,6 @@ from pydantic_ai.capabilities import Toolset as NativeToolsetCapability
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
-    RetryPromptPart,
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
@@ -24,6 +22,7 @@ from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.toolsets import FunctionToolset
 from pydantic_ai.usage import RunUsage
+from pydantic_core import to_jsonable_python
 from ya_agent_sdk.agents.main import create_agent
 from ya_agent_sdk.context import ResumableState, StreamEvent
 from ya_agent_sdk.events import UsageSnapshotEvent
@@ -642,8 +641,7 @@ async def test_suspended_run_does_not_block_another_session(tmp_path: Path) -> N
         _info: Any,
     ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
         has_tool_result = any(
-            isinstance(message, ModelRequest)
-            and any(isinstance(part, ToolReturnPart | RetryPromptPart) for part in message.parts)
+            isinstance(message, ModelRequest) and any(isinstance(part, ToolReturnPart) for part in message.parts)
             for message in messages
         )
         if "suspend this run" in str(messages) and not has_tool_result:
@@ -1082,7 +1080,7 @@ async def test_segment_usage_accumulates_live_checkpoints_and_terminal_recovery(
         assert revision.terminal["status"] == ("failed" if ending == "fallback" else ending)
         requests, units = (6, 15) if ending == "fallback" else (9, 27)
         assert {key: value for key, value in revision.usage.items() if key != SESSION_USAGE_SNAPSHOT_REVISION_KEY} == (
-            asdict(_segment_usage(requests, units))
+            to_jsonable_python(_segment_usage(requests, units))
         )
         _assert_segment_usage(
             UsageSnapshot.model_validate(revision.usage[SESSION_USAGE_SNAPSHOT_REVISION_KEY]),

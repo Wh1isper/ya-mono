@@ -29,11 +29,10 @@ from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.output import DummyOutput
 from prompt_toolkit.utils import Event
 from prompt_toolkit.widgets import TextArea
-from pydantic_ai import BinaryContent, DeferredToolRequests, DeferredToolResults, PartStartEvent, ToolDenied
+from pydantic_ai import BinaryContent, DeferredToolRequests, DeferredToolResults, ModelRetry, PartStartEvent, ToolDenied
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
-    RetryPromptPart,
     TextPart,
     ToolCallPart,
     ToolReturnPart,
@@ -2847,8 +2846,8 @@ async def test_tui_app_deferred_flow_resolves_approvals_and_calls() -> None:
 
     assert results.approvals["approve-1"] is True
     call_result = results.calls["call-1"]
-    assert isinstance(call_result, RetryPromptPart)
-    assert call_result.content == "provided value"
+    assert isinstance(call_result, ModelRetry)
+    assert call_result.message == "provided value"
     assert app.phase == TUIPhase.TOOL_CALLING
 
 
@@ -3114,15 +3113,13 @@ async def test_tui_app_structured_question_timeout_rejects_call_and_continues() 
     results = await app._request_user_action(deferred)
 
     call_result = results.calls["question-timeout"]
-    assert isinstance(call_result, RetryPromptPart)
-    assert call_result.content == (
+    assert isinstance(call_result, ModelRetry)
+    assert call_result.message == (
         "The user did not respond before the clarification request timed out. "
         "Do not wait for or request the same input again. Continue the task using your best judgment "
         "and make reasonable assumptions where needed."
     )
-    assert call_result.content == USER_INPUT_TIMEOUT_PROMPT
-    assert call_result.tool_name == "ask_user_question"
-    assert call_result.tool_call_id == "question-timeout"
+    assert call_result.message == USER_INPUT_TIMEOUT_PROMPT
     assert app._approval_event is None
     assert app.phase == TUIPhase.TOOL_CALLING
     assert "Timed out: ask_user_question" in "\n".join(app._output_lines)
@@ -3149,8 +3146,8 @@ async def test_tui_app_deferred_flow_records_explicit_denials() -> None:
     assert isinstance(approval, ToolDenied)
     assert approval.message == "unsafe"
     call_result = results.calls["call-1"]
-    assert isinstance(call_result, RetryPromptPart)
-    assert "denied by user: not available" in str(call_result.content)
+    assert isinstance(call_result, ModelRetry)
+    assert "denied by user: not available" in str(call_result.message)
 
 
 def test_tui_app_rejects_invalid_phase_transition_without_mutating_coarse_state() -> None:

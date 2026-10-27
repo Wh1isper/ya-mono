@@ -19,6 +19,7 @@ Example::
 """
 
 import json
+from dataclasses import replace
 
 from pydantic_ai.messages import (
     LoadCapabilityCallPart,
@@ -56,10 +57,13 @@ async def fix_truncated_tool_args(
             capabilities=[ProcessHistory(fix_truncated_tool_args)],
         )
     """
-    for msg in message_history:
+    result = list(message_history)
+    for message_index, msg in enumerate(message_history):
         if isinstance(msg, ModelRequest):
             continue
-        for part in msg.parts:
+        parts = list(msg.parts)
+        changed = False
+        for part_index, part in enumerate(msg.parts):
             if (
                 isinstance(part, ToolCallPart)
                 and not isinstance(part, ToolSearchCallPart | LoadCapabilityCallPart)
@@ -70,8 +74,14 @@ async def fix_truncated_tool_args(
                     json.loads(part.args)
                 except json.JSONDecodeError:
                     logger.warning(f"({msg.model_name})Dropping unparseable tool args: {part}")
-                    part.args = {
-                        "system": "This tool's args is not a valid JSON. "
-                        "Please refer the return value of the tool to try again."
-                    }
-    return message_history
+                    parts[part_index] = replace(
+                        part,
+                        args={
+                            "system": "This tool's args is not a valid JSON. "
+                            "Please refer the return value of the tool to try again."
+                        },
+                    )
+                    changed = True
+        if changed:
+            result[message_index] = replace(msg, parts=parts)
+    return result

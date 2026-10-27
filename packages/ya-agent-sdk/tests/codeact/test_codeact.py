@@ -34,7 +34,6 @@ from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
     ModelResponse,
-    RetryPromptPart,
     TextPart,
     ToolCallPart,
     ToolReturnPart,
@@ -176,7 +175,7 @@ def _tool_returns(messages: list[ModelMessage], name: str) -> list[ToolReturnPar
         for message in messages
         if isinstance(message, ModelRequest)
         for part in message.parts
-        if isinstance(part, ToolReturnPart) and part.tool_name == name
+        if isinstance(part, ToolReturnPart) and part.tool_name == name and part.outcome != "retried"
     ]
 
 
@@ -318,7 +317,8 @@ async def test_ineligible_tool_is_not_dispatched_from_codeact(tmp_path: Path) ->
 
     assert HiddenTool.calls == 0
     assert any(
-        isinstance(part, RetryPromptPart) and "unavailable function names" in str(part.content)
+        (isinstance(part, ToolReturnPart) and part.outcome == "retried")
+        and "unavailable function names" in str(part.content)
         for message in result.all_messages()
         if isinstance(message, ModelRequest)
         for part in message.parts
@@ -363,7 +363,7 @@ async def test_failure_after_side_effect_is_terminal_not_retry(tmp_path: Path) -
     assert payload["codeact"]["status"] == "failed"
     assert payload["codeact"]["tool_call_count"] == 1
     assert not any(
-        isinstance(part, RetryPromptPart)
+        (isinstance(part, ToolReturnPart) and part.outcome == "retried")
         for message in result.all_messages()
         if isinstance(message, ModelRequest)
         for part in message.parts
@@ -577,7 +577,7 @@ async def test_program_source_limits_are_checked_before_sandbox(
         result = await runtime.agent.run("invalid program", deps=runtime.ctx)
 
     assert any(
-        isinstance(part, RetryPromptPart) and expected in str(part.content)
+        (isinstance(part, ToolReturnPart) and part.outcome == "retried") and expected in str(part.content)
         for message in result.all_messages()
         if isinstance(message, ModelRequest)
         for part in message.parts
@@ -787,7 +787,7 @@ async def test_invalid_nested_arguments_do_not_mark_side_effect_started(tmp_path
     assert calls == 0
     assert not _tool_returns(result.all_messages(), "run_code")
     assert any(
-        isinstance(part, RetryPromptPart) and "valid integer" in str(part.content)
+        (isinstance(part, ToolReturnPart) and part.outcome == "retried") and "valid integer" in str(part.content)
         for message in result.all_messages()
         if isinstance(message, ModelRequest)
         for part in message.parts
@@ -1035,7 +1035,7 @@ async def test_static_missing_tool_is_rejected_before_prior_side_effect(tmp_path
 
     assert mutations == 0
     assert any(
-        isinstance(part, RetryPromptPart) and "definitely_missing" in str(part.content)
+        (isinstance(part, ToolReturnPart) and part.outcome == "retried") and "definitely_missing" in str(part.content)
         for message in result.all_messages()
         if isinstance(message, ModelRequest)
         for part in message.parts
@@ -1117,7 +1117,7 @@ async def test_program_static_preflight_does_not_inherit_inline_names(tmp_path: 
 
     assert mutations == 0
     assert any(
-        isinstance(part, RetryPromptPart) and "helper" in str(part.content)
+        (isinstance(part, ToolReturnPart) and part.outcome == "retried") and "helper" in str(part.content)
         for message in result.all_messages()
         if isinstance(message, ModelRequest)
         for part in message.parts
@@ -1334,7 +1334,7 @@ async def test_final_output_limit_is_enforced(tmp_path: Path) -> None:
 
     assert not _tool_returns(result.all_messages(), "run_code")
     assert any(
-        isinstance(part, RetryPromptPart)
+        (isinstance(part, ToolReturnPart) and part.outcome == "retried")
         for message in result.all_messages()
         if isinstance(message, ModelRequest)
         for part in message.parts
@@ -1397,7 +1397,7 @@ async def test_monty_has_no_ambient_os_authority(tmp_path: Path) -> None:
 
     assert not _tool_returns(result.all_messages(), "run_code")
     assert any(
-        isinstance(part, RetryPromptPart)
+        (isinstance(part, ToolReturnPart) and part.outcome == "retried")
         for message in result.all_messages()
         if isinstance(message, ModelRequest)
         for part in message.parts
@@ -1753,7 +1753,7 @@ async def test_restart_resets_inline_state_before_failed_preflight(tmp_path: Pat
         for message in result.all_messages()
         if isinstance(message, ModelRequest)
         for part in message.parts
-        if isinstance(part, RetryPromptPart)
+        if (isinstance(part, ToolReturnPart) and part.outcome == "retried")
     ]
     assert len(retries) == 2
     assert "'missing'" in str(retries[0].content)

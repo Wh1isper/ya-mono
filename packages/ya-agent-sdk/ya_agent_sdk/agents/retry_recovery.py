@@ -171,7 +171,11 @@ def _unreturned_tool_calls(
                     ordinary_calls[part.tool_call_id] = part.tool_name
         elif isinstance(message, ModelRequest):
             for part in message.parts:
-                if isinstance(part, BaseToolReturnPart | RetryPromptPart):
+                # Native prepare_messages translates in-memory legacy retries later.
+                # Count tool-bound retries now, before synthesizing missing results.
+                if isinstance(part, BaseToolReturnPart) or (
+                    isinstance(part, RetryPromptPart) and part.tool_name is not None
+                ):
                     ordinary_calls.pop(part.tool_call_id, None)
     return ordinary_calls, native_calls
 

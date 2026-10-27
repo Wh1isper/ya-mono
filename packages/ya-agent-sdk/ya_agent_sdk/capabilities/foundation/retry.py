@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic_ai import RunContext, UnexpectedModelBehavior
 from pydantic_ai.capabilities import AbstractCapability, CapabilityOrdering, ReinjectSystemPrompt
-from pydantic_ai.messages import ModelRequest, RetryPromptPart
+from pydantic_ai.messages import ModelRequest, RetryFeedbackPart, ToolReturnPart
 from pydantic_ai.models import ModelRequestContext
 
 from .history import ColdStartCapability, ContextCompactionCapability, HandoffCapability
@@ -48,7 +48,10 @@ class OverallRetryBudget(AbstractCapability[Any]):
         request = request_context.messages[-1]
         if not isinstance(request, ModelRequest) or request.run_id != ctx.run_id:
             return request_context
-        retry_count = sum(isinstance(part, RetryPromptPart) for part in request.parts)
+        retry_count = sum(
+            isinstance(part, RetryFeedbackPart) or (isinstance(part, ToolReturnPart) and part.outcome == "retried")
+            for part in request.parts
+        )
         if retry_count == 0:
             return request_context
         self.retries_used += retry_count

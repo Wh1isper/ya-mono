@@ -60,7 +60,6 @@ from ya_agent_sdk.codeact.programs import (
 )
 from ya_agent_sdk.codeact.runtime import CodeActExecution, CodeActRunState
 from ya_agent_sdk.context import AgentContext
-from ya_agent_sdk.toolsets._nested_dispatch import execute_nested_tool_call
 
 _RUN_CODE = "run_code"
 _RUN_PROGRAM = "run_program"
@@ -387,10 +386,6 @@ class CodeActToolset(WrapperToolset[AgentContext]):
             args_bytes = _redacted_json_bytes(kwargs)
             call_id = f"{ctx.tool_call_id or 'codeact'}__{ordinal}"
             call = ToolCallPart(tool_name=original_name, args=kwargs, tool_call_id=call_id)
-            try:
-                validated = await nested_manager.validate_tool_call(call, wrap_validation_errors=False)
-            except ValidationError as exc:
-                raise ModelRetry(_format_validation_error(exc)) from exc
             args_descriptor = _trace_value_descriptor(args_bytes, self.config.trace_preview_bytes)
             record = _ToolCallRecord(
                 call_id=call_id,
@@ -402,10 +397,14 @@ class CodeActToolset(WrapperToolset[AgentContext]):
                 args_preview=args_descriptor["preview"],
                 args_truncated=args_descriptor["truncated"],
             )
-            await budget.mark_started(record)
+
+            async def on_validate(args_valid: bool) -> None:
+                if args_valid:
+                    await budget.mark_started(record)
+
             started = time.monotonic()
             try:
-                result = await execute_nested_tool_call(nested_manager, validated, call)
+                result = await nested_manager.handle_call(call, wrap_validation_errors=False, on_validate=on_validate)
                 if isinstance(result, ToolDenied):
                     record["outcome"] = "denied"
                     try:

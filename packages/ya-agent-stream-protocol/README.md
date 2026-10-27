@@ -38,3 +38,12 @@ The adapter retains that key across deferred-result segments and allocates a new
 when another invocation starts, even if an agent reuses a provider ID. Result
 `messageId` derives from this display key. Replay, rendering, and argument budgets use
 `toolCallKey`; older stored events without it retain their original ID-based behavior.
+
+Native `ToolReturnPart` outcomes (`success`, `failed`, `denied`, `interrupted`, and
+`retried`) are carried as an `outcome` extension on `TOOL_CALL_RESULT`, including compact
+replay. A result event closes a call; it does not by itself imply success. Tool-less
+`RetryFeedbackPart` remains native model-history feedback, not a fabricated tool event.
+
+Replay delta fragments are geometrically coalesced rather than retaining one string
+per incoming token. `snapshot()` shares immutable joined text with the buffer; later
+appends preserve earlier snapshots. Complete payloads and event ordering remain intact.

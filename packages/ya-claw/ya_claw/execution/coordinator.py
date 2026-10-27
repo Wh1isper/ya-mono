@@ -828,10 +828,9 @@ class RunCoordinator:
             effective_state_payload = buffers.latest_state_payload or {
                 "container_id": None,
                 "context_state": {},
-                "resumable_state": {},
                 "message_history": list(effective_message_payload["message_history"]),
                 "message_count": effective_message_payload["message_count"],
-                "version": 3,
+                "version": 6,
             }
             complete_run(session_record, run_record)
             run_record.output_text = buffers.output_text
@@ -1010,6 +1009,12 @@ class RunCoordinator:
             },
         )
         message_history = self._extract_message_history(restore_point)
+        # Keep provenance for checkpoints, not a second JSON history for the
+        # lifetime of the live native runtime (also releases the caller's blobs).
+        if restore_point is not None:
+            restore_point.state = None
+            restore_point.message = None
+        restored_state = None
         agui_adapter = AguiEventAdapter(session_id=session_id, run_id=run_id, config=CLAW_AGUI_ADAPTER_CONFIG)
         deferred_tool_results: DeferredToolResults | None = None
         cumulative_usage_snapshot: UsageSnapshot | None = None
@@ -1813,7 +1818,6 @@ class RunCoordinator:
             "usage_snapshot": usage_snapshot.model_dump(mode="json") if usage_snapshot is not None else None,
             "message_history": message_history,
             "message_count": message_count,
-            "resumable_state": exported_state,
             "restore": {
                 "run_id": restore_point.run_id,
                 "status": restore_point.status,
@@ -1845,7 +1849,7 @@ class RunCoordinator:
                 ),
             },
             "trigger_type": trigger_type,
-            "version": 5,
+            "version": 6,
         }
 
     def _extract_replay_events(

@@ -128,6 +128,9 @@ async def process_handoff_message(
     if not agent_ctx.handoff_message:
         return message_history
 
+    # Extension hooks receive an isolated history only when a handoff actually runs.
+    message_history = copy.deepcopy(message_history)
+
     # Generate event_id to correlate start/complete events
     event_id = uuid4().hex[:8]
     original_message_count = len(message_history)

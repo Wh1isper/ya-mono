@@ -55,6 +55,7 @@ from pydantic_ai import (
     DeferredToolRequests,
     DeferredToolResults,
     EnqueuedMessagesEvent,
+    ModelRetry,
     ToolDenied,
     UserContent,
     prices,
@@ -70,7 +71,6 @@ from pydantic_ai.messages import (
     PartDeltaEvent,
     PartEndEvent,
     PartStartEvent,
-    RetryPromptPart,
     TextPart,
     TextPartDelta,
     ThinkingPart,
@@ -3595,7 +3595,7 @@ class TUIApp:
                     message = result.message if isinstance(result, ToolDenied) else "Tool call denied"
                     decision = {"approved": False, "message": message}
             else:
-                content = result.content if isinstance(result, RetryPromptPart) else result
+                content = result.message if isinstance(result, ModelRetry) else result
                 decision = {"result": cast(JsonValue, to_jsonable_python(content))}
             session_service.accept_action(
                 item.action_item_id,
@@ -3714,11 +3714,7 @@ class TUIApp:
                 try:
                     answers = await self._collect_user_question_answers(tool_call)
                 except _UserInputTimeoutError:
-                    call_result: Any = RetryPromptPart(
-                        content=USER_INPUT_TIMEOUT_PROMPT,
-                        tool_name=tool_call.tool_name,
-                        tool_call_id=tool_call.tool_call_id,
-                    )
+                    call_result: Any = ModelRetry(USER_INPUT_TIMEOUT_PROMPT)
                     confirmation = f"  [Timed out: {tool_call.tool_name}]"
                 else:
                     call_result = format_user_question_answers(answers)
@@ -3741,11 +3737,7 @@ class TUIApp:
             content = response or "User declined to provide a deferred tool result."
             if not provided:
                 content = f"Deferred tool call denied by user: {content}"
-            call_result = RetryPromptPart(
-                content=content,
-                tool_name=tool_call.tool_name,
-                tool_call_id=tool_call.tool_call_id,
-            )
+            call_result = ModelRetry(content)
             results.calls[tool_call.tool_call_id] = call_result
             if on_result is not None:
                 await on_result(tool_call.tool_call_id, call_result)
@@ -5361,7 +5353,7 @@ class TUIApp:
                     latest[part.tool_call_id] = occurrence
             elif isinstance(message, ModelRequest):
                 for part_index, part in enumerate(message.parts):
-                    if not isinstance(part, ToolReturnPart | RetryPromptPart) or not part.tool_call_id:
+                    if not isinstance(part, ToolReturnPart) or not part.tool_call_id:
                         continue
                     existing = latest.get(part.tool_call_id)
                     if existing is None:

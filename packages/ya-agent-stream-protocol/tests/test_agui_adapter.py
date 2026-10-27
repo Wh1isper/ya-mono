@@ -384,3 +384,31 @@ def test_agui_adapter_maps_run_custom_event_namespace() -> None:
     assert finished["result"] == {"output_text": "done"}
     assert errored["type"] == "RUN_ERROR"
     assert errored["message"] == "boom"
+
+
+def test_tool_result_outcomes_survive_live_and_replay_projection() -> None:
+    from pydantic_ai.messages import FunctionToolResultEvent, ToolReturnPart
+
+    adapter = AguiEventAdapter(session_id="session-1", run_id="run-1", config=CLAW_ADAPTER_CONFIG)
+    replay = AguiReplayBuffer()
+    for outcome in ("success", "failed", "denied", "interrupted", "retried"):
+        part = ToolReturnPart(tool_name="lookup", tool_call_id=f"call-{outcome}", content="result", outcome=outcome)
+        events = adapter.adapt_stream_event(
+            StreamEvent(
+                agent_id="main",
+                agent_name="main",
+                event=FunctionToolResultEvent(part=part),
+            )
+        )
+        assert len(events) == 1
+        assert events[0]["type"] == "TOOL_CALL_RESULT"
+        assert events[0]["outcome"] == outcome
+        assert events[0]["toolCallId"] == f"call-{outcome}"
+        replay.append(events[0])
+    assert [event["outcome"] for event in replay.snapshot()] == [
+        "success",
+        "failed",
+        "denied",
+        "interrupted",
+        "retried",
+    ]

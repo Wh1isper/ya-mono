@@ -16,10 +16,10 @@ from pydantic_ai import (
     AgentSpec,
     DeferredToolRequests,
     DeferredToolResults,
+    ModelRetry,
     ToolDenied,
     prices,
 )
-from pydantic_ai.messages import RetryPromptPart
 from ya_agent_sdk.context import (
     PROJECT_GUIDANCE_TAG,
     USER_RULES_TAG,
@@ -84,11 +84,7 @@ class _DenySubagentDeferredResolver:
                 message="Headless mode denies child HITL requests by policy."
             )
         for request in requests.calls:
-            results.calls[request.tool_call_id] = RetryPromptPart(
-                content="Headless mode denies child deferred calls by policy.",
-                tool_name=request.tool_name,
-                tool_call_id=request.tool_call_id,
-            )
+            results.calls[request.tool_call_id] = ModelRetry("Headless mode denies child deferred calls by policy.")
         return results
 
 

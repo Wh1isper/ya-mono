@@ -586,7 +586,8 @@ async def test_stream_agent_closes_unreturned_tool_calls_before_resume(tmp_path:
     assert any(isinstance(part, UserPromptPart) for part in resume_request.parts)
 
 
-async def test_stream_agent_treats_retry_prompt_as_tool_call_completion(tmp_path: Path) -> None:
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_stream_agent_treats_retry_prompt_as_tool_call_completion(tmp_path: Path, legacy: bool) -> None:
     calls: list[list[ModelMessage]] = []
     history = [
         ModelResponse(
@@ -600,7 +601,14 @@ async def test_stream_agent_treats_retry_prompt_as_tool_call_completion(tmp_path
         ),
         ModelRequest(
             parts=[
-                RetryPromptPart(
+                ToolReturnPart(
+                    outcome="retried",
+                    tool_name="shell_exec",
+                    tool_call_id="call-1",
+                    content="retry with corrected arguments",
+                )
+                if not legacy
+                else RetryPromptPart(
                     tool_name="shell_exec",
                     tool_call_id="call-1",
                     content="retry with corrected arguments",
@@ -615,6 +623,8 @@ async def test_stream_agent_treats_retry_prompt_as_tool_call_completion(tmp_path
             raise RuntimeError("simulated retry stream disconnect")
         yield "resumed after retry prompt"
 
+    assert history_has_unreturned_tool_calls(history) is False
+    assert close_unreturned_tool_calls(history) == history
     runtime = _make_runtime(tmp_path, FunctionModel(stream_function=stream_function))
 
     async with stream_agent(
@@ -635,11 +645,12 @@ async def test_stream_agent_treats_retry_prompt_as_tool_call_completion(tmp_path
         for message in resume_messages
         if isinstance(message, ModelRequest)
         for part in message.parts
-        if isinstance(part, ToolReturnPart)
+        if isinstance(part, ToolReturnPart) and part.outcome != "retried"
     ]
     assert synthetic_tool_returns == []
     assert any(
-        isinstance(message, ModelRequest) and any(isinstance(part, RetryPromptPart) for part in message.parts)
+        isinstance(message, ModelRequest)
+        and any((isinstance(part, ToolReturnPart) and part.outcome == "retried") for part in message.parts)
         for message in resume_messages
     )
 

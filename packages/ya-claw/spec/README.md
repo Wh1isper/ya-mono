@@ -42,6 +42,12 @@ This spec set defines one execution shape:
 | 13      | [13-workflows.md](13-workflows.md)                                                       | Claw-managed workflows, agent supervision tools, profile-backed node runs    |
 | 14      | [14-github-bridge.md](14-github-bridge.md)                                               | outbound GitHub notification polling, sender policy, sessions, and cursor    |
 
+## Performance Evidence
+
+[Memory Ownership and Performance](15-memory-performance.md) records the Pydantic AI
+upgrade, allocation root causes, implemented ownership changes, reproducible benchmarks,
+and remaining capacity limits.
+
 ## Cross-Package Architecture
 
 - [Capability-First Runtime Architecture](../../ya-agent-sdk/spec/05-capability-first-runtime.md) defines native `AgentSpec` profile cores, SDK capability composition, and the YA Claw `steer`/`queue` architecture built on Pydantic AI enqueue semantics.

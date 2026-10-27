@@ -85,7 +85,12 @@ The filesystem does not need a session-first directory structure.
 
 ## `state.json`
 
-Each committed run may write one `state.json` file. A suspended native segment also writes its stable state checkpoint before any durable HITL batch becomes externally visible.
+Each committed run may write one `state.json` file. Version 6 writes exported context
+once under `context_state`; readers still accept older `resumable_state` and
+`exported_state` keys. Atomic writes stream JSON to a temporary file before replace,
+and remove incomplete temporary files on failure. Restore reads replay only when
+native `message_history` is absent, and releases source JSON blobs once native state
+and messages have been constructed. A suspended native segment also writes its stable state checkpoint before any durable HITL batch becomes externally visible.
 YA Claw upgrades its unversioned pre-2.0 SDK context state at the restore boundary before strict v2 validation. The upgrade preserves main-session state with direct equivalents and discards legacy parent-owned subagent history and registry data, which have no valid representation in the 2.0 subagent execution store. Versioned state is never compatibility-normalized.
 
 It should include:
@@ -170,7 +175,16 @@ the SDK logical input ledger, never in the event buffer.
 
 ## Incremental Event Buffer
 
-The runtime keeps an in-memory incremental event buffer per active run.
+The runtime keeps two in-memory views per active run: a complete compact AGUI
+replay and a live ring capped at 512 events and 512 KiB of serialized payloads.
+Eviction bounds raw transport overhead; complete content remains proportional to
+actual conversation content. Oversized events remain in compact replay even when
+they cannot fit in the ring. There is no disk paging or raw-event journal.
+
+Compact replay delta fragments are geometrically merged; snapshots share immutable
+joined text with the buffer. Complete passthrough events and tool results are preserved.
+Session exclusion locks are weakly registered: holders and waiters retain one identity,
+while unused session entries disappear.
 
 Responsibilities:
 
@@ -203,12 +217,20 @@ Queued runs are started by the supervisor and expose SSE endpoints for later sub
 
 ### Resume
 
-The SSE replay contract should support:
+Source events have monotonically increasing run-scoped IDs. `Last-Event-ID`
+resumes the retained suffix, followed by live events. New subscribers and expired
+or future cursors receive a `claw.replay_snapshot` transport frame with complete
+compact replay and an atomic cutover ID. Clients replace that run's view and apply
+only subsequent IDs. Slow consumers can receive another reset on the same stream.
+Snapshot capture and publication are synchronous on the owning event loop; network
+yields occur outside the condition. Each subscriber retains at most one snapshot
+or a bounded batch of 64 raw events, releasing consumed entries before waiting.
 
-- monotonic event IDs
-- `Last-Event-ID`
-- replay from the requested cursor
-- live tail after replay completes
+A closed snapshot ends the stream even if the terminal raw event has been evicted.
+Snapshots never enter `message.json` or consume a source event ID. Ephemeral
+`replay=False` workspace notifications are not part of compact replay; clients
+refresh the workspace query for its current state. Once a live handle is released,
+new subscriptions return 404 and clients refresh durable run/session queries.
 
 ## Best-effort Checkpoints
 

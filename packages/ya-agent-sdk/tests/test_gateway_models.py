@@ -57,7 +57,7 @@ def test_infer_gateway_deepseek_v4_uses_reasoning_content_profile(monkeypatch) -
     assert profile.get("thinking_always_enabled") is True
     assert profile.get("openai_chat_thinking_field") == "reasoning_content"
     assert profile.get("openai_chat_send_back_thinking_parts") == "field"
-    assert profile.get("openai_supports_tool_choice_required") is False
+    assert profile.get("supports_forced_tool_choice") is False
 
 
 def test_infer_gateway_mimo_v2_5_uses_reasoning_content_profile(monkeypatch) -> None:
@@ -88,7 +88,7 @@ def test_infer_gateway_deepseek_r1_uses_tool_choice_profile_patch(monkeypatch) -
     assert model.model_name == "deepseek-reasoner"
     assert profile.get("openai_chat_thinking_field") is None
     assert profile.get("openai_chat_send_back_thinking_parts") == "auto"
-    assert profile.get("openai_supports_tool_choice_required") is False
+    assert profile.get("supports_forced_tool_choice") is False
 
 
 @pytest.mark.parametrize("provider_prefix", ["openai", "chat", "responses"])

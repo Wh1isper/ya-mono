@@ -72,7 +72,11 @@ class AguiReplayBuffer:
             event_copy = dict(event)
             fragments = self._chunk_fragments.get(index)
             if fragments:
-                event_copy["delta"] = "".join(fragments)
+                text = "".join(fragments)
+                # Share the immutable snapshot text instead of keeping a second
+                # complete set of fragments. Later appends never mutate snapshots.
+                fragments[:] = [text]
+                event_copy["delta"] = text
             snapshot.append(event_copy)
         return snapshot
 
@@ -163,7 +167,13 @@ class AguiReplayBuffer:
         fragment = _delta_fragment(value)
         if fragment is None:
             return
-        self._chunk_fragments.setdefault(index, []).append(fragment)
+        fragments = self._chunk_fragments.setdefault(index, [])
+        fragments.append(fragment)
+        # Geometric merging avoids one Python string per token without repeatedly
+        # copying the full prefix on each append (quadratic concatenation).
+        while len(fragments) > 1 and len(fragments[-1]) >= len(fragments[-2]):
+            right = fragments.pop()
+            fragments[-1] += right
 
     def _forget_previous_run_state_if_needed(self, event: dict[str, Any]) -> None:
         if event.get("type") != "RUN_STARTED":

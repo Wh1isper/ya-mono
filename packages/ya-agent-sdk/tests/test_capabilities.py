@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 from pydantic_ai import RunContext
-from pydantic_ai.capabilities import AbstractCapability, Hooks, ProcessHistory
+from pydantic_ai.capabilities import AbstractCapability, CapabilityOrdering, Hooks, ProcessHistory
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.toolsets import FunctionToolset
@@ -169,6 +169,57 @@ async def test_file_inspection_capability_injects_paths_once_without_loading_con
     assert len(reminders) == 1
     assert 'path="src/&lt;unsafe&gt;&amp;&quot;file.py"' in reminders[0]
     assert runtime.ctx.files_to_inspect == []
+
+
+@pytest.mark.parametrize("fails", [False, True])
+async def test_file_inspection_consumes_lifecycle_batch_but_preserves_later_paths(env, fails: bool) -> None:
+    class AddInspectionPath(AbstractCapability[Any]):
+        def get_ordering(self):
+            return CapabilityOrdering(wraps=(FileInspectionCapability,))
+
+        async def before_model_request(self, ctx, request_context):
+            ctx.deps.files_to_inspect.append("added-by-lifecycle.py")
+            return request_context
+
+    class AppendDuringRequest(CapturingTestModel):
+        async def request(self, messages, model_settings, model_request_parameters):
+            runtime.ctx.files_to_inspect.append("added-after-injection.py")
+            response = await super().request(messages, model_settings, model_request_parameters)
+            if fails:
+                raise RuntimeError("model request failed")
+            return response
+
+    model = AppendDuringRequest(custom_output_text="ok")
+    runtime = create_agent(
+        model,
+        env=env,
+        capabilities=[AddInspectionPath(), FileInspectionCapability()],
+        defer_model_check=True,
+    )
+    runtime.ctx.files_to_inspect = ["initial.py"]
+
+    async with runtime:
+        if fails:
+            with pytest.raises(RuntimeError, match="model request failed"):
+                await runtime.agent.run("Continue", deps=runtime.ctx)
+        else:
+            await runtime.agent.run("Continue", deps=runtime.ctx)
+
+    assert model.last_messages is not None
+    reminders = [
+        part.content
+        for message in model.last_messages
+        if isinstance(message, ModelRequest)
+        for part in message.parts
+        if isinstance(part, UserPromptPart) and isinstance(part.content, str) and "<files-to-inspect" in part.content
+    ]
+    assert len(reminders) == 1
+    assert "initial.py" in reminders[0]
+    assert "added-by-lifecycle.py" in reminders[0]
+    assert "added-after-injection.py" not in reminders[0]
+    assert runtime.ctx.files_to_inspect == (
+        ["initial.py", "added-by-lifecycle.py", "added-after-injection.py"] if fails else ["added-after-injection.py"]
+    )
 
 
 async def test_file_inspection_capability_retains_paths_when_request_fails(env) -> None:
