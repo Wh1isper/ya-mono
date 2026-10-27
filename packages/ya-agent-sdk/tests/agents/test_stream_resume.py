@@ -15,6 +15,7 @@ from pydantic_ai.messages import (
     ModelResponse,
     NativeToolCallPart,
     NativeToolReturnPart,
+    RetryPromptPart,
     TextPart,
     ThinkingPart,
     ToolCallPart,
@@ -585,7 +586,8 @@ async def test_stream_agent_closes_unreturned_tool_calls_before_resume(tmp_path:
     assert any(isinstance(part, UserPromptPart) for part in resume_request.parts)
 
 
-async def test_stream_agent_treats_retry_prompt_as_tool_call_completion(tmp_path: Path) -> None:
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_stream_agent_treats_retry_prompt_as_tool_call_completion(tmp_path: Path, legacy: bool) -> None:
     calls: list[list[ModelMessage]] = []
     history = [
         ModelResponse(
@@ -605,6 +607,12 @@ async def test_stream_agent_treats_retry_prompt_as_tool_call_completion(tmp_path
                     tool_call_id="call-1",
                     content="retry with corrected arguments",
                 )
+                if not legacy
+                else RetryPromptPart(
+                    tool_name="shell_exec",
+                    tool_call_id="call-1",
+                    content="retry with corrected arguments",
+                )
             ]
         ),
     ]
@@ -615,6 +623,8 @@ async def test_stream_agent_treats_retry_prompt_as_tool_call_completion(tmp_path
             raise RuntimeError("simulated retry stream disconnect")
         yield "resumed after retry prompt"
 
+    assert history_has_unreturned_tool_calls(history) is False
+    assert close_unreturned_tool_calls(history) == history
     runtime = _make_runtime(tmp_path, FunctionModel(stream_function=stream_function))
 
     async with stream_agent(

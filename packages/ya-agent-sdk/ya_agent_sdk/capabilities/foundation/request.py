@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -30,6 +31,9 @@ from ._request import apply_context_snapshot, apply_history_processor, copy_requ
 from .history import ColdStartCapability, ContextCompactionCapability, HandoffCapability
 
 ModelHandler = Callable[[ModelRequestContext], Awaitable[Any]]
+
+# The wrapper owns a request-local batch; before hooks populate it only at injection.
+_file_inspection_batch: ContextVar[list[str] | None] = ContextVar("file_inspection_batch", default=None)
 
 
 async def _project_media(
@@ -133,6 +137,9 @@ class FileInspectionCapability(AbstractCapability[AgentContext]):
                 UserPromptPart(content=build_file_inspection_prompt(list(pending))),
             ],
         )
+        batch = _file_inspection_batch.get()
+        if batch is not None:
+            batch[:] = pending
         return copy_request_context(request_context, messages=messages)
 
     async def wrap_model_request(
@@ -142,14 +149,18 @@ class FileInspectionCapability(AbstractCapability[AgentContext]):
         request_context: ModelRequestContext,
         handler: ModelHandler,
     ) -> Any:
-        pending = tuple(ctx.deps.files_to_inspect)
-        response = await handler(request_context)
-        remaining = list(ctx.deps.files_to_inspect)
-        for path in pending:
-            with suppress(ValueError):
-                remaining.remove(path)
-        ctx.deps.files_to_inspect = remaining
-        return response
+        injected: list[str] = []
+        token = _file_inspection_batch.set(injected)
+        try:
+            response = await handler(request_context)
+            remaining = list(ctx.deps.files_to_inspect)
+            for path in injected:
+                with suppress(ValueError):
+                    remaining.remove(path)
+            ctx.deps.files_to_inspect = remaining
+            return response
+        finally:
+            _file_inspection_batch.reset(token)
 
 
 @dataclass(kw_only=True)

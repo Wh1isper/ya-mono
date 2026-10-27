@@ -101,8 +101,10 @@ return replacement messages in a replacement `ModelRequestContext` without updat
 lifecycle, so request projection must not happen in its pre-handler section. The replacement preserves every field not intentionally changed, including
 Pydantic AI runtime-managed `model_id` and `streaming` fields.
 
-A one-shot source is cleared only after `handler()` returns a model response. If the
-handler raises, the source remains pending for recovery/retry.
+A one-shot source records the exact injected batch in request-local state during the
+before hook and consumes that batch only after `handler()` returns a model response.
+This includes paths added by earlier lifecycle hooks and preserves paths added after
+injection. If the handler raises, the source remains pending for recovery/retry.
 
 The note index does not alter note storage or inject note values. On user prompts it
 serializes at most 50 alphabetically sorted keys into one compact JSON array inside the
