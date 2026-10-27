@@ -46,10 +46,14 @@ async def load_restore_point(
     record = await resolve_restore_run(db_session, session, explicit_run_id=explicit_run_id)
     if record is None:
         return None
+    state = run_store.read_state(record.id)
+    # Native history is authoritative, including an explicitly empty list. Load
+    # the complete replay artifact only for legacy history reconstruction.
+    has_native_history = isinstance(state, dict) and isinstance(state.get("message_history"), list)
     return ResolvedRestorePoint(
         run_id=record.id,
         session_id=record.session_id,
         status=record.status,
-        state=run_store.read_state(record.id),
-        message=run_store.read_message(record.id),
+        state=state,
+        message=None if has_native_history else run_store.read_message(record.id),
     )

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { LiveReplay } from '../liveReplay'
 import { buildTimelineFromRuns } from './eventReducer'
 
 // Provider IDs are data; the adapter-owned key identifies a displayed invocation.
@@ -50,6 +51,40 @@ describe('native tool identities', () => {
       'child done',
       'root again done',
       'next run done',
+    ])
+  })
+
+  it('coalesces live and snapshot chunks by display invocation', () => {
+    const replay = new LiveReplay()
+    const chunk = (key: string, delta: string) => ({
+      type: 'TOOL_CALL_CHUNK',
+      toolCallId: 'same',
+      toolCallKey: key,
+      delta,
+    })
+    replay.append(chunk('run:tool:1', '{"x":'))
+    replay.append(chunk('run:tool:2', '{"y":'))
+    const earlier = replay.snapshot()
+    replay.replace(earlier)
+    replay.append(chunk('run:tool:1', '1}'))
+    replay.append(chunk('run:tool:2', '2}'))
+    expect(earlier.map((event) => event.delta)).toEqual(['{"x":', '{"y":'])
+    const state = buildTimelineFromRuns([
+      { id: 'run', message: replay.snapshot() },
+    ])
+    expect(state.blocks).toMatchObject([
+      {
+        kind: 'tool_call',
+        id: 'tool:run:tool:1',
+        toolCallId: 'same',
+        args: '{"x":1}',
+      },
+      {
+        kind: 'tool_call',
+        id: 'tool:run:tool:2',
+        toolCallId: 'same',
+        args: '{"y":2}',
+      },
     ])
   })
 

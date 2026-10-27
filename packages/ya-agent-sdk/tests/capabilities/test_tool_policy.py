@@ -10,7 +10,7 @@ import pytest
 from pydantic_ai import ModelRetry, RunContext
 from pydantic_ai.capabilities import Toolset as ToolsetCapability
 from pydantic_ai.capabilities import ValidatedToolArgs, WrapToolExecuteHandler
-from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, RetryPromptPart, TextPart, ToolCallPart
+from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.tools import ToolDefinition
 from ya_agent_sdk.agents.main import create_agent
@@ -370,7 +370,7 @@ async def test_agent_receives_timeout_retry_prompt_and_continues(tmp_path: Path)
             for message in messages
             if isinstance(message, ModelRequest)
             for part in message.parts
-            if isinstance(part, RetryPromptPart) and part.tool_name == _SlowTool.name
+            if (isinstance(part, ToolReturnPart) and part.outcome == "retried") and part.tool_name == _SlowTool.name
         ]
         if retry_prompts:
             saw_retry_prompt = True

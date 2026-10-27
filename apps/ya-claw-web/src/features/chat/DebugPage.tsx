@@ -20,7 +20,7 @@ import {
 } from '../../lib/urlState'
 import { formatShortId } from '../../lib/utils'
 import { useLayoutStore } from '../../stores/layoutStore'
-import { buildTimelineFromRuns, reduceAguiEvent } from './agui/eventReducer'
+import { buildTimeline } from './agui/eventReducer'
 import { isTerminalAguiEvent } from './eventUtils'
 import { filterActivitySessions, type ActivityFilters } from './activityFilters'
 import { validateActivityRunSelection } from './activityRunSelection'
@@ -245,19 +245,39 @@ export function DebugPage() {
   )
 
   const history = useMemo(
-    () => mergeSessionHistoryPages(historyPages, effectiveLiveEvents),
-    [effectiveLiveEvents, historyPages],
+    () =>
+      mergeSessionHistoryPages(historyPages, {
+        runId: validatedRunId,
+        ready: live.ready && !hasCommittedTerminalEvent,
+        events: effectiveLiveEvents,
+      }),
+    [
+      effectiveLiveEvents,
+      historyPages,
+      validatedRunId,
+      live.ready,
+      hasCommittedTerminalEvent,
+    ],
   )
-  const selectedRunTimeline = useMemo(() => {
-    const baseTimeline = buildTimelineFromRuns(activeRun ? [activeRun] : [], {
-      includeRuntimeEvents: false,
-    })
-    return effectiveLiveEvents.reduce(
-      (state, event) =>
-        reduceAguiEvent(state, event, { includeRuntimeEvents: false }),
-      baseTimeline,
-    )
-  }, [activeRun, effectiveLiveEvents])
+  const selectedRunTimeline = useMemo(
+    () =>
+      buildTimeline(
+        live.ready && !hasCommittedTerminalEvent
+          ? effectiveLiveEvents
+          : replayEvents,
+        activeRun?.input_parts ?? [],
+        validatedRunId ?? 'run',
+        { includeRuntimeEvents: false },
+      ),
+    [
+      activeRun,
+      effectiveLiveEvents,
+      replayEvents,
+      live.ready,
+      hasCommittedTerminalEvent,
+      validatedRunId,
+    ],
+  )
   const timeline = validatedRunId ? selectedRunTimeline : history.timeline
   const activeUsageSnapshot = useMemo(
     () =>

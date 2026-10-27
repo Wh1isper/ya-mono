@@ -40,7 +40,7 @@ class ReasoningCompatibilityCapability(AbstractCapability[AgentContext]):
         ctx: RunContext[AgentContext],
         request_context: ModelRequestContext,
     ) -> ModelRequestContext:
-        return await apply_history_processor(normalize_reasoning_for_model, ctx, request_context)
+        return await apply_history_processor(normalize_reasoning_for_model, ctx, request_context, copy_on_write=True)
 
 
 @dataclass(kw_only=True)
@@ -64,7 +64,7 @@ class ToolArgumentRepairCapability(AbstractCapability[AgentContext]):
         ctx: RunContext[AgentContext],
         request_context: ModelRequestContext,
     ) -> ModelRequestContext:
-        return await apply_history_processor(fix_truncated_tool_args, ctx, request_context)
+        return await apply_history_processor(fix_truncated_tool_args, ctx, request_context, copy_on_write=True)
 
 
 @dataclass(kw_only=True)
@@ -87,7 +87,7 @@ class HandoffCapability(AbstractCapability[AgentContext]):
         ctx: RunContext[AgentContext],
         request_context: ModelRequestContext,
     ) -> ModelRequestContext:
-        return await apply_history_processor(process_handoff_message, ctx, request_context)
+        return await apply_history_processor(process_handoff_message, ctx, request_context, copy_on_write=True)
 
 
 @dataclass(kw_only=True)
@@ -110,7 +110,7 @@ class ContextCompactionCapability(AbstractCapability[AgentContext]):
         ctx: RunContext[AgentContext],
         request_context: ModelRequestContext,
     ) -> ModelRequestContext:
-        return await apply_history_processor(self._processor, ctx, request_context)
+        return await apply_history_processor(self._processor, ctx, request_context, copy_on_write=True)
 
 
 @dataclass(kw_only=True)
@@ -127,4 +127,4 @@ class ColdStartCapability(AbstractCapability[AgentContext]):
         ctx: RunContext[AgentContext],
         request_context: ModelRequestContext,
     ) -> ModelRequestContext:
-        return await apply_history_processor(cold_start_trim, ctx, request_context)
+        return await apply_history_processor(cold_start_trim, ctx, request_context, copy_on_write=True)

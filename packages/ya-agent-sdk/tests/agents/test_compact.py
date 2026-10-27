@@ -302,27 +302,6 @@ def test_trim_replaces_all_media_in_list_with_placeholders() -> None:
     assert part.content[0] == "[image: https://example.com/image.png]"
 
 
-def test_trim_handles_singleton_media_content() -> None:
-    """Direct media content (not in a list) should be replaced with placeholder."""
-    # This is technically a type violation (content should be str | Sequence[UserContent])
-    # but we handle it defensively
-    history: list[ModelMessage] = [
-        ModelRequest(
-            parts=[
-                UserPromptPart(content=ImageUrl(url="https://example.com/image.png")),  # type: ignore[arg-type]
-            ]
-        ),
-    ]
-
-    trimmed = _trim_history_for_compact(history)
-
-    request = trimmed[0]
-    assert isinstance(request, ModelRequest)
-    part = request.parts[0]
-    assert isinstance(part, UserPromptPart)
-    assert part.content == "[image: https://example.com/image.png]"
-
-
 def test_trim_preserves_string_user_prompts() -> None:
     """String UserPromptPart content should not be modified."""
     history: list[ModelMessage] = [

@@ -13,7 +13,7 @@ from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
     ModelResponse,
-    RetryPromptPart,
+    RetryFeedbackPart,
     ToolReturnPart,
     UserPromptPart,
     VideoUrl,
@@ -98,7 +98,7 @@ def _find_last_user_turn_index(message_history: list[ModelMessage]) -> int | Non
     for i in range(len(message_history) - 1, -1, -1):
         msg = message_history[i]
         if isinstance(msg, ModelRequest) and not any(
-            isinstance(part, (ToolReturnPart, RetryPromptPart)) for part in msg.parts
+            isinstance(part, (ToolReturnPart, RetryFeedbackPart)) for part in msg.parts
         ):
             return i
     return None
@@ -113,8 +113,6 @@ def _trim_tool_return(part: ToolReturnPart, options: TrimHistoryOptions) -> tupl
 
 def _strip_media(part: UserPromptPart) -> tuple[UserPromptPart, bool]:
     content = part.content
-    if _is_media_content(content):
-        return replace(part, content=_media_to_placeholder(content)), True
     if not isinstance(content, Sequence) or isinstance(content, str):
         return part, False
     has_media = any(_is_media_content(item) for item in content)

@@ -7,7 +7,6 @@ import pytest
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
-    RetryPromptPart,
     SystemPromptPart,
     TextPart,
     ToolReturnPart,
@@ -58,7 +57,8 @@ async def test_inject_environment_instructions_inserts_before_user_prompt(tmp_pa
 
         result = await filter_func(mock_ctx, history)
 
-        assert result == history
+        assert len(request.parts) == 1
+        request = result[0]
         # Should have added a part before the user prompt
         assert len(request.parts) == 2
         assert isinstance(request.parts[0], UserPromptPart)
@@ -84,11 +84,12 @@ async def test_inject_environment_instructions_finds_last_request(tmp_path: Path
         request2 = ModelRequest(parts=[UserPromptPart(content="Second")])
         history = [request1, response, request2]
 
-        await filter_func(mock_ctx, history)
+        result = await filter_func(mock_ctx, history)
 
-        # Only the last request should be modified
-        assert len(request1.parts) == 1
-        assert len(request2.parts) == 2
+        assert result[0] is request1
+        assert result[1] is response
+        assert len(request2.parts) == 1
+        assert len(result[2].parts) == 2
 
 
 async def test_inject_environment_instructions_only_model_response(tmp_path: Path) -> None:
@@ -160,8 +161,9 @@ async def test_inject_environment_instructions_force_inject_with_tool_response(t
 
         result = await filter_func(mock_ctx, history)
 
-        # Should inject environment instructions despite ToolReturnPart
-        assert result == history
+        # Replace the last request without modifying caller-owned history.
+        assert len(request.parts) == 1
+        request = result[0]
         assert len(request.parts) == 2
         assert isinstance(request.parts[0], ToolReturnPart)
         assert isinstance(request.parts[1], UserPromptPart)
@@ -178,7 +180,9 @@ async def test_environment_context_preserves_system_and_result_prefix(
         result_parts = [
             ToolReturnPart(tool_name="test_tool", content="result", tool_call_id=f"call_{index}")
             if kind == "tool"
-            else RetryPromptPart(content="Try again", tool_name="test_tool", tool_call_id=f"call_{index}")
+            else ToolReturnPart(
+                outcome="retried", content="Try again", tool_name="test_tool", tool_call_id=f"call_{index}"
+            )
             for index, kind in enumerate(result_kinds)
         ]
         prefix = [*system_parts, *result_parts]
@@ -187,7 +191,9 @@ async def test_environment_context_preserves_system_and_result_prefix(
         mock_ctx = MagicMock()
         mock_ctx.deps.force_inject_instructions = True
 
-        await create_environment_instructions_filter(env)(mock_ctx, [request])
+        result = await create_environment_instructions_filter(env)(mock_ctx, [request])
+        assert request.parts == [*prefix, user_part]
+        request = result[0]
 
         assert len(request.parts) == len(prefix) + 2
         assert all(actual is expected for actual, expected in zip(request.parts, prefix, strict=False))

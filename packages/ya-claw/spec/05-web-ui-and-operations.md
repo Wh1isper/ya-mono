@@ -108,6 +108,20 @@ Shows the final run result, commit metadata, source metadata, schedule or heartb
 
 ## Console API Contract
 
+Run streams bootstrap with a `claw.replay_snapshot` transport frame. The console
+atomically replaces that run's compact live view and cursor, discarding any pending
+older batch. It coalesces text, reasoning, and tool-call chunks by their identifiers
+without truncating conversation content. Stream cursors and replay ownership are
+scoped to the connection and run, and survive queued-to-running transitions.
+Network failures reconnect; authentication failures stop and invalidate the connection.
+Terminal snapshots and released-handle 404 responses refresh durable queries.
+
+Until bootstrap is ready, pages display checkpoint replay. Once ready, live replay
+replaces the corresponding run's checkpoint in chronological history, preserving
+its input and other runs. Chat, Activity, and Agency must never append a full live
+snapshot on top of the same run's checkpoint. Committed terminal replay becomes the
+source again after query refresh. Transport snapshots never enter the AGUI reducer.
+
 The web shell uses these API layers:
 
 - `/api/v1/claw/info` for startup handshake, capability flags, storage model, workspace backend, and auth mode

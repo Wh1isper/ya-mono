@@ -5,7 +5,7 @@ V4 thinking mode requires assistant messages that performed tool calls to pass
 ``reasoning_content`` back in subsequent requests. Plain assistant messages can omit
 reasoning content because DeepSeek ignores it for regular multi-turn context.
 
-This filter consults the active model's capabilities and rewrites history in place:
+This filter consults the active model's capabilities and replaces changed responses:
 
 - ``reasoning_required``:
   - Tool-call assistant messages: ensure a ``ThinkingPart`` with
@@ -20,7 +20,7 @@ This filter consults the active model's capabilities and rewrites history in pla
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from pydantic_ai import RunContext
 from pydantic_ai.messages import ModelMessage, ModelResponse, ThinkingPart, ToolCallPart
@@ -62,10 +62,10 @@ def normalize_reasoning_for_model(
     Args:
         ctx: pydantic-ai run context. ``ctx.deps.model_cfg.capabilities`` drives
             the rewrite policy, and ``ctx.model`` provides the active provider tag.
-        history: Message history to reshape. Messages are mutated in place.
+        history: Message history to reshape without mutating its messages.
 
     Returns:
-        The same message history, possibly mutated.
+        Message history sharing unchanged messages and parts.
     """
     if not history:
         return history
@@ -81,9 +81,13 @@ def normalize_reasoning_for_model(
     current_provider = _provider_tag(ctx)
     stats = _ReasoningNormalizeStats()
 
-    for msg in history:
+    result = list(history)
+    for index, msg in enumerate(history):
         if isinstance(msg, ModelResponse):
-            _normalize_response(msg, current_provider, requires, strict_provider, stats)
+            updated = replace(msg)
+            _normalize_response(updated, current_provider, requires, strict_provider, stats)
+            if updated.parts != msg.parts:
+                result[index] = updated
 
     if stats.changed:
         logger.debug(
@@ -93,7 +97,7 @@ def normalize_reasoning_for_model(
             stats.dropped_plain,
             current_provider,
         )
-    return history
+    return result
 
 
 def _reasoning_policy(model_cfg: object) -> tuple[bool, bool] | None:

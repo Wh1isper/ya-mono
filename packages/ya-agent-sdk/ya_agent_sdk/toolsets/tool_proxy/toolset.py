@@ -30,7 +30,7 @@ from pydantic_ai.toolsets.abstract import AbstractToolset, ToolsetTool
 from ya_agent_sdk._logger import get_logger
 from ya_agent_sdk.context import AgentContext
 from ya_agent_sdk.events import NamespaceStatus, NamespaceStatusEvent
-from ya_agent_sdk.toolsets._nested_dispatch import execute_nested_tool_call, prepare_nested_tool
+from ya_agent_sdk.toolsets._nested_dispatch import prepare_nested_tool
 from ya_agent_sdk.toolsets.base import BaseToolset, collect_instruction_parts
 from ya_agent_sdk.toolsets.search.metadata import ToolMetadata, extract_metadata_from_schema
 from ya_agent_sdk.toolsets.search.strategies.keyword import KeywordSearchStrategy
@@ -656,18 +656,10 @@ class ToolProxyToolset(BaseToolset[AgentContext]):
                 args=arguments,
                 tool_call_id=f"{ctx.tool_call_id or self._call_tool_name}__{tool_name}",
             )
-            validated = await nested_manager.validate_tool_call(
-                call,
-                approved=False,
-                metadata=None,
-                wrap_validation_errors=False,
-            )
-            return await execute_nested_tool_call(
-                nested_manager,
-                validated,
-                call,
-                require_resolution=True,
-            )
+            try:
+                return await nested_manager.handle_call(call, wrap_validation_errors=False)
+            except (ApprovalRequired, CallDeferred) as exc:
+                raise RuntimeError(f"Nested deferred tool {tool_name!r} was not resolved inline") from exc
         except (ApprovalRequired, CallDeferred):
             raise
         except Exception as e:

@@ -71,12 +71,16 @@ class RunStore:
 
     def _atomic_write_json(self, path: Path, payload: JsonValue) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
-        serialized = json.dumps(payload, ensure_ascii=False, indent=2)
-        with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as tmp_file:
-            tmp_file.write(serialized)
-            tmp_file.flush()
-            tmp_path = Path(tmp_file.name)
-        tmp_path.replace(path)
+        tmp_path: Path | None = None
+        try:
+            with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as tmp_file:
+                tmp_path = Path(tmp_file.name)
+                json.dump(payload, tmp_file, ensure_ascii=False, indent=2)
+                tmp_file.flush()
+            tmp_path.replace(path)
+        finally:
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)
         return path
 
     def _read_json_if_exists(self, path: Path) -> JsonValue | None:

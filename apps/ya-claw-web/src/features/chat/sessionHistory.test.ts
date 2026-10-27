@@ -104,3 +104,45 @@ describe('session history merging', () => {
     expect(history.oldestSequenceNo).toBe(1)
   })
 })
+
+it('replaces one run checkpoint at its chronological position once the live baseline is ready', () => {
+  const pages = [
+    page([
+      { id: 'run-3', sequence_no: 3, content: 'later' },
+      { id: 'run-2', sequence_no: 2, content: 'Hello' },
+      { id: 'run-1', sequence_no: 1, content: 'earlier' },
+    ]),
+  ]
+  const live = {
+    runId: 'run-2',
+    ready: false,
+    events: [
+      {
+        type: 'TEXT_MESSAGE_CHUNK',
+        messageId: 'message-2',
+        delta: 'Hello world',
+      },
+    ],
+  }
+  const before = mergeSessionHistoryPages(pages, live)
+  expect(before.events.map((event) => event.delta)).toEqual([
+    'earlier',
+    'Hello',
+    'later',
+  ])
+  const after = mergeSessionHistoryPages(pages, { ...live, ready: true })
+  expect(after.events.map((event) => event.delta)).toEqual([
+    'earlier',
+    'Hello world',
+    'later',
+  ])
+  expect(
+    after.timeline.blocks
+      .filter((block) => block.kind === 'assistant_message')
+      .map((block) => block.content),
+  ).toEqual(['earlier', 'Hello world', 'later'])
+  expect(
+    after.timeline.blocks.filter((block) => block.kind === 'user_input'),
+  ).toHaveLength(3)
+  expect(pages[0].session.runs[1].message?.[0]?.delta).toBe('Hello')
+})

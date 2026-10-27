@@ -12,16 +12,32 @@ export type SessionHistoryState = {
   oldestSequenceNo: number | null
 }
 
+export type LiveRunReplay = {
+  runId: string | null
+  ready: boolean
+  events: AguiEvent[]
+}
+
 export function mergeSessionHistoryPages(
   pages: SessionGetResponse[] | undefined,
-  liveEvents: AguiEvent[] = [],
+  live?: LiveRunReplay,
 ): SessionHistoryState {
   const latestPage = pages?.[0]
   const orderedRuns = orderRunsForTimeline(dedupeRuns(pages))
-  const baseTimeline = buildTimelineFromRuns(orderedRuns, {
+  const replayRuns = orderedRuns.map((run) =>
+    live?.ready && run.id === live.runId
+      ? { ...run, message: live.events }
+      : run,
+  )
+  // A newly admitted run may not have reached the session query yet.
+  const trailingEvents =
+    live?.ready && !orderedRuns.some((run) => run.id === live.runId)
+      ? live.events
+      : []
+  const baseTimeline = buildTimelineFromRuns(replayRuns, {
     includeRuntimeEvents: false,
   })
-  const timeline = liveEvents.reduce(
+  const timeline = trailingEvents.reduce(
     (state, event) =>
       reduceAguiEvent(state, event, { includeRuntimeEvents: false }),
     baseTimeline,
@@ -29,7 +45,10 @@ export function mergeSessionHistoryPages(
   return {
     runs: orderedRuns,
     timeline,
-    events: [...orderedRuns.flatMap((run) => run.message ?? []), ...liveEvents],
+    events: [
+      ...replayRuns.flatMap((run) => run.message ?? []),
+      ...trailingEvents,
+    ],
     hasMore: Boolean(pages?.[pages.length - 1]?.session.runs_has_more),
     loadedRunCount: orderedRuns.length,
     totalRunCount: latestPage?.session.run_count ?? orderedRuns.length,

@@ -581,6 +581,9 @@ def create_cache_friendly_compact_filter(
             logger.debug("No current agent in RunContext, skipping cache-friendly compact.")
             return message_history
 
+        # The nested agent and lifecycle extensions may mutate their history.
+        # Keep the common no-compaction path allocation-free below the list level.
+        message_history = copy.deepcopy(message_history)
         logger.info("Compacting conversation history with cache-friendly compact filter...")
         event_id = uuid4().hex[:8]
 

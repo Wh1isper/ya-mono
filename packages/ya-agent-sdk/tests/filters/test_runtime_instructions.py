@@ -6,7 +6,6 @@ import pytest
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
-    RetryPromptPart,
     SystemPromptPart,
     TextPart,
     ToolReturnPart,
@@ -75,7 +74,8 @@ async def test_inject_runtime_instructions_inserts_before_user_prompt(tmp_path: 
 
             result = await inject_runtime_instructions(mock_ctx, history)
 
-            assert result == history
+            assert len(request.parts) == 1
+            request = result[0]
             # Should have added a part before the user prompt
             assert len(request.parts) == 2
             # The added part should be a UserPromptPart with runtime context
@@ -111,9 +111,10 @@ async def test_inject_runtime_instructions_with_model_config(tmp_path: Path) -> 
             request = ModelRequest(parts=[UserPromptPart(content="Hello")])
             history = [request]
 
-            await inject_runtime_instructions(mock_ctx, history)
+            result = await inject_runtime_instructions(mock_ctx, history)
 
-            added_part = request.parts[0]
+            assert len(request.parts) == 1
+            added_part = result[0].parts[0]
             assert isinstance(added_part, UserPromptPart)
             assert "<model-config>" in added_part.content
             assert "<context-window>200000</context-window>" in added_part.content
@@ -140,7 +141,11 @@ async def test_inject_runtime_instructions_finds_last_request(tmp_path: Path) ->
             last_request = ModelRequest(parts=[UserPromptPart(content="Last")])
             history = [first_request, response, last_request]
 
-            await inject_runtime_instructions(mock_ctx, history)
+            result = await inject_runtime_instructions(mock_ctx, history)
+            assert result[0] is first_request
+            assert result[1] is response
+            assert len(last_request.parts) == 1
+            last_request = result[-1]
 
             # First request should be unchanged
             assert len(first_request.parts) == 1
@@ -178,7 +183,8 @@ async def test_inject_runtime_instructions_preserves_tool_response_order(tmp_pat
 
             result = await inject_runtime_instructions(mock_ctx, history)
 
-            assert result == history
+            assert len(request.parts) == 2
+            request = result[0]
             assert len(request.parts) == 3
             assert isinstance(request.parts[0], ToolReturnPart)
             assert isinstance(request.parts[1], UserPromptPart)
@@ -225,7 +231,7 @@ async def test_runtime_context_preserves_system_and_result_prefix(
     result_parts = [
         ToolReturnPart(tool_name="test_tool", content="result", tool_call_id=f"call_{index}")
         if kind == "tool"
-        else RetryPromptPart(content="Try again", tool_name="test_tool", tool_call_id=f"call_{index}")
+        else ToolReturnPart(outcome="retried", content="Try again", tool_name="test_tool", tool_call_id=f"call_{index}")
         for index, kind in enumerate(result_kinds)
     ]
     prefix = [*system_parts, *result_parts]
@@ -235,7 +241,9 @@ async def test_runtime_context_preserves_system_and_result_prefix(
     mock_ctx.deps = agent_context
     agent_context.force_inject_instructions = True
 
-    await inject_runtime_instructions(mock_ctx, [request])
+    result = await inject_runtime_instructions(mock_ctx, [request])
+    assert request.parts == [*prefix, user_part]
+    request = result[0]
 
     assert len(request.parts) == len(prefix) + 2
     assert all(actual is expected for actual, expected in zip(request.parts, prefix, strict=False))

@@ -107,7 +107,7 @@ def _build_openai_chat_profile(model_name: str) -> OpenAIModelProfile | None:
 
     DeepSeek's OpenAI-compatible chat endpoint also rejects
     ``tool_choice=required``. Pydantic AI consults
-    ``openai_supports_tool_choice_required`` before emitting that value for tool
+    ``supports_forced_tool_choice`` before emitting that value for tool
     output.
     """
     requires_reasoning_content = _requires_reasoning_content_profile(model_name)
@@ -121,7 +121,7 @@ def _build_openai_chat_profile(model_name: str) -> OpenAIModelProfile | None:
         ignore_streamed_leading_whitespace=requires_reasoning_content,
         openai_chat_thinking_field="reasoning_content" if requires_reasoning_content else None,
         openai_chat_send_back_thinking_parts="field" if requires_reasoning_content else "auto",
-        openai_supports_tool_choice_required=supports_required_tool_choice,
+        supports_forced_tool_choice=supports_required_tool_choice,
     )
 
 

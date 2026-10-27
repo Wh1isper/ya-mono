@@ -21,7 +21,7 @@ from pydantic_ai.messages import (
     ModelResponse,
     NativeToolCallPart,
     NativeToolReturnPart,
-    RetryPromptPart,
+    RetryFeedbackPart,
     TextContent,
     TextPart,
     ThinkingPart,
@@ -137,7 +137,8 @@ async def test_structured_provider_error_preserves_message_quotes(body, streamin
     assert original == snapshot
 
 
-async def test_item_repair_preserves_all_tool_identities() -> None:
+@pytest.mark.parametrize("outcome", ["success", "retried", "failed", "denied", "interrupted"])
+async def test_item_repair_preserves_all_tool_identities(outcome) -> None:
     original = [
         ModelResponse(
             parts=[
@@ -156,8 +157,8 @@ async def test_item_repair_preserves_all_tool_identities() -> None:
         ),
         ModelRequest(
             parts=[
-                ToolReturnPart("lookup", "result", tool_call_id="call_1|fc_1"),
-                RetryPromptPart("retry", tool_name="lookup", tool_call_id="call_1|fc_1"),
+                ToolReturnPart("lookup", "result", tool_call_id="call_1|fc_1", outcome=outcome),
+                RetryFeedbackPart(content="Please reconsider the answer."),
             ]
         ),
     ]

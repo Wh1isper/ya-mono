@@ -42,10 +42,12 @@ Example::
         result = await agent.run('Your prompt here', deps=ctx)
 """
 
+from dataclasses import replace
+
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
-    RetryPromptPart,
+    RetryFeedbackPart,
     ToolReturnPart,
     UserPromptPart,
 )
@@ -101,7 +103,7 @@ async def inject_runtime_instructions(
     # Determine if this is a user prompt (not a tool response or retry)
     # We include subagent info only on user prompts to reduce noise
     # Exception: force_inject_instructions overrides this after context reset (handoff/compact)
-    is_user_prompt = not any(isinstance(part, (ToolReturnPart, RetryPromptPart)) for part in last_request.parts)
+    is_user_prompt = not any(isinstance(part, (ToolReturnPart, RetryFeedbackPart)) for part in last_request.parts)
     if ctx.deps.force_inject_instructions:
         is_user_prompt = True
 
@@ -115,6 +117,7 @@ async def inject_runtime_instructions(
     # Non-inline providers demote system parts that follow user content.
     runtime_part = UserPromptPart(content=instructions)
     insert_at = context_insertion_index(last_request.parts)
-    last_request.parts = [*last_request.parts[:insert_at], runtime_part, *last_request.parts[insert_at:]]
-
-    return message_history
+    updated = replace(
+        last_request, parts=[*last_request.parts[:insert_at], runtime_part, *last_request.parts[insert_at:]]
+    )
+    return [updated if message is last_request else message for message in message_history]

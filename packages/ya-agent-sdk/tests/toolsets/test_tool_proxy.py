@@ -447,7 +447,7 @@ async def test_proxy_fails_closed_without_inner_external_resolver() -> None:
     )
 
     assert isinstance(result, str)
-    assert "Nested deferred tool 'remote' has no active resolver" in result
+    assert "Nested deferred tool 'remote' was not resolved inline" in result
 
 
 @pytest.mark.anyio

@@ -352,10 +352,14 @@ async def test_display_reset_cancels_stale_stream_render() -> None:
 
     app._start_streaming_text("")
     app._update_streaming_text("first")
-    app._update_streaming_text(" stale")
-    assert app._pending_stream_render_handle is not None
+    # Hold the render clock inside the cadence even under a loaded test runner.
+    with patch("yaacli.app.tui.time.monotonic", return_value=app._last_stream_render_time):
+        app._update_streaming_text(" stale")
+    pending = app._pending_stream_render_handle
+    assert pending is not None
 
     app._restore_output_from_display_events([])
+    assert pending.cancelled()
     await asyncio.sleep(0.02)
 
     assert app._output_lines == []

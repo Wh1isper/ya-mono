@@ -15,7 +15,6 @@ from pydantic_ai.messages import (
     ModelResponse,
     NativeToolCallPart,
     NativeToolReturnPart,
-    RetryPromptPart,
     TextPart,
     ThinkingPart,
     ToolCallPart,
@@ -600,7 +599,8 @@ async def test_stream_agent_treats_retry_prompt_as_tool_call_completion(tmp_path
         ),
         ModelRequest(
             parts=[
-                RetryPromptPart(
+                ToolReturnPart(
+                    outcome="retried",
                     tool_name="shell_exec",
                     tool_call_id="call-1",
                     content="retry with corrected arguments",
@@ -635,11 +635,12 @@ async def test_stream_agent_treats_retry_prompt_as_tool_call_completion(tmp_path
         for message in resume_messages
         if isinstance(message, ModelRequest)
         for part in message.parts
-        if isinstance(part, ToolReturnPart)
+        if isinstance(part, ToolReturnPart) and part.outcome != "retried"
     ]
     assert synthetic_tool_returns == []
     assert any(
-        isinstance(message, ModelRequest) and any(isinstance(part, RetryPromptPart) for part in message.parts)
+        isinstance(message, ModelRequest)
+        and any((isinstance(part, ToolReturnPart) and part.outcome == "retried") for part in message.parts)
         for message in resume_messages
     )
 

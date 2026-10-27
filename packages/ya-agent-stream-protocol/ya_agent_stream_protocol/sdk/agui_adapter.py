@@ -35,7 +35,7 @@ from pydantic_ai import (
     ThinkingPartDelta,
     ToolCallPartDelta,
 )
-from pydantic_ai.messages import RetryPromptPart, TextPart, ThinkingPart, ToolCallPart, ToolReturnPart
+from pydantic_ai.messages import TextPart, ThinkingPart, ToolCallPart, ToolReturnPart
 from ya_agent_sdk.context.agent import StreamEvent
 from ya_agent_sdk.events import (
     AgentEvent,
@@ -278,8 +278,6 @@ class AguiEventAdapter:
             return events
         if isinstance(part, ToolReturnPart):
             return [self._tool_result_event(part)]
-        if isinstance(part, RetryPromptPart):
-            return [self._retry_prompt_event(stream_event, part)]
         return []
 
     def _adapt_part_delta(self, stream_event: StreamEvent, cursor: AgentCursor) -> list[JsonObject]:
@@ -388,8 +386,6 @@ class AguiEventAdapter:
             return events
         if isinstance(part, ToolReturnPart):
             return [self._tool_result_event(part)]
-        if isinstance(part, RetryPromptPart):
-            return [self._retry_prompt_event(stream_event, part)]
         return []
 
     def _adapt_function_tool_result(self, stream_event: StreamEvent) -> list[JsonObject]:
@@ -398,23 +394,11 @@ class AguiEventAdapter:
         content = event.content if isinstance(event, FunctionToolResultEvent) else None
         if isinstance(part, ToolReturnPart):
             return [self._tool_result_event(part, content=content)]
-        if isinstance(part, RetryPromptPart):
-            return [self._retry_prompt_event(stream_event, part)]
         return []
-
-    def _retry_prompt_event(self, stream_event: StreamEvent, part: RetryPromptPart) -> JsonObject:
-        return self._custom_agent_event(
-            "retry_prompt_part",
-            stream_event=stream_event,
-            payload={
-                "tool_name": part.tool_name,
-                "tool_call_id": part.tool_call_id,
-            },
-        )
 
     def _tool_result_event(self, part: ToolReturnPart, *, content: object = None) -> JsonObject:
         tool_call_id = part.tool_call_id
-        return dump_agui_event(
+        result = dump_agui_event(
             ToolCallResultEvent(
                 message_id=f"{tool_call_id}:result",
                 tool_call_id=tool_call_id,
@@ -422,6 +406,9 @@ class AguiEventAdapter:
                 role="tool",
             )
         )
+
+        result["outcome"] = part.outcome
+        return result
 
     def _ensure_text_cursor(self, agent_id: str, cursor: AgentCursor, index: int) -> PartCursor:
         existing = cursor.parts.get(index)

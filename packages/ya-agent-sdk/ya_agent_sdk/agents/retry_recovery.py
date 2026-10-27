@@ -27,7 +27,6 @@ from pydantic_ai.messages import (
     ModelResponsePart,
     NativeToolCallPart,
     NativeToolReturnPart,
-    RetryPromptPart,
     TextPart,
     ToolReturnPart,
     UploadedFile,
@@ -171,7 +170,7 @@ def _unreturned_tool_calls(
                     ordinary_calls[part.tool_call_id] = part.tool_name
         elif isinstance(message, ModelRequest):
             for part in message.parts:
-                if isinstance(part, BaseToolReturnPart | RetryPromptPart):
+                if isinstance(part, BaseToolReturnPart):
                     ordinary_calls.pop(part.tool_call_id, None)
     return ordinary_calls, native_calls
 

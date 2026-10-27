@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import copy
 import inspect
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from pydantic_ai import RunContext
 from pydantic_ai.capabilities import AbstractCapability, CapabilityOrdering, ReinjectSystemPrompt
-from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
+from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart, UserPromptPart
 from pydantic_ai.models import ModelRequestContext
 
 from ya_agent_sdk.context import AgentContext
@@ -27,7 +26,7 @@ from ya_agent_sdk.filters.image import (
 )
 from ya_agent_sdk.filters.runtime_instructions import inject_runtime_instructions
 
-from ._request import apply_context_snapshot, copy_request_context, project_history
+from ._request import apply_context_snapshot, apply_history_processor, copy_request_context
 from .history import ColdStartCapability, ContextCompactionCapability, HandoffCapability
 
 ModelHandler = Callable[[ModelRequestContext], Awaitable[Any]]
@@ -45,7 +44,20 @@ async def _project_media(
         drop_extra_videos,
         filter_by_capability,
     )
-    current = messages
+    # These processors assign content on request parts; nested media transforms
+    # construct replacement containers/content. Share response trees and large tool
+    # payloads rather than deepcopying the entire conversation before every request.
+    current = [
+        replace(
+            message,
+            parts=[
+                replace(part) if isinstance(part, (UserPromptPart, ToolReturnPart)) else part for part in message.parts
+            ],
+        )
+        if isinstance(message, ModelRequest)
+        else message
+        for message in messages
+    ]
     for processor in processors:
         result = processor(ctx, current)
         current = await result if inspect.isawaitable(result) else result
@@ -59,16 +71,24 @@ class MediaCompatibilityCapability(AbstractCapability[AgentContext]):
     id: str | None = "media_compatibility"
 
     def get_ordering(self) -> CapabilityOrdering:
-        return CapabilityOrdering(wraps=(FileInspectionCapability,))
+        return CapabilityOrdering(
+            wrapped_by=(
+                HandoffCapability,
+                ContextCompactionCapability,
+                ColdStartCapability,
+                ReinjectSystemPrompt,
+                EnvironmentContextCapability,
+                RuntimeContextCapability,
+            ),
+            wraps=(FileInspectionCapability,),
+        )
 
-    async def wrap_model_request(
+    async def before_model_request(
         self,
         ctx: RunContext[AgentContext],
-        *,
         request_context: ModelRequestContext,
-        handler: ModelHandler,
-    ) -> Any:
-        return await project_history(_project_media, ctx, request_context, handler)
+    ) -> ModelRequestContext:
+        return await apply_history_processor(_project_media, ctx, request_context, persist=False, copy_on_write=True)
 
 
 @dataclass(kw_only=True)
@@ -76,6 +96,44 @@ class FileInspectionCapability(AbstractCapability[AgentContext]):
     """Inject a one-shot file-inspection reminder and commit after success."""
 
     id: str | None = "file_inspection"
+
+    def get_ordering(self) -> CapabilityOrdering:
+        return CapabilityOrdering(
+            wrapped_by=(
+                HandoffCapability,
+                ContextCompactionCapability,
+                ColdStartCapability,
+                ReinjectSystemPrompt,
+                EnvironmentContextCapability,
+                RuntimeContextCapability,
+            )
+        )
+
+    async def before_model_request(
+        self,
+        ctx: RunContext[AgentContext],
+        request_context: ModelRequestContext,
+    ) -> ModelRequestContext:
+        pending = tuple(ctx.deps.files_to_inspect)
+        if not pending:
+            return request_context
+
+        messages = list(request_context.messages)
+        last_request = next(
+            (message for message in reversed(messages) if isinstance(message, ModelRequest)),
+            None,
+        )
+        if last_request is None:
+            return request_context
+
+        messages[messages.index(last_request)] = replace(
+            last_request,
+            parts=[
+                *last_request.parts,
+                UserPromptPart(content=build_file_inspection_prompt(list(pending))),
+            ],
+        )
+        return copy_request_context(request_context, messages=messages)
 
     async def wrap_model_request(
         self,
@@ -85,23 +143,7 @@ class FileInspectionCapability(AbstractCapability[AgentContext]):
         handler: ModelHandler,
     ) -> Any:
         pending = tuple(ctx.deps.files_to_inspect)
-        if not pending:
-            return await handler(request_context)
-
-        messages = copy.deepcopy(request_context.messages)
-        last_request = next(
-            (message for message in reversed(messages) if isinstance(message, ModelRequest)),
-            None,
-        )
-        if last_request is None:
-            return await handler(request_context)
-
-        last_request.parts = [
-            *last_request.parts,
-            UserPromptPart(content=build_file_inspection_prompt(list(pending))),
-        ]
-        response = await handler(copy_request_context(request_context, messages=messages))
-
+        response = await handler(request_context)
         remaining = list(ctx.deps.files_to_inspect)
         for path in pending:
             with suppress(ValueError):

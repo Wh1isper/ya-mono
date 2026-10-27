@@ -81,3 +81,76 @@ def test_stream_routes_are_present_in_openapi() -> None:
     assert "/api/v1/sessions:stream" in paths
     assert "/api/v1/sessions/{session_id}/runs:stream" in paths
     assert "/api/v1/runs:stream" in paths
+
+
+@pytest.mark.parametrize("endpoint", ["/api/v1/runs/r/events", "/api/v1/sessions/s/events"])
+@pytest.mark.parametrize("cursor", [None, "1", "99"])
+def test_live_routes_send_atomic_compact_snapshot_after_eviction(endpoint: str, cursor: str | None) -> None:
+    import json
+
+    app = create_app()
+    with TestClient(app) as client:
+        state = app.state.runtime_state
+
+        async def prepare() -> None:
+            handle = state.register_run("s", "r")
+            handle.max_live_events = 2
+            for delta in "ABCD":
+                await state.append_run_event("r", {"type": "TEXT_MESSAGE_CHUNK", "messageId": "m", "delta": delta})
+            await state.append_run_event("r", {"type": "RUN_FINISHED"}, terminal=True)
+
+        assert client.portal is not None
+        client.portal.call(prepare)
+        headers = _auth_headers()
+        if cursor is not None:
+            headers["Last-Event-ID"] = cursor
+        response = client.get(endpoint, headers=headers)
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        lines = response.text.splitlines()
+        assert "id: 5" in lines
+        assert "event: claw.replay_snapshot" in lines
+        frames = [json.loads(line.removeprefix("data: ")) for line in lines if line.startswith("data: ")]
+        assert len(frames) == 1
+        assert frames[0]["events"][0]["delta"] == "ABCD"
+        assert frames[0]["closed"] is True
+        assert frames[0]["reason"] == (
+            "initial" if cursor is None else "cursor_expired" if cursor == "1" else "cursor_invalid"
+        )
+        assert client.get(endpoint, headers=headers).status_code == 404
+
+
+@pytest.mark.parametrize("endpoint", ["/api/v1/runs:stream", "/api/v1/sessions:stream"])
+def test_create_stream_routes_bootstrap_full_replay(monkeypatch, endpoint: str) -> None:
+    import asyncio
+    import json
+
+    from ya_claw.api import runs, sessions
+
+    def dispatch(request, run_id, dispatch_mode, *, require_submission):
+        state = request.app.state.runtime_state
+
+        async def produce() -> None:
+            handle = state.get_run_handle(run_id)
+            assert handle is not None
+            handle.max_live_events = 1
+            for delta in "ABCD":
+                await state.append_run_event(run_id, {"type": "TEXT_MESSAGE_CHUNK", "messageId": "m", "delta": delta})
+            await state.append_run_event(run_id, {"type": "RUN_FINISHED"}, terminal=True)
+
+        task = asyncio.create_task(produce())
+        state.register_background_task(run_id, task)
+
+    monkeypatch.setattr(runs, "_dispatch_run", dispatch)
+    monkeypatch.setattr(sessions, "_dispatch_run", dispatch)
+    with TestClient(create_app()) as client:
+        response = client.post(
+            endpoint, headers=_auth_headers(), json={"input_parts": [{"type": "text", "text": "hello"}]}
+        )
+    assert response.status_code == 200
+    frames = [
+        json.loads(line.removeprefix("data: ")) for line in response.text.splitlines() if line.startswith("data: ")
+    ]
+    assert frames[0]["type"] == "claw.replay_snapshot"
+    assert frames[-1]["closed"] is True
+    assert [event["delta"] for event in frames[-1]["events"] if event["type"] == "TEXT_MESSAGE_CHUNK"] == ["ABCD"]

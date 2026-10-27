@@ -220,3 +220,44 @@ async def test_restore_loader_accepts_ancestor_and_rejects_sibling(
     with pytest.raises(HTTPException) as exc_info:
         await resolve_restore_run(db_session, child, explicit_run_id=sibling_run.id)
     assert exc_info.value.status_code == 422
+
+
+@pytest.mark.parametrize("history", [[], [{"kind": "request", "parts": []}]])
+async def test_restore_loader_skips_replay_when_native_history_exists(
+    db_session: AsyncSession, settings: ClawSettings, history: list[dict[str, object]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = SessionRecord(id="native-session", profile_name="general", session_metadata={})
+    run = RunRecord(
+        id="native-run",
+        session_id=session.id,
+        sequence_no=1,
+        status="completed",
+        trigger_type="api",
+        profile_name="general",
+        input_parts=[],
+        run_metadata={},
+    )
+    db_session.add_all([session, run])
+    await db_session.commit()
+    session.head_success_run_id = run.id
+    await db_session.commit()
+    store = RunStore(settings)
+    store.write_state(run.id, {"message_history": history})  # type: ignore[dict-item]
+
+    def unexpected_read(run_id: str) -> None:
+        pytest.fail(f"Unexpected replay read: {run_id}")
+
+    monkeypatch.setattr(store, "read_message", unexpected_read)
+    point = await load_restore_point(db_session, store, session, explicit_run_id=None)
+    assert point is not None
+    assert point.state == {"message_history": history}
+    assert point.message is None
+
+
+def test_run_store_streaming_json_failure_preserves_committed_file(settings: ClawSettings) -> None:
+    store = RunStore(settings)
+    path = store.write_state("atomic", {"value": "committed"})
+    with pytest.raises(TypeError):
+        store.write_state("atomic", {"value": object()})  # type: ignore[dict-item]
+    assert store.read_state("atomic") == {"value": "committed"}
+    assert list(path.parent.iterdir()) == [path]

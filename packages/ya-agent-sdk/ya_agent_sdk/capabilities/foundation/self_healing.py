@@ -7,8 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from copy import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from pydantic_ai import RunContext
 from pydantic_ai.capabilities import AbstractCapability, CapabilityOrdering
@@ -44,6 +43,4 @@ class SelfHealingModelCapability(AbstractCapability[AgentContext]):
             if isinstance(model, SelfHealingModel):
                 return request_context
             model = model.wrapped
-        updated = copy(request_context)
-        updated.model = SelfHealingModel(request_context.model, rules=self.rules)
-        return updated
+        return replace(request_context, model=SelfHealingModel(request_context.model, rules=self.rules))

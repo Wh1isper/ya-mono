@@ -67,6 +67,16 @@ also default to five through `RetryConfig`.
 `ModelRetry`, `ApprovalRequired`, and `CallDeferred` are Pydantic AI control flow and
 must propagate unchanged through SDK adapters and policy wrappers.
 
+## Stream Backpressure
+
+`stream_agent()` buffers at most 128 output events between its model/tool producers
+and consumer. Producers await publication when the queue fills, so a slow host can
+pause streaming without an unbounded output backlog. Accepted events are delivered
+in order when consumption resumes. Interrupt and context exit cancel blocked
+producers as part of the existing task-owned cleanup. The bound applies to event
+count, not payload bytes; canonical history and feature-owned sideband queues have
+separate ownership.
+
 ## Stream Recovery Budgets
 
 `stream_agent()` separates transient model transport recovery from non-transport

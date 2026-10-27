@@ -17,11 +17,12 @@ from pydantic_ai import (
     DeferredToolRequests,
     DeferredToolResults,
     EnqueuedMessagesEvent,
+    ModelRetry,
     ToolDenied,
     UsageLimits,
     UserContent,
 )
-from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter, ModelRequest, RetryPromptPart, UserPromptPart
+from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter, ModelRequest, UserPromptPart
 from pydantic_ai.usage import RunUsage
 from pydantic_core import to_jsonable_python
 from ya_agent_sdk.agents.main import AgentRuntime, RuntimeReadyContext
@@ -617,11 +618,7 @@ class LocalExecutionCoordinator:
             value = decision.get("result")
             if not isinstance(value, str):
                 value = json.dumps(value, ensure_ascii=False, sort_keys=True)
-            results.calls[request.tool_call_id] = RetryPromptPart(
-                content=value,
-                tool_name=request.tool_name,
-                tool_call_id=request.tool_call_id,
-            )
+            results.calls[request.tool_call_id] = ModelRetry(value)
         return results
 
     async def _commit_success(

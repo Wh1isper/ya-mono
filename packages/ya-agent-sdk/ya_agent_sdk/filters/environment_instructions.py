@@ -28,8 +28,9 @@ Example::
 """
 
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 
-from pydantic_ai import RetryPromptPart
+from pydantic_ai import RetryFeedbackPart
 from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart, UserPromptPart
 from pydantic_ai.tools import RunContext
 from ya_agent_environment import Environment
@@ -94,7 +95,7 @@ def create_environment_instructions_filter(
         # Skip injection if last_request contains ToolReturnPart (tool response)
         # We only inject environment instructions on user input, not tool responses or retry prompts
         # Exception: force_inject_instructions overrides this check after context reset (handoff/compact)
-        has_tool_return = any(isinstance(part, (ToolReturnPart, RetryPromptPart)) for part in last_request.parts)
+        has_tool_return = any(isinstance(part, (ToolReturnPart, RetryFeedbackPart)) for part in last_request.parts)
         if has_tool_return and not ctx.deps.force_inject_instructions:
             return message_history
 
@@ -108,8 +109,9 @@ def create_environment_instructions_filter(
         # Non-inline providers demote system parts that follow user content.
         env_part = UserPromptPart(content=instructions)
         insert_at = context_insertion_index(last_request.parts)
-        last_request.parts = [*last_request.parts[:insert_at], env_part, *last_request.parts[insert_at:]]
-
-        return message_history
+        updated = replace(
+            last_request, parts=[*last_request.parts[:insert_at], env_part, *last_request.parts[insert_at:]]
+        )
+        return [updated if message is last_request else message for message in message_history]
 
     return inject_environment_instructions

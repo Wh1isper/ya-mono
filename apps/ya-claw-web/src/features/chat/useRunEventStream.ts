@@ -1,21 +1,39 @@
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { queryKeys } from '../../api/queryKeys'
 import { useConnectionStore } from '../../stores/connectionStore'
 import type { AguiEvent, RunSummary } from '../../types'
 import type { StreamStatus } from '../../lib/status'
 import { isTerminalAguiEvent } from './eventUtils'
+import { LiveReplay } from './liveReplay'
 
-const maxBufferedEvents = 1_000
 const eventBatchIntervalMs = 32
+class FatalRunStreamError extends Error {}
+
+type StreamView = {
+  connectionScope: string
+  runId: string | null
+  status: StreamStatus
+  events: AguiEvent[]
+  ready: boolean
+}
+
+type ReplayOwner = {
+  connectionScope: string
+  runId: string | null
+  replay: LiveReplay
+  cursor: number | null
+  ready: boolean
+  closed: boolean
+}
 
 export function useRunEventStream(
   runId: string | null,
   status: RunSummary['status'] | null,
   sessionId: string | null,
-): { status: StreamStatus; events: AguiEvent[] } {
+): { status: StreamStatus; events: AguiEvent[]; ready: boolean } {
   const baseUrl = useConnectionStore((state) => state.baseUrl)
   const apiToken = useConnectionStore((state) => state.apiToken)
   const connectionScope = useConnectionStore((state) => state.connectionScope)
@@ -23,82 +41,132 @@ export function useRunEventStream(
     (state) => state.invalidateConnection,
   )
   const queryClient = useQueryClient()
-  const [streamState, setStreamState] = useState<{
-    connectionScope: string
-    runId: string | null
-    status: StreamStatus
-    events: AguiEvent[]
-  }>({ connectionScope, runId, status: 'idle', events: [] })
+  const ownerRef = useRef<ReplayOwner | null>(null)
+  const [streamState, setStreamState] = useState<StreamView>({
+    connectionScope,
+    runId,
+    status: 'idle',
+    events: [],
+    ready: false,
+  })
 
   useEffect(() => {
-    const ownsStream = (state: typeof streamState) =>
-      state.connectionScope === connectionScope && state.runId === runId
-    const setOwnedStatus = (nextStatus: StreamStatus) => {
-      setStreamState((previous) =>
-        ownsStream(previous) ? { ...previous, status: nextStatus } : previous,
-      )
-    }
-    setStreamState((previous) =>
-      ownsStream(previous)
-        ? previous
-        : { connectionScope, runId, status: 'idle', events: [] },
-    )
-    if (!runId || (status !== 'running' && status !== 'queued')) {
-      setOwnedStatus(runId ? 'closed' : 'idle')
-      return
-    }
-    if (!apiToken.trim()) {
-      setOwnedStatus('idle')
-      return
-    }
-
-    const controller = new AbortController()
-    let pendingEvents: AguiEvent[] = []
-    let flushTimer: ReturnType<typeof setTimeout> | null = null
-    const flushEvents = () => {
-      if (flushTimer) clearTimeout(flushTimer)
-      flushTimer = null
-      if (pendingEvents.length === 0 || controller.signal.aborted) return
-      const batch = pendingEvents
-      pendingEvents = []
-      setStreamState((previous) =>
-        ownsStream(previous)
-          ? {
-              ...previous,
-              events: [...previous.events, ...batch].slice(-maxBufferedEvents),
-            }
-          : previous,
-      )
-    }
-    const queueEvent = (event: AguiEvent) => {
-      pendingEvents.push(event)
-      if (!flushTimer) {
-        flushTimer = setTimeout(flushEvents, eventBatchIntervalMs)
+    if (
+      ownerRef.current?.connectionScope !== connectionScope ||
+      ownerRef.current?.runId !== runId
+    ) {
+      ownerRef.current = {
+        connectionScope,
+        runId,
+        replay: new LiveReplay(),
+        cursor: null,
+        ready: false,
+        closed: false,
       }
     }
-    setOwnedStatus('connecting')
+    const owner = ownerRef.current
+    const controller = new AbortController()
+    const isCurrent = () =>
+      !controller.signal.aborted && ownerRef.current === owner
+    let flushTimer: ReturnType<typeof setTimeout> | null = null
+    const publish = (nextStatus?: StreamStatus) => {
+      if (flushTimer) clearTimeout(flushTimer)
+      flushTimer = null
+      if (!isCurrent()) return
+      const events = owner.replay.snapshot()
+      const ready = owner.ready
+      setStreamState((previous) => ({
+        connectionScope,
+        runId,
+        events,
+        ready,
+        status: nextStatus ?? previous.status,
+      }))
+    }
+    const refresh = () => {
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+        sessionId
+          ? queryClient.invalidateQueries({
+              queryKey: queryKeys.session(sessionId),
+            })
+          : Promise.resolve(),
+        sessionId
+          ? queryClient.invalidateQueries({
+              queryKey: queryKeys.sessionHistoryBase(sessionId),
+            })
+          : Promise.resolve(),
+        queryClient.invalidateQueries({ queryKey: queryKeys.run(runId!) }),
+      ])
+    }
+    const finish = () => {
+      owner.closed = true
+      publish('closed')
+      refresh()
+      controller.abort()
+    }
+    if (
+      !runId ||
+      (status !== 'running' && status !== 'queued') ||
+      owner.closed
+    ) {
+      if (
+        status !== null &&
+        status !== 'running' &&
+        status !== 'queued' &&
+        !owner.closed
+      ) {
+        // A durable terminal status can arrive before the SSE terminal frame.
+        // In that case the last live prefix is not authoritative anymore.
+        owner.ready = false
+        owner.closed = true
+        refresh()
+      }
+      publish(runId ? 'closed' : 'idle')
+      return () => controller.abort()
+    }
+    if (!apiToken.trim()) {
+      publish('idle')
+      return () => controller.abort()
+    }
+    publish('connecting')
 
     const streamPromise = fetchEventSource(
       `${baseUrl.replace(/\/$/, '')}/api/v1/runs/${encodeURIComponent(runId)}/events`,
       {
         signal: controller.signal,
-        headers: { Authorization: `Bearer ${apiToken.trim()}` },
+        headers: {
+          Authorization: `Bearer ${apiToken.trim()}`,
+          ...(owner.cursor !== null
+            ? { 'last-event-id': String(owner.cursor) }
+            : {}),
+        },
         openWhenHidden: true,
         async onopen(response) {
+          if (!isCurrent()) return
+          if (response.status === 404) {
+            // The coordinator may already have released the terminal live handle.
+            owner.ready = false
+            finish()
+            return
+          }
           if (!response.ok) {
-            setOwnedStatus('error')
             if (response.status === 401) {
               invalidateConnection(
                 'Your API token is invalid or expired.',
                 connectionScope,
               )
             }
-            throw new Error(`run event stream failed with ${response.status}`)
+            const message = `run event stream failed with ${response.status}`
+            if (response.status >= 400 && response.status < 500) {
+              throw new FatalRunStreamError(message)
+            }
+            throw new Error(message)
           }
-          setOwnedStatus('streaming')
+          publish('streaming')
         },
         onmessage(message) {
-          if (!message.data) return
+          if (!isCurrent() || !message.data) return
           let event: AguiEvent
           try {
             event = JSON.parse(message.data) as AguiEvent
@@ -106,44 +174,61 @@ export function useRunEventStream(
             console.warn('Ignored malformed run event', error)
             return
           }
-          queueEvent(event)
-          if (isTerminalAguiEvent(event)) {
-            flushEvents()
-            void Promise.all([
-              queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
-              sessionId
-                ? queryClient.invalidateQueries({
-                    queryKey: queryKeys.session(sessionId),
-                  })
-                : Promise.resolve(),
-              queryClient.invalidateQueries({ queryKey: queryKeys.run(runId) }),
-            ])
-            setOwnedStatus('closed')
+          const cursor = message.id ? Number(message.id) : null
+          if (event.type === 'claw.replay_snapshot') {
+            if (
+              event.runId !== runId ||
+              !Array.isArray(event.events) ||
+              cursor === null ||
+              !Number.isSafeInteger(cursor)
+            )
+              return
+            // Discard any unrendered prefix. The snapshot and its cursor form
+            // one baseline; transport frames never enter the AGUI reducer.
+            owner.replay.replace(event.events as AguiEvent[])
+            owner.cursor = cursor
+            owner.ready = true
+            if (event.closed === true) finish()
+            else publish('streaming')
+            return
           }
+          if (cursor !== null && Number.isSafeInteger(cursor)) {
+            if (owner.cursor !== null && cursor <= owner.cursor) return
+            owner.cursor = cursor
+          }
+          owner.replay.append(event)
+          if (isTerminalAguiEvent(event)) finish()
+          else if (!flushTimer)
+            flushTimer = setTimeout(() => publish(), eventBatchIntervalMs)
         },
         onclose() {
-          setOwnedStatus('closed')
+          if (!isCurrent()) return
+          publish('connecting')
+          refresh()
+          throw new Error('run event stream closed before terminal event')
         },
         onerror(error) {
-          if (!controller.signal.aborted) setOwnedStatus('error')
-          throw error
+          if (!isCurrent()) return
+          if (error instanceof FatalRunStreamError) throw error
+          publish('connecting')
+          return 2_000
         },
       },
     )
     void streamPromise.catch((error: unknown) => {
       if (
-        controller.signal.aborted ||
+        !isCurrent() ||
         (error instanceof Error && error.name === 'AbortError')
-      ) {
+      )
         return
-      }
-      setOwnedStatus('error')
+      publish('error')
     })
 
     return () => {
+      // The owner holds accepted events and cursor together across effect
+      // restarts (including queued -> running), even before the UI batch fires.
       controller.abort()
       if (flushTimer) clearTimeout(flushTimer)
-      pendingEvents = []
     }
   }, [
     apiToken,
@@ -162,5 +247,6 @@ export function useRunEventStream(
   return {
     status: ownsCurrentStream ? streamState.status : 'idle',
     events: ownsCurrentStream ? streamState.events : [],
+    ready: ownsCurrentStream && streamState.ready,
   }
 }
