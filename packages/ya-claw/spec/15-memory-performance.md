@@ -127,6 +127,65 @@ from 194.28 to 192.28 MiB. Service imports remain a substantial fixed floor. A n
 20-run offline SDK lifetime probe retained 0.027 MiB after collection and found no
 material leak in that specific workload.
 
+## Follow-up: Historical Retention Query
+
+Read-only inspection of a fresh deployment on October 27, 2026 found a 4.95 GiB
+Python-process RSS high-water mark and approximately 1.41 GiB current RSS. The
+retention dispatcher started at 05:51:34 UTC with a 300-second startup delay and
+completed its first sweep at 05:56:53 without deleting artifacts. The only subsequent
+active run started at 06:00:03 with no restore source and a roughly 300 KiB replay.
+
+`SessionPruneController._load_runs()` selected every column of every historical run.
+The 12,734 rows contained 801,572,780 characters of serialized input and 899,332,744
+characters of metadata. A separate read-only process decoded one row at a time and
+summed unique reachable Python-object sizes within each payload: those two columns
+accounted for 3,167,083,882 bytes (2.95 GiB), before ORM objects, driver result buffers,
+and allocator overhead. No conversation content was printed or copied. This is a
+strong causal candidate for the observed startup peak; the original peak itself was
+not sampled with an attached profiler.
+
+Retention selection now loads only session IDs/head pointers and run IDs, session
+IDs, sequence numbers, restore links, statuses, and creation timestamps. Payload
+columns are excluded at SQL execution, before JSON decoding. Existing recent-run,
+head, active-run, direct-restore protection, ordering, cutoff, and batch semantics
+are unchanged. This needs no schema, retention-policy, or deployment-setting change.
+Memory scales with the small index records rather than all historical conversation
+content. The index itself still grows with record count.
+
+### Process-level Reproduction
+
+```bash
+uv run --all-packages python benchmarks/claw_prune_memory.py --baseline-ref 1a0b1a7e --rows 10000
+uv run --all-packages python benchmarks/claw_prune_memory.py --rows 10000
+```
+
+The Linux probe seeds disposable SQLite data in a separate process, then executes
+the actual retention selector in a fresh process. Each of 10,000 runs has a distinct
+65,536-character ASCII input and metadata value (1,250 MiB total payload). Both
+versions select the same 100 IDs. No deletion, live data, provider, or event paging
+is involved. These are single-run observations on Python 3.13.7:
+
+| Process metric                          |     Baseline | Narrow projection |
+| --------------------------------------- | -----------: | ----------------: |
+| RSS before query                        |   195.27 MiB |        193.06 MiB |
+| Peak RSS                                | 1,464.71 MiB |        219.48 MiB |
+| Peak increase over pre-query RSS        | 1,269.44 MiB |         26.41 MiB |
+| RSS after session close and explicit GC |   768.85 MiB |        203.52 MiB |
+| RSS after engine disposal               |   726.10 MiB |        200.69 MiB |
+| Selector elapsed time                   |      3.879 s |           0.493 s |
+
+The additional peak falls by 97.9%. Elevated baseline RSS survives collection after
+all run records leave scope, reproducing retained process memory without establishing
+an application-object leak. The fix avoids these allocations rather than adding
+forced GC, allocator trimming, or disk paging to production. A smaller 2,000-row
+probe also drops peak RSS from 453.36 to 202.18 MiB. Deployment-level improvement
+must be measured after this follow-up is deployed; these are isolated path results.
+
+A regression verifies that the emitted SQL and loaded ORM attributes exclude input,
+metadata, and output payloads while returning unchanged candidates. Existing pruning
+tests cover protected heads, active work, restore sources, generated sessions, failed
+cleanup, and retries.
+
 ## Validation and Remaining Memory Sources
 
 Regression coverage includes old saved retry messages, native lifecycle recovery,

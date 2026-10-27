@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select, update
+from sqlalchemy import event, inspect, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from ya_claw.config import ClawSettings
 from ya_claw.controller.models import RunCreateRequest, SessionForkRequest
@@ -58,6 +58,54 @@ def settings(tmp_path: Path) -> ClawSettings:
         session_prune_fire_records_older_than_days=0,
         _env_file=None,
     )
+
+
+async def test_prune_selection_does_not_load_conversation_payloads(
+    db_engine: AsyncEngine,
+    db_session: AsyncSession,
+    settings: ClawSettings,
+) -> None:
+    payload = "history" * 10_000
+    db_session.add(SessionRecord(id="payload-session", session_metadata={"payload": payload}))
+    for index in range(6):
+        db_session.add(
+            RunRecord(
+                id=f"payload-run-{index}",
+                session_id="payload-session",
+                sequence_no=index,
+                status="completed",
+                input_parts=[{"type": "text", "text": payload}],
+                run_metadata={"payload": payload},
+                output_text=payload,
+                output_json={"payload": payload},
+            )
+        )
+    await db_session.commit()
+    db_session.expunge_all()
+    statements: list[str] = []
+
+    def capture(_connection, _cursor, statement, _parameters, _context, _executemany):
+        statements.append(statement)
+
+    event.listen(db_engine.sync_engine, "before_cursor_execute", capture)
+    try:
+        controller = SessionPruneController()
+        assert await controller._select_prunable_run_ids(db_session, settings) == [
+            "payload-run-0",
+            "payload-run-1",
+            "payload-run-2",
+        ]
+        sessions = await controller._load_sessions(db_session)
+        runs = await controller._load_runs(db_session)
+        assert "session_metadata" in inspect(sessions[0]).unloaded
+        assert {"input_parts", "run_metadata", "output_text", "output_json"} <= inspect(runs[0]).unloaded
+    finally:
+        event.remove(db_engine.sync_engine, "before_cursor_execute", capture)
+    for statement in statements:
+        assert "metadata" not in statement
+        assert "input_parts" not in statement
+        assert "output_text" not in statement
+        assert "output_json" not in statement
 
 
 async def test_prune_keeps_recent_run_rows_heads_active_and_restore_sources(
