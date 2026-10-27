@@ -22,6 +22,7 @@ from pydantic_ai.messages import (
     NativeToolCallPart,
     NativeToolReturnPart,
     RetryFeedbackPart,
+    RetryInfo,
     TextContent,
     TextPart,
     ThinkingPart,
@@ -158,7 +159,7 @@ async def test_item_repair_preserves_all_tool_identities(outcome) -> None:
         ModelRequest(
             parts=[
                 ToolReturnPart("lookup", "result", tool_call_id="call_1|fc_1", outcome=outcome),
-                RetryFeedbackPart(content="Please reconsider the answer."),
+                RetryFeedbackPart(content="Please reconsider the answer.", retry=RetryInfo(cause="model_retry")),
             ]
         ),
     ]
