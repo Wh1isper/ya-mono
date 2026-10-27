@@ -551,7 +551,7 @@ Runtime, typed tool, CodeAct-enforced timeout, and unresolved-deferred failures 
 - error text
 - whether side effects may have occurred
 
-The outer CodeAct tool must not automatically execute the source again or emit a `RetryPromptPart`. The model may inspect the partial record and explicitly decide whether a new attempt is appropriate.
+The outer CodeAct tool must not automatically execute the source again or emit a `ToolReturnPart(outcome="retried")`. The model may inspect the partial record and explicitly decide whether a new attempt is appropriate.
 
 A nested call is failed only when the standard dispatch path emits or raises a typed failure. Existing tools that encode failure as an ordinary string are observed as successful returns. Mutating built-ins should migrate to `ModelRetry`, a tool return with an explicit failed outcome, or another typed failure before being marked `codeact=True`; CodeAct must not infer failure from result text.
 
@@ -816,7 +816,7 @@ The initial complete feature is accepted when:
 6. Each `run_program` call starts with no interpreter state from the prior call.
 7. Both runs record source digest, catalog fingerprint, and nested call trace.
 8. Missing statically referenced functions fail preflight when detectable, and invalid arguments fail validation before dispatch.
-9. A mutating nested call followed by a runtime error executes the mutation once, returns `status="failed"` with a bounded completed-call descriptor, and produces no `RetryPromptPart`.
+9. A mutating nested call followed by a runtime error executes the mutation once, returns `status="failed"` with a bounded completed-call descriptor, and produces no `ToolReturnPart(outcome="retried")`.
 10. External cancellation cancels and awaits active nested calls, terminates the sandbox, re-raises cancellation, and does not claim rollback or guarantee a model-visible result.
 11. Unresolved approval/deferred behavior is explicit and tested.
 12. Canonical duplicates, sanitized-name duplicates such as `a-b` versus `a.b`, and execution-tool name collisions fail closed.

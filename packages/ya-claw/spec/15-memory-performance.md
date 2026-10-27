@@ -86,8 +86,8 @@ event values are one bounded run, corroborating the earlier investigation.
 | -------------------------------------------------------- | ---------: | --------: | --------: |
 | 20,000 unique 64-character deltas: retained active state |  7.781 MiB | 1.426 MiB |     81.7% |
 | Same stream with a complete snapshot retained            |  9.002 MiB | 1.426 MiB |     84.2% |
-| Native SDK/Foundation turn: additional allocation peak   |  9.533 MiB | 0.521 MiB |     94.5% |
-| Same turn: elapsed time with tracing                     |    2.250 s |   0.611 s |     72.8% |
+| Native SDK/Foundation turn: additional allocation peak   |  5.703 MiB | 0.476 MiB |     91.7% |
+| Same turn: elapsed time with tracing                     |    1.621 s |   0.513 s |     68.4% |
 | 7,111,954-byte checkpoint: additional write peak         | 13.695 MiB | 0.166 MiB |     98.8% |
 
 ### What Each Measurement Exercises
@@ -104,7 +104,10 @@ contains 80 tool results, each with 250 distinct structured rows and 256-charact
 values. The probe verifies all 20,000 rows remain after the run. The baseline is an
 ablation restoring eager deep-copy at the Foundation boundary on the same upgraded
 runtime; it isolates this ownership change rather than comparing different native
-versions. No compaction or provider call is involved.
+versions. These values were rerun after integrating the native tool-ID and
+request-local self-healing changes from main (`122f41c`). Normal requests share
+history; matched provider-error repair retains its separate deep-copy boundary.
+No compaction or provider call is involved.
 
 **Checkpoint:** actual old/new `RunStore.write_state`, preserving the same encoded
 artifact size and atomic replacement. Incremental encoding costs more CPU: median
