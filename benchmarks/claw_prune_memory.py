@@ -3,8 +3,8 @@
 uv run --all-packages python benchmarks/claw_prune_memory.py
 uv run --all-packages python benchmarks/claw_prune_memory.py --baseline-ref 1a0b1a7e
 
-A separate process seeds synthetic SQLite rows before the measured process starts.
-Only candidate selection runs, never prune_once or filesystem/container cleanup.
+A separate process seeds synthetic SQLite rows and run-store directories before
+measurement. Only candidate selection runs, never prune_once or cleanup.
 Use trusted local revisions only: --baseline-ref executes the historical module.
 """
 
@@ -38,16 +38,20 @@ def seed(path: Path, rows: int, payload_chars: int) -> None:
     from ya_claw.orm.base import Base
     from ya_claw.orm.tables import RunRecord, SessionRecord
 
+    run_store_dir = path.parent / "data" / "run-store"
+    run_store_dir.mkdir(parents=True)
     engine = create_engine(f"sqlite:///{path}")
     Base.metadata.create_all(engine)
     with engine.begin() as connection:
         connection.execute(insert(SessionRecord), {"id": "session", "session_metadata": {}})
         for index in range(rows):
+            run_id = f"run-{index:08d}"
+            (run_store_dir / run_id).mkdir()
             payload = f"{index:08d}" + "x" * max(0, payload_chars - 8)
             connection.execute(
                 insert(RunRecord),
                 {
-                    "id": f"run-{index:08d}",
+                    "id": run_id,
                     "session_id": "session",
                     "sequence_no": index,
                     "status": "completed",
@@ -70,6 +74,7 @@ async def measure(path: Path, ref: str | None, rows: int) -> None:
         ).SessionPruneController
     settings = ClawSettings(
         _env_file=None,
+        data_dir=path.parent / "data",
         session_prune_run_keep_recent=10,
         session_prune_run_older_than_days=0,
         session_prune_batch_size=100,

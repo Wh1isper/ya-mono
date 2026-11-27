@@ -68,6 +68,7 @@ async def test_prune_selection_does_not_load_conversation_payloads(
     payload = "history" * 10_000
     db_session.add(SessionRecord(id="payload-session", session_metadata={"payload": payload}))
     for index in range(6):
+        (settings.run_store_dir / f"payload-run-{index}").mkdir(parents=True)
         db_session.add(
             RunRecord(
                 id=f"payload-run-{index}",
@@ -152,6 +153,95 @@ async def test_prune_keeps_recent_run_rows_heads_active_and_restore_sources(
     assert not (settings.run_store_dir / "run-3").exists()
     assert (settings.run_store_dir / "run-2").exists()
     assert (settings.run_store_dir / "run-6").exists()
+
+
+async def test_prune_run_store_advances_across_batches_without_deleting_run_rows(
+    db_session: AsyncSession,
+    settings: ClawSettings,
+) -> None:
+    settings.session_prune_batch_size = 2
+    settings.session_prune_orphans_enabled = False
+    db_session.add(SessionRecord(id="session-1", head_success_run_id="run-1"))
+    now = datetime(2026, 4, 26, tzinfo=UTC)
+    run_ids = {f"run-{index}" for index in range(9)}
+    for index in range(9):
+        run_id = f"run-{index}"
+        db_session.add(
+            RunRecord(
+                id=run_id,
+                session_id="session-1",
+                sequence_no=index,
+                status="completed",
+                created_at=now + timedelta(minutes=index),
+            )
+        )
+        (settings.run_store_dir / run_id).mkdir(parents=True)
+    await db_session.commit()
+
+    controller = SessionPruneController()
+    remaining = run_ids.copy()
+    for removed in ({"run-0", "run-2"}, {"run-3", "run-4"}, {"run-5"}, set()):
+        result = await controller.prune_once(db_session, settings)
+        remaining -= removed
+        assert result.pruned_run_store_dirs == len(removed)
+        assert result.deleted_runs == 0
+        assert {path.name for path in settings.run_store_dir.iterdir()} == remaining
+        assert set(await db_session.scalars(select(RunRecord.id))) == run_ids
+    assert remaining == {"run-1", "run-6", "run-7", "run-8"}
+
+
+async def test_missing_run_store_dirs_do_not_affect_batch_size_or_recent_protection(
+    db_session: AsyncSession,
+    settings: ClawSettings,
+) -> None:
+    settings.session_prune_batch_size = 2
+    db_session.add(SessionRecord(id="session-1"))
+    now = datetime(2026, 4, 26, tzinfo=UTC)
+    for index in range(8):
+        run_id = f"run-{index}"
+        db_session.add(
+            RunRecord(
+                id=run_id,
+                session_id="session-1",
+                sequence_no=index,
+                status="completed",
+                created_at=now + timedelta(minutes=index),
+            )
+        )
+        # Both the oldest runs and one of the three protected recent runs lack directories.
+        if index in {2, 3, 4, 5, 7}:
+            (settings.run_store_dir / run_id).mkdir(parents=True)
+    await db_session.commit()
+
+    controller = SessionPruneController()
+    assert await controller._select_prunable_run_ids(db_session, settings) == ["run-2", "run-3"]
+    assert (await controller.prune_once(db_session, settings)).pruned_run_store_dirs == 2
+    assert await controller._select_prunable_run_ids(db_session, settings) == ["run-4"]
+    assert (await controller.prune_once(db_session, settings)).pruned_run_store_dirs == 1
+    assert {path.name for path in settings.run_store_dir.iterdir()} == {"run-5", "run-7"}
+
+
+@pytest.mark.parametrize("store_kind", ["missing", "empty", "file", "symlink_child"])
+async def test_prune_run_selection_skips_db_without_real_run_dirs(
+    db_session: AsyncSession,
+    settings: ClawSettings,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    store_kind: str,
+) -> None:
+    if store_kind == "empty":
+        settings.run_store_dir.mkdir()
+    elif store_kind == "file":
+        settings.run_store_dir.touch()
+    elif store_kind == "symlink_child":
+        settings.run_store_dir.mkdir()
+        (settings.run_store_dir / "link").symlink_to(tmp_path, target_is_directory=True)
+
+    async def unexpected_db_query(*args: object, **kwargs: object) -> None:
+        pytest.fail("Run-store selection queried the database without real run directories")
+
+    monkeypatch.setattr(db_session, "execute", unexpected_db_query)
+    assert await SessionPruneController()._select_prunable_run_ids(db_session, settings) == []
 
 
 async def test_prune_generated_heartbeat_sessions_keeps_recent_group(
@@ -269,6 +359,93 @@ async def test_prune_generated_schedule_sessions_groups_by_schedule_id(
     assert remaining_sessions == {"schedule-session-2"}
     assert result.deleted_sessions == 2
     assert result.deleted_runs == 2
+
+
+@pytest.mark.parametrize("source", ["heartbeat", "schedule"])
+async def test_prune_generated_sessions_advances_across_batches_with_retained_fires(
+    db_engine: AsyncEngine,
+    db_session: AsyncSession,
+    settings: ClawSettings,
+    source: str,
+) -> None:
+    settings.session_prune_generated_sessions_enabled = True
+    settings.session_prune_batch_size = 2
+    settings.session_prune_fire_records_older_than_days = 0
+    settings.session_prune_heartbeat_keep_recent = 2
+    settings.session_prune_heartbeat_older_than_days = 0
+    settings.session_prune_schedule_keep_recent = 2
+    settings.session_prune_schedule_older_than_days = 0
+    if source == "schedule":
+        db_session.add(
+            ScheduleRecord(
+                id="schedule-1",
+                name="schedule",
+                cron_expr="* * * * *",
+                timezone="UTC",
+                execution_mode="isolate_session",
+                status="active",
+            )
+        )
+        await db_session.flush()
+    now = datetime(2026, 4, 26, tzinfo=UTC)
+    # The newest fire points to a deleted session. Older active or protected sessions
+    # are live but must not use any of the fresh-candidate budget.
+    for index in range(10):
+        session_id = f"session-{index}"
+        fire_id = f"fire-{index}"
+        scheduled_at = now + timedelta(minutes=index)
+        if index < 9:
+            db_session.add(SessionRecord(id=session_id, active_run_id="active-run" if index == 6 else None))
+        if source == "heartbeat":
+            db_session.add(
+                HeartbeatFireRecord(
+                    id=fire_id,
+                    session_id=session_id,
+                    scheduled_at=scheduled_at,
+                    status="submitted",
+                    dedupe_key=fire_id,
+                )
+            )
+        else:
+            db_session.add(
+                ScheduleFireRecord(
+                    id=fire_id,
+                    schedule_id="schedule-1",
+                    created_session_id=session_id,
+                    scheduled_at=scheduled_at,
+                    status="submitted",
+                    dedupe_key=fire_id,
+                )
+            )
+    await db_session.flush()
+    db_session.add(SessionRecord(id="child-session", parent_session_id="session-5"))
+    await db_session.commit()
+
+    controller = SessionPruneController()
+    remaining = {f"session-{index}" for index in range(9)} | {"child-session"}
+    fire_table = HeartbeatFireRecord if source == "heartbeat" else ScheduleFireRecord
+    fire_selects: list[str] = []
+
+    def capture(_connection, _cursor, statement, _parameters, _context, _executemany):
+        if statement.startswith("SELECT") and (
+            "FROM heartbeat_fires" in statement or "FROM schedule_fires" in statement
+        ):
+            fire_selects.append(statement)
+
+    event.listen(db_engine.sync_engine, "before_cursor_execute", capture)
+    try:
+        for removed in ({"session-3", "session-4"}, {"session-1", "session-2"}, {"session-0"}, set()):
+            result = await controller.prune_once(db_session, settings)
+            remaining -= removed
+            assert result.deleted_sessions == len(removed)
+            assert set(await db_session.scalars(select(SessionRecord.id))) == remaining
+            assert set(await db_session.scalars(select(fire_table.id))) == {f"fire-{index}" for index in range(10)}
+    finally:
+        event.remove(db_engine.sync_engine, "before_cursor_execute", capture)
+
+    assert remaining == {"child-session", "session-5", "session-6", "session-7", "session-8"}
+    assert any("JOIN sessions" in statement for statement in fire_selects)
+    assert all("metadata" not in statement and "input_parts" not in statement for statement in fire_selects)
 
 
 async def test_prune_removes_docker_sandbox_before_deleting_session(
@@ -808,6 +985,43 @@ async def test_prune_orphan_run_store_dirs(
     assert not orphan_dir.exists()
 
 
+async def test_prune_orphan_run_store_lookups_are_chunked_and_ignore_symlinks(
+    db_engine: AsyncEngine,
+    db_session: AsyncSession,
+    settings: ClawSettings,
+    tmp_path: Path,
+) -> None:
+    db_session.add(SessionRecord(id="session-1"))
+    live_ids = {"run-0", "run-600"}
+    for sequence_no, run_id in enumerate(sorted(live_ids)):
+        db_session.add(RunRecord(id=run_id, session_id="session-1", sequence_no=sequence_no, status="completed"))
+    await db_session.commit()
+    for index in range(601):
+        (settings.run_store_dir / f"run-{index}").mkdir(parents=True)
+    target = tmp_path / "outside-store"
+    target.mkdir()
+    link = settings.run_store_dir / "link"
+    link.symlink_to(target, target_is_directory=True)
+    lookup_sizes: list[int] = []
+
+    def capture(_connection, _cursor, statement, parameters, _context, _executemany):
+        if " IN (" in statement:
+            lookup_sizes.append(len(parameters))
+
+    event.listen(db_engine.sync_engine, "before_cursor_execute", capture)
+    try:
+        result = await SessionPruneController()._prune_orphan_run_store_dirs(db_session, settings)
+    finally:
+        event.remove(db_engine.sync_engine, "before_cursor_execute", capture)
+
+    assert sorted(lookup_sizes) == [101, 500]
+    assert result.deleted_orphan_run_dirs == 599
+    assert result.failed_run_store_paths == []
+    assert {path.name for path in settings.run_store_dir.iterdir()} == live_ids | {"link"}
+    assert link.is_symlink()
+    assert target.is_dir()
+
+
 async def test_prune_fire_records_keeps_pending_and_latest(
     db_session: AsyncSession,
     settings: ClawSettings,
@@ -886,6 +1100,63 @@ async def test_prune_fire_records_keeps_pending_and_latest(
     assert result.deleted_heartbeat_fires == 1
     assert schedule_fire_ids == {"schedule-fire-pending", "schedule-fire-latest"}
     assert heartbeat_fire_ids == {"heartbeat-fire-latest"}
+
+
+async def test_prune_fire_record_deletes_use_chunks_without_loading_payloads(
+    db_engine: AsyncEngine,
+    db_session: AsyncSession,
+    settings: ClawSettings,
+) -> None:
+    settings.session_prune_fire_records_older_than_days = 1
+    db_session.add(
+        ScheduleRecord(id="schedule-1", name="schedule", cron_expr="* * * * *", timezone="UTC", status="active")
+    )
+    await db_session.flush()
+    old = datetime.now(UTC) - timedelta(days=2)
+    for index in range(601):
+        fire_id = f"fire-{index}"
+        created_at = old + timedelta(seconds=index)
+        db_session.add(
+            ScheduleFireRecord(
+                id=fire_id,
+                schedule_id="schedule-1",
+                scheduled_at=created_at,
+                status="submitted",
+                dedupe_key=fire_id,
+                created_at=created_at,
+            )
+        )
+        db_session.add(
+            HeartbeatFireRecord(
+                id=fire_id,
+                scheduled_at=created_at,
+                status="submitted",
+                dedupe_key=fire_id,
+                created_at=created_at,
+            )
+        )
+    await db_session.commit()
+    select_statements: list[str] = []
+    delete_sizes: list[int] = []
+
+    def capture(_connection, _cursor, statement, parameters, _context, _executemany):
+        if statement.startswith("SELECT"):
+            select_statements.append(statement)
+        elif statement.startswith("DELETE"):
+            delete_sizes.append(len(parameters))
+
+    event.listen(db_engine.sync_engine, "before_cursor_execute", capture)
+    try:
+        result = await SessionPruneController()._prune_fire_records(db_session, settings)
+    finally:
+        event.remove(db_engine.sync_engine, "before_cursor_execute", capture)
+
+    assert sorted(delete_sizes) == [100, 100, 500, 500]
+    assert len(select_statements) == 2
+    assert all("metadata" not in statement and "input_parts" not in statement for statement in select_statements)
+    assert result.deleted_schedule_fires == result.deleted_heartbeat_fires == 600
+    assert list(await db_session.scalars(select(ScheduleFireRecord.id))) == ["fire-600"]
+    assert list(await db_session.scalars(select(HeartbeatFireRecord.id))) == ["fire-600"]
 
 
 async def test_prune_hides_expired_once_schedules(
