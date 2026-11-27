@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import os
 import shutil
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -32,6 +33,7 @@ from ya_claw.workspace.docker_lifecycle import (
 from ya_claw.workspace.provider import get_docker_container_lock
 
 _ACTIVE_RUN_STATUSES = frozenset({"queued", "running"})
+_PRUNE_SQL_CHUNK_SIZE = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +104,10 @@ class SessionPruneController:
         return result
 
     async def _select_prunable_run_ids(self, db_session: AsyncSession, settings: ClawSettings) -> list[str]:
+        existing_run_ids = _existing_run_store_dir_ids(settings.run_store_dir)
+        if not existing_run_ids:
+            return []
+
         keep_recent = max(settings.session_prune_run_keep_recent, 1)
         batch_size = max(settings.session_prune_batch_size, 1)
         cutoff = _cutoff_from_days(settings.session_prune_run_older_than_days)
@@ -112,6 +118,7 @@ class SessionPruneController:
         return _prunable_run_ids(
             runs,
             protected_run_ids,
+            existing_run_ids=existing_run_ids,
             cutoff=cutoff,
             batch_size=batch_size,
         )
@@ -160,7 +167,7 @@ class SessionPruneController:
         # Keep at least one fresh-candidate slot even when batch_size is one so
         # permanently failing claims cannot stop the queue from advancing.
         fresh_budget = max(batch_size - len(claimed_session_ids), 1)
-        excluded_session_ids = set(claimed_session_ids)
+        excluded_session_ids = await self._protected_session_ids(db_session)
         fresh_session_ids = await self._select_heartbeat_session_ids(
             db_session,
             settings,
@@ -195,18 +202,14 @@ class SessionPruneController:
         settings: ClawSettings,
         *,
         batch_size: int,
-        excluded_session_ids: set[str] | None = None,
+        excluded_session_ids: set[str],
     ) -> list[str]:
-        excluded = excluded_session_ids or set()
         keep_recent = max(settings.session_prune_heartbeat_keep_recent, 1)
         cutoff = _cutoff_from_days(settings.session_prune_heartbeat_older_than_days)
-        claimed_session_ids = select(SessionRecord.id).where(SessionRecord.active_run_id == SESSION_PRUNE_CLAIM)
         result = await db_session.execute(
-            select(HeartbeatFireRecord)
-            .where(
-                HeartbeatFireRecord.session_id.is_not(None),
-                HeartbeatFireRecord.session_id.not_in(claimed_session_ids),
-            )
+            select(SessionRecord.id, HeartbeatFireRecord.scheduled_at, SessionRecord.active_run_id)
+            .join_from(HeartbeatFireRecord, SessionRecord, HeartbeatFireRecord.session_id == SessionRecord.id)
+            .where(or_(SessionRecord.active_run_id.is_(None), SessionRecord.active_run_id != SESSION_PRUNE_CLAIM))
             .order_by(
                 HeartbeatFireRecord.scheduled_at.desc(),
                 HeartbeatFireRecord.created_at.desc(),
@@ -214,19 +217,18 @@ class SessionPruneController:
             )
         )
         seen: set[str] = set()
-        ordered_records: list[HeartbeatFireRecord] = []
-        for record in result.scalars().all():
-            if not isinstance(record.session_id, str) or record.session_id in seen:
-                continue
-            seen.add(record.session_id)
-            ordered_records.append(record)
-
         candidates: list[str] = []
-        for record in ordered_records[keep_recent:]:
-            if cutoff is not None and not _is_older_than(record.scheduled_at, cutoff):
+        for session_id, scheduled_at, active_run_id in result:
+            if session_id in seen:
                 continue
-            if isinstance(record.session_id, str) and record.session_id not in excluded:
-                candidates.append(record.session_id)
+            seen.add(session_id)
+            if len(seen) <= keep_recent:
+                continue
+            if cutoff is not None and not _is_older_than(scheduled_at, cutoff):
+                continue
+            if session_id in excluded_session_ids or (active_run_id and active_run_id.strip()):
+                continue
+            candidates.append(session_id)
             if len(candidates) >= batch_size:
                 break
         return candidates
@@ -237,18 +239,21 @@ class SessionPruneController:
         settings: ClawSettings,
         *,
         batch_size: int,
-        excluded_session_ids: set[str] | None = None,
+        excluded_session_ids: set[str],
     ) -> list[str]:
-        excluded = excluded_session_ids or set()
         keep_recent = max(settings.session_prune_schedule_keep_recent, 1)
         cutoff = _cutoff_from_days(settings.session_prune_schedule_older_than_days)
-        claimed_session_ids = select(SessionRecord.id).where(SessionRecord.active_run_id == SESSION_PRUNE_CLAIM)
         result = await db_session.execute(
-            select(ScheduleFireRecord)
-            .where(
-                ScheduleFireRecord.created_session_id.is_not(None),
-                ScheduleFireRecord.created_session_id.not_in(claimed_session_ids),
+            select(
+                ScheduleFireRecord.schedule_id,
+                SessionRecord.id,
+                ScheduleFireRecord.target_session_id,
+                ScheduleFireRecord.source_session_id,
+                ScheduleFireRecord.scheduled_at,
+                SessionRecord.active_run_id,
             )
+            .join_from(ScheduleFireRecord, SessionRecord, ScheduleFireRecord.created_session_id == SessionRecord.id)
+            .where(or_(SessionRecord.active_run_id.is_(None), SessionRecord.active_run_id != SESSION_PRUNE_CLAIM))
             .order_by(
                 ScheduleFireRecord.schedule_id.asc(),
                 ScheduleFireRecord.scheduled_at.desc(),
@@ -256,29 +261,24 @@ class SessionPruneController:
                 ScheduleFireRecord.id.desc(),
             )
         )
-        records_by_schedule: dict[str, list[ScheduleFireRecord]] = defaultdict(list)
         seen_session_ids_by_schedule: dict[str, set[str]] = defaultdict(set)
-        for record in result.scalars().all():
-            if not _is_generated_schedule_session(record):
-                continue
-            created_session_id = record.created_session_id
-            if not isinstance(created_session_id, str):
-                continue
-            seen = seen_session_ids_by_schedule[record.schedule_id]
-            if created_session_id in seen:
-                continue
-            seen.add(created_session_id)
-            records_by_schedule[record.schedule_id].append(record)
-
         candidates: list[str] = []
-        for schedule_id in sorted(records_by_schedule):
-            for record in records_by_schedule[schedule_id][keep_recent:]:
-                if cutoff is not None and not _is_older_than(record.scheduled_at, cutoff):
-                    continue
-                if isinstance(record.created_session_id, str) and record.created_session_id not in excluded:
-                    candidates.append(record.created_session_id)
-                if len(candidates) >= batch_size:
-                    return candidates
+        for schedule_id, session_id, target_id, source_id, scheduled_at, active_run_id in result:
+            if not session_id.strip() or session_id in (target_id, source_id):
+                continue
+            seen = seen_session_ids_by_schedule[schedule_id]
+            if session_id in seen:
+                continue
+            seen.add(session_id)
+            if len(seen) <= keep_recent:
+                continue
+            if cutoff is not None and not _is_older_than(scheduled_at, cutoff):
+                continue
+            if session_id in excluded_session_ids or (active_run_id and active_run_id.strip()):
+                continue
+            candidates.append(session_id)
+            if len(candidates) >= batch_size:
+                break
         return candidates
 
     async def _prune_run_store_dirs(
@@ -557,10 +557,10 @@ class SessionPruneController:
             return SessionPruneResult()
         schedule_fire_ids = await self._select_prunable_schedule_fire_ids(db_session, cutoff)
         heartbeat_fire_ids = await self._select_prunable_heartbeat_fire_ids(db_session, cutoff)
-        if schedule_fire_ids:
-            await db_session.execute(delete(ScheduleFireRecord).where(ScheduleFireRecord.id.in_(schedule_fire_ids)))
-        if heartbeat_fire_ids:
-            await db_session.execute(delete(HeartbeatFireRecord).where(HeartbeatFireRecord.id.in_(heartbeat_fire_ids)))
+        for chunk in _id_chunks(schedule_fire_ids):
+            await db_session.execute(delete(ScheduleFireRecord).where(ScheduleFireRecord.id.in_(chunk)))
+        for chunk in _id_chunks(heartbeat_fire_ids):
+            await db_session.execute(delete(HeartbeatFireRecord).where(HeartbeatFireRecord.id.in_(chunk)))
         if schedule_fire_ids or heartbeat_fire_ids:
             await db_session.commit()
         return SessionPruneResult(
@@ -570,7 +570,12 @@ class SessionPruneController:
 
     async def _select_prunable_schedule_fire_ids(self, db_session: AsyncSession, cutoff: datetime) -> list[str]:
         result = await db_session.execute(
-            select(ScheduleFireRecord).order_by(
+            select(
+                ScheduleFireRecord.id,
+                ScheduleFireRecord.schedule_id,
+                ScheduleFireRecord.status,
+                ScheduleFireRecord.created_at,
+            ).order_by(
                 ScheduleFireRecord.schedule_id.asc(),
                 ScheduleFireRecord.created_at.desc(),
                 ScheduleFireRecord.id.desc(),
@@ -578,33 +583,30 @@ class SessionPruneController:
         )
         latest_fire_by_schedule: set[str] = set()
         prunable_ids: list[str] = []
-        for record in result.scalars().all():
-            if record.schedule_id not in latest_fire_by_schedule:
-                latest_fire_by_schedule.add(record.schedule_id)
+        for fire_id, schedule_id, status, created_at in result:
+            if schedule_id not in latest_fire_by_schedule:
+                latest_fire_by_schedule.add(schedule_id)
                 continue
-            if record.status == "pending":
+            if status == "pending":
                 continue
-            if not _is_older_than(record.created_at, cutoff):
+            if not _is_older_than(created_at, cutoff):
                 continue
-            prunable_ids.append(record.id)
+            prunable_ids.append(fire_id)
         return prunable_ids
 
     async def _select_prunable_heartbeat_fire_ids(self, db_session: AsyncSession, cutoff: datetime) -> list[str]:
         result = await db_session.execute(
-            select(HeartbeatFireRecord).order_by(HeartbeatFireRecord.created_at.desc(), HeartbeatFireRecord.id.desc())
+            select(HeartbeatFireRecord.id, HeartbeatFireRecord.status, HeartbeatFireRecord.created_at).order_by(
+                HeartbeatFireRecord.created_at.desc(), HeartbeatFireRecord.id.desc()
+            )
         )
-        latest_seen = False
-        prunable_ids: list[str] = []
-        for record in result.scalars().all():
-            if not latest_seen:
-                latest_seen = True
-                continue
-            if record.status == "pending":
-                continue
-            if not _is_older_than(record.created_at, cutoff):
-                continue
-            prunable_ids.append(record.id)
-        return prunable_ids
+        fires = iter(result)
+        next(fires, None)  # Always keep the newest fire.
+        return [
+            fire_id
+            for fire_id, status, created_at in fires
+            if status != "pending" and _is_older_than(created_at, cutoff)
+        ]
 
     async def _hide_expired_once_schedules(
         self,
@@ -683,15 +685,15 @@ class SessionPruneController:
         settings: ClawSettings,
     ) -> SessionPruneResult:
         run_store_dir = settings.run_store_dir
-        if not run_store_dir.exists():
+        candidate_ids = list(_existing_run_store_dir_ids(run_store_dir))
+        if not candidate_ids:
             return SessionPruneResult()
-        candidate_paths = [path for path in run_store_dir.iterdir() if path.is_dir()]
-        if not candidate_paths:
-            return SessionPruneResult()
-        candidate_ids = [path.name for path in candidate_paths]
-        result = await db_session.execute(select(RunRecord.id).where(RunRecord.id.in_(candidate_ids)))
-        existing_ids = {run_id for run_id in result.scalars().all() if isinstance(run_id, str)}
-        orphan_paths = [path for path in candidate_paths if path.name not in existing_ids]
+
+        existing_ids: set[str] = set()
+        for chunk in _id_chunks(candidate_ids):
+            result = await db_session.execute(select(RunRecord.id).where(RunRecord.id.in_(chunk)))
+            existing_ids.update(result.scalars().all())
+        orphan_paths = [run_store_dir / run_id for run_id in candidate_ids if run_id not in existing_ids]
         reclaimed_bytes = sum(_path_size(path) for path in orphan_paths)
         file_result = self._delete_run_store_paths(orphan_paths)
         return SessionPruneResult(
@@ -713,13 +715,9 @@ class SessionPruneController:
         return result
 
 
-def _is_generated_schedule_session(record: ScheduleFireRecord) -> bool:
-    created_session_id = record.created_session_id
-    if not isinstance(created_session_id, str) or created_session_id.strip() == "":
-        return False
-    if isinstance(record.target_session_id, str) and created_session_id == record.target_session_id:
-        return False
-    return not (isinstance(record.source_session_id, str) and created_session_id == record.source_session_id)
+def _id_chunks(ids: list[str]) -> Iterator[list[str]]:
+    for offset in range(0, len(ids), _PRUNE_SQL_CHUNK_SIZE):
+        yield ids[offset : offset + _PRUNE_SQL_CHUNK_SIZE]
 
 
 def _index_runs(runs: list[RunRecord]) -> tuple[dict[str, list[RunRecord]], dict[str, RunRecord]]:
@@ -773,23 +771,31 @@ def _active_run_restore_ids(runs: list[RunRecord]) -> set[str]:
     return protected_run_ids
 
 
+def _existing_run_store_dir_ids(run_store_dir: Path) -> set[str]:
+    try:
+        with os.scandir(run_store_dir) as entries:
+            return {entry.name for entry in entries if entry.is_dir(follow_symlinks=False)}
+    except (FileNotFoundError, NotADirectoryError):
+        return set()
+
+
 def _prunable_run_ids(
     runs: list[RunRecord],
     protected_run_ids: set[str],
     *,
+    existing_run_ids: set[str],
     cutoff: datetime | None,
     batch_size: int,
 ) -> list[str]:
-    prunable_run_ids: list[str] = []
-    for run in sorted(runs, key=lambda item: (item.created_at, item.session_id, item.sequence_no, item.id)):
-        if run.id in protected_run_ids:
-            continue
-        if cutoff is not None and not _is_older_than(run.created_at, cutoff):
-            continue
-        prunable_run_ids.append(run.id)
-        if len(prunable_run_ids) >= batch_size:
-            break
-    return prunable_run_ids
+    candidates = [
+        run
+        for run in runs
+        if run.id in existing_run_ids
+        and run.id not in protected_run_ids
+        and (cutoff is None or _is_older_than(run.created_at, cutoff))
+    ]
+    candidates.sort(key=lambda run: (run.created_at, run.session_id, run.sequence_no, run.id))
+    return [run.id for run in candidates[:batch_size]]
 
 
 def _cutoff_from_days(days: int) -> datetime | None:

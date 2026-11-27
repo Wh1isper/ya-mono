@@ -83,6 +83,21 @@ Suggested layout:
 Committed runtime blobs are keyed by `run_id`.
 The filesystem does not need a session-first directory structure.
 
+### Session Pruning
+
+Disk-only pruning retains run rows and fills each batch with eligible directories
+that still exist. Recent-run, session-head, active-run, and restore-source
+protections are calculated from run history, including runs without directories.
+Optional orphan cleanup looks up directory IDs in bounded SQL batches. Both disk
+scans ignore symlink entries.
+
+When generated-session pruning is enabled, heartbeat and schedule fire history
+can outlive the sessions it created. Only existing sessions outside the prune
+claim retry queue count toward the recent-session retention window. Active and
+protected sessions do not consume fresh-candidate batch slots. Fire selection
+reads only retention fields, and optional fire-history cleanup deletes in bounded
+SQL batches.
+
 ## `state.json`
 
 Each committed run may write one `state.json` file. Version 6 writes exported context
